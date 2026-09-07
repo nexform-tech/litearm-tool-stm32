@@ -307,7 +307,8 @@ class MainWindow(QMainWindow):
         sess = self.session
         if sess is not None and sess.client is not None:
             sess.client.emergency_now()
-        self._lock_motion("急停已按下 — 需 [复位 reset] 解除 EMERGENCY 后重新解锁")
+        self._lock_motion("急停已按下：所有电机已失能并进入 EMERGENCY 锁存。"
+                          "需 [失能 disable] 或 [复位 reset] 退出后重新解锁")
 
     # ================= 运动页下发（含 Δq 确认） =================
     def _on_move_j(self, qs, speed):
@@ -391,7 +392,7 @@ class MainWindow(QMainWindow):
                 self._fault_logged = False
             if not self._fault_logged and st is not None:
                 self._fault_logged = True
-                reason = "急停锁存 EMERGENCY（需 [复位 reset]）" if st.mode == 6 \
+                reason = "急停锁存 EMERGENCY（需 [失能 disable] 或 [复位 reset] 退出）" if st.mode == 6 \
                     else "FAULT 标志置位（可先试 [清故障 clear_faults]，若反复出现用 [复位 reset]）"
                 self._log_ui(f"[WARN] 检测到 {reason} —— 使能与运动已锁定")
         else:

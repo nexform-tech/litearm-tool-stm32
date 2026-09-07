@@ -94,7 +94,7 @@ class ControlPage(QWidget):
             self.hint_lbl.setText("")
             return
         if status.mode == 6:   # EMERGENCY
-            self.hint_lbl.setText("⚠ 急停锁存中 —— 需先 [复位 reset] 才能退出 EMERGENCY")
+            self.hint_lbl.setText("⚠ 急停锁存中 —— 需先 [失能 disable] 或 [复位 reset] 退出 EMERGENCY，然后重新使能")
             self.btn_enable.setEnabled(False)
         elif status.has_fault:
             self.hint_lbl.setText("⚠ 检测到故障位 —— 建议先 [清故障 clear_faults]，仍不行则 [复位 reset]")

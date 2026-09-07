@@ -18,6 +18,9 @@ _CHIP_ON = "QLabel{background:#ff6b6b;color:#ffffff;border-radius:4px;padding:2p
 _CHIP_OFF = "QLabel{background:#3a3a3a;color:#b0b0b0;border-radius:4px;padding:2px 8px;font-size:11px;}"
 _MONO = QFont("DejaVu Sans Mono", 11)
 
+# DM 电机状态字节: 0=失能 1=使能 (用户在真机确认); 其余为未知/故障码
+ERR_STATE = {0: "失能", 1: "使能"}
+
 
 def _num_label(width: int) -> QLabel:
     """固定宽度、等宽、左对齐的数值小格：数字变化不挤动相邻控件。"""
@@ -78,7 +81,7 @@ class MonitorPage(QWidget):
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
             ["关节", "q (rad)", "dq (rad/s)", "tau (Nm)",
-             "T_mos (°C)", "T_coil (°C)", "err"])
+             "T_mos (°C)", "T_coil (°C)", "状态"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -175,12 +178,13 @@ class MonitorPage(QWidget):
         # 表格：逐格只在文本/背景变化时更新
         for i, js in enumerate(view.joints):
             warn = js.t_mos > self._temp_alert or js.t_coil > self._temp_alert
-            err = js.err != 0
-            cells = ((1, f"{js.q:.3f}", "err" if err else "normal"),
-                     (2, f"{js.dq:.3f}", "err" if err else "normal"),
-                     (3, f"{js.tau:.3f}", "err" if err else "normal"),
+            unknown = js.err not in ERR_STATE      # 0/1 为状态, 其余视为异常码
+            st_text = ERR_STATE.get(js.err, f"0x{js.err:02X}")
+            cells = ((1, f"{js.q:.3f}", "err" if unknown else "normal"),
+                     (2, f"{js.dq:.3f}", "err" if unknown else "normal"),
+                     (3, f"{js.tau:.3f}", "err" if unknown else "normal"),
                      (4, f"{js.t_mos:.1f}", "warn" if warn else "normal"),
                      (5, f"{js.t_coil:.1f}", "warn" if warn else "normal"),
-                     (6, f"0x{js.err:02X}", "normal"))
+                     (6, st_text, "err" if unknown else "normal"))
             for col, text, bg in cells:
                 self._set_cell(i, col, text, bg)

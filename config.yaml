@@ -1,0 +1,20 @@
+# LiteArm Tool STM32 —— 交互层配置
+# 注：本工具不保存/不下发限位等安全参数（权威在固件）。这里只含操作意图层选项。
+
+# Δq 超过即弹确认框 (rad)。防手滑输错数量级。
+confirm_threshold: 0.5
+
+# move_j 默认速度倍率 (0.01 ~ speed_max_ui)，低速起步。
+default_speed: 0.2
+speed_max_ui: 1.0
+
+# move_mit 默认参数
+mit_kp_default: 30.0
+mit_kd_default: 2.0
+mit_tau_default: 0.0
+
+# 监控页超温告警阈值 (°C)
+temp_alert_c: 85.0
+
+# 曲线滚动窗口（秒）
+plot_window_s: 30.0

@@ -1,0 +1,62 @@
+"""Session —— Qt-free 会话控制器，串起 传输层 / 客户端 / 曲线模型。
+
+GUI 只持有 Session，并通过 Session.log 回调（线程安全地）输出日志。
+"""
+import time
+
+from litetool import client, protocol as P
+from litetool.gui.plot_model import PlotModel
+from litetool.transport import SerialLink
+
+
+class Session:
+    def __init__(self, log=None, clock=time.monotonic):
+        self._log = log if log is not None else (lambda msg: None)
+        self._clock = clock
+        self.link: SerialLink | None = None
+        self.client: client.LiteArmClient | None = None
+        self.model = PlotModel(clock=clock)
+
+    # ---- 连接生命周期 ----
+    def connect(self, port: str):
+        """打开串口。失败抛异常（由 GUI 捕获并提示）。"""
+        self.close()
+        self.model.reset()
+        link = SerialLink(port, on_frame=self._on_frame, on_error=self._on_error)
+        cli = client.LiteArmClient(link, log=self._log, clock=self._clock)
+        link.connect()
+        self.link, self.client = link, cli
+
+    def close(self):
+        if self.link is not None:
+            self.link.close()
+        self.link = None
+        self.client = None
+
+    # ---- 帧分发（读线程上下文） ----
+    def _on_frame(self, cmd: int, payload: bytes):
+        cli = self.client
+        if cli is None:
+            return
+        cli.handle_frame(cmd, payload)
+        if cmd == P.RSP_STATUS:
+            view = cli.status
+            if view is not None:
+                self.model.push(view)
+
+    def _on_error(self, msg: str):
+        self._log(f"[ERR] {msg}")
+
+    # ---- 便捷属性 ----
+    @property
+    def online(self) -> bool:
+        return bool(self.client is not None and self.client.online)
+
+    @property
+    def status(self):
+        return self.client.status if self.client is not None else None
+
+    def bad_frames(self) -> int:
+        if self.link is not None:
+            return self.link.stats["bad_crc"] + self.link.stats["discarded"]
+        return 0

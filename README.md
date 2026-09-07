@@ -62,7 +62,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 51 用例：协议(黄金向量)/checks/客户端(FakeLink)/传输/配置/曲线模型
+python3 -m pytest          # 61 用例：协议(黄金向量)/checks/客户端(FakeLink)/传输/配置/曲线模型
 ```
 
 ## 真机验收清单（需 STM32 + 电机/CAN 在线）

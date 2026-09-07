@@ -1,0 +1,15 @@
+[project]
+name = "litearm-tool-stm32"
+version = "0.1.0"
+description = "LiteArm STM32 上位机工具 (PyQt5 GUI over USB CDC)"
+requires-python = ">=3.9"
+dependencies = [
+    "pyserial>=3.5",
+    "PyQt5>=5.15",
+    "pyqtgraph>=0.13",
+    "PyYAML>=6.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

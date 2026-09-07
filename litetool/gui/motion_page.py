@@ -22,6 +22,7 @@ class MotionPage(QWidget):
         self._locked = True
         self._online = False
         self._busy = False
+        self._fault_blocked = False
         self._n = 0
         self._qs = []
         self._joint_labels = []
@@ -108,15 +109,28 @@ class MotionPage(QWidget):
         self.mm_idx.clear()
         self.mm_idx.addItems([f"J{j + 1}" for j in range(n)])
 
-    # ---- 在线 / 忙状态 ----
+    # ---- 在线 / 忙 / 故障状态 ----
     def set_online(self, onl: bool):
         self._online = onl
-        self.unlock_cb.setEnabled(onl)
+        self._refresh_unlock_cb()
         self._apply_locked_state()
 
     def set_busy(self, busy: bool):
         self._busy = busy
+        self._refresh_unlock_cb()
         self._apply_locked_state()
+
+    def set_fault_blocked(self, fb: bool):
+        """FAULT/EMERGENCY 锁存时禁止解锁，已解锁则立即重新锁定。"""
+        if fb and not self._locked:
+            self.lock("FAULT / 急停锁存中 — 需 [清故障] 或 [复位]")
+        self._fault_blocked = fb
+        self._refresh_unlock_cb()
+        self._apply_locked_state()
+
+    def _refresh_unlock_cb(self):
+        can = self._online and not self._busy and not self._fault_blocked
+        self.unlock_cb.setEnabled(can)
 
     # ---- 锁定/解锁 ----
     def _on_unlock_toggled(self, checked: bool):
@@ -137,7 +151,7 @@ class MotionPage(QWidget):
         self._apply_locked_state()
 
     def _apply_locked_state(self):
-        locked = self._locked or not self._online or self._busy
+        locked = self._locked or not self._online or self._busy or self._fault_blocked
         if self._locked:
             reason = getattr(self, "_lock_reason", "安全横幅提示")
             self.banner.setText(f"⛔ 运动控制已锁定 — {reason}")
@@ -150,7 +164,7 @@ class MotionPage(QWidget):
                 "background:#2a5a3a;color:#6fdd8b;font-weight:bold;"
                 "font-size:15px;border-radius:4px;")
         can_use = not locked
-        self.btn_mj.setEnabled(can_use and self._qs)
+        self.btn_mj.setEnabled(can_use and bool(self._qs))
         self.btn_mm.setEnabled(can_use)
         for sp in self._qs:
             sp.setEnabled(can_use)

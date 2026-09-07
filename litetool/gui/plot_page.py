@@ -96,7 +96,8 @@ class PlotPage(QWidget):
         for field, series in enumerate((q, dq, tau)):
             mat = np.asarray(series, dtype=float)     # (样本, 关节)
             pi = self.plots[field]
-            for j in range(self._n):
+            n_show = min(self._n, mat.shape[1])       # 重连窗口内样本关节数可能小于 UI 值
+            for j in range(n_show):
                 key = (field, j)
                 curve = self.curves.get(key)
                 color = COLORS[j % len(COLORS)]

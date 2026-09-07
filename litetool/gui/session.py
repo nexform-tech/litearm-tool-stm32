@@ -16,12 +16,16 @@ class Session:
         self.link: SerialLink | None = None
         self.client: client.LiteArmClient | None = None
         self.model = PlotModel(clock=clock)
+        self._prev_seq = None
+        self._drops = 0
 
     # ---- 连接生命周期 ----
     def connect(self, port: str):
         """打开串口。失败抛异常（由 GUI 捕获并提示）。"""
         self.close()
         self.model.reset()
+        self._prev_seq = None
+        self._drops = 0
         link = SerialLink(port, on_frame=self._on_frame, on_error=self._on_error)
         cli = client.LiteArmClient(link, log=self._log, clock=self._clock)
         link.connect()
@@ -43,6 +47,18 @@ class Session:
             view = cli.status
             if view is not None:
                 self.model.push(view)
+                self._count_drops(view.seq)
+
+    def _count_drops(self, seq: int):
+        """在读线程按 seq 差分统计丢帧（固件每帧 seq+1；100Hz 全量判据）。"""
+        if self._prev_seq is not None:
+            gap = (seq - self._prev_seq) & 0xFFFF
+            if gap > 1:
+                self._drops += gap - 1
+        self._prev_seq = seq
+
+    def drops(self) -> int:
+        return self._drops
 
     def _on_error(self, msg: str):
         self._log(f"[ERR] {msg}")

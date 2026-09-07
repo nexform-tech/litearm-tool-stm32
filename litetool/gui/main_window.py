@@ -48,10 +48,14 @@ class MainWindow(QMainWindow):
         self._busy = False
         self._was_online = False
         self._safety_latched = False
+        self._fault_logged = False
         self._last_seq = None
         self._last_seq_t = 0.0
         self._fps = 0.0
-        self._drops = 0
+        self._ui_n = 0
+        self._cmd_seq = 0               # 每条命令递增 token，防过期 sig_done 串台
+        self._pending_token = None
+        self._pending_done = None
 
         self._build_ui()
         self._wire()
@@ -169,7 +173,13 @@ class MainWindow(QMainWindow):
             return
         self.session = sess
         self._last_seq = None
-        self._drops = 0
+        self._last_seq_t = 0.0
+        self._fps = 0.0
+        self._was_online = False
+        self._fault_logged = False
+        self._ui_n = 0
+        self.plot.set_joints(0)
+        self.motion.set_joints(0)
         self._log_ui(f"[INFO] 已连接 {device}")
         self._run("固件版本", sess.client.get_firmware,
                   require_online=False, on_done=self._on_firmware)
@@ -181,7 +191,13 @@ class MainWindow(QMainWindow):
         self._was_online = False
         self._last_seq = None
         self._busy = False
+        self._cmd_seq += 1              # 作废所有在途 sig_done token
+        self._pending_token = None
         self._pending_done = None
+        self._fault_logged = False
+        self._ui_n = 0
+        self.plot.set_joints(0)
+        self.motion.set_joints(0)
         self._log_ui("[INFO] 已断开")
         self._set_online_ui(False)
         self._lock_motion("未连接")
@@ -198,14 +214,17 @@ class MainWindow(QMainWindow):
         if self._busy:
             self._log_ui(f"[WARN] 忙，忽略 {name}")
             return
-        if require_online and not (self.session and self.session.online):
-            self._log_ui(f"[WARN] 离线，忽略 {name}")
-            return
         if self.session is None:
             self._log_ui(f"[WARN] 未连接，忽略 {name}")
             return
-        self._busy = True
+        if require_online and not self.session.online:
+            self._log_ui(f"[WARN] 离线，忽略 {name}")
+            return
+        self._cmd_seq += 1
+        tok = self._cmd_seq
+        self._pending_token = tok
         self._pending_done = on_done
+        self._busy = True
         self._apply_busy()
 
         def target():
@@ -214,13 +233,16 @@ class MainWindow(QMainWindow):
             except Exception as e:  # noqa: BLE001
                 self.bridge.sig_log.emit(f"[ERR] {name} 异常: {e}")
                 res = False
-            self.bridge.sig_done.emit(name, res)
+            self.bridge.sig_done.emit(tok, name, res)
 
         threading.Thread(target=target, name=f"cmd-{name}", daemon=True).start()
 
-    def _on_done(self, name, res):
+    def _on_done(self, tok, name, res):
+        if tok != self._pending_token:      # 过期命令（断开/重连后迟到），忽略
+            return
         self._busy = False
-        handler = getattr(self, "_pending_done", None)
+        handler = self._pending_done
+        self._pending_token = None
         self._pending_done = None
         self._apply_busy()
         if handler is not None:
@@ -300,11 +322,15 @@ class MainWindow(QMainWindow):
             if not self._confirm_move(plan):
                 self._log_ui("[INFO] move_j 已取消")
                 return
-        ok, code = sess.client.move_j(qs, speed)
-        if ok:
-            self._log_ui(f"[OK] move_j 已发送 sp={speed}")
-        else:
-            self._log_ui(self._err_text("move_j", code))
+
+        def done(res):
+            ok, code = res
+            if ok:
+                self._log_ui(f"[OK] move_j 已发送 sp={speed}")
+            else:
+                self._log_ui(self._err_text("move_j", code))
+
+        self._run("move_j", lambda: sess.client.move_j(qs, speed), on_done=done)
 
     def _on_move_mit(self, idx, q, dq, kp, kd, tau):
         sess = self.session
@@ -318,11 +344,17 @@ class MainWindow(QMainWindow):
             if not self._confirm_move(plan, labels=[f"J{idx + 1}"]):
                 self._log_ui("[INFO] move_mit 已取消")
                 return
-        ok, code = sess.client.move_mit(idx, q, dq, kp, kd, tau)
-        if ok:
-            self._log_ui(f"[OK] move_mit J{idx + 1} 单帧已发送")
-        else:
-            self._log_ui(self._err_text("move_mit", code))
+
+        def done(res):
+            ok, code = res
+            if ok:
+                self._log_ui(f"[OK] move_mit J{idx + 1} 单帧已发送")
+            else:
+                self._log_ui(self._err_text("move_mit", code))
+
+        self._run("move_mit",
+                  lambda: sess.client.move_mit(idx, q, dq, kp, kd, tau),
+                  on_done=done)
 
     def _confirm_move(self, plan, labels=None) -> bool:
         lines = checks.confirm_lines(plan, labels=labels)
@@ -351,36 +383,44 @@ class MainWindow(QMainWindow):
             self._log_ui("[WARN] 离线 — 超过 500ms 未收到状态帧")
             self._lock_motion("离线")
 
+        fault_now = st is not None and (st.mode == 6 or st.has_fault)
+        if fault_now:
+            if not self._safety_latched:
+                self._safety_latched = True
+                self._lock_motion("检测到 FAULT / EMERGENCY — 需 [清故障] 或 [复位]")
+                self._fault_logged = False
+            if not self._fault_logged and st is not None:
+                self._fault_logged = True
+                reason = "急停锁存 EMERGENCY（需 [复位 reset]）" if st.mode == 6 \
+                    else "FAULT 标志置位（可先试 [清故障 clear_faults]，若反复出现用 [复位 reset]）"
+                self._log_ui(f"[WARN] 检测到 {reason} —— 使能与运动已锁定")
+        else:
+            self._safety_latched = False
+
         if st is not None:
-            if st.mode == 6 or st.has_fault:
-                if not self._safety_latched:
-                    self._safety_latched = True
-                    self._lock_motion("检测到 FAULT / EMERGENCY")
-            else:
-                self._safety_latched = False
             # N 自适应
-            if st.n != getattr(self, "_ui_n", 0):
+            if st.n != self._ui_n:
                 self._ui_n = st.n
                 self.plot.set_joints(st.n)
                 self.motion.set_joints(st.n)
-            # 帧率 / 丢帧
+            # 帧率（GUI 抽稀估计，仅展示用；丢帧计数用读线程 sess.drops()）
             now = time.monotonic()
             if self._last_seq is not None:
                 dseq = (st.seq - self._last_seq) & 0xFFFF
                 dt = now - self._last_seq_t
-                if dseq > 0:
-                    self._fps = dseq / dt if dt > 0 else 0.0
-                    self._drops += max(0, dseq - 1)
+                if dseq > 0 and dt > 0:
+                    self._fps = dseq / dt
             self._last_seq = st.seq
             self._last_seq_t = now
             bad = sess.bad_frames()
-            self.monitor.update_from(st, bad, self._fps, self._drops)
+            self.monitor.update_from(st, bad, self._fps, sess.drops())
 
         self._set_online_ui(onl)
         self.control.set_online(onl)
         self.control.set_busy(self._busy)
         self.motion.set_online(onl)
         self.motion.set_busy(self._busy)
+        self.motion.set_fault_blocked(fault_now)
         if st is not None:
             self.control.refresh_fault_hint(st)
 

@@ -148,6 +148,26 @@ def test_offline_detects_when_status_stops():
     assert cli.online is False
 
 
+def test_emergency_now_bypasses_lock_and_sends_immediately():
+    """急停走旁路通道：不加锁、不等 ACK，立刻写帧（忙等 ACK 的命令不能阻塞急停）。"""
+    link, cli, _ = _mk_client()
+    # 先占用 tx_lock（模拟一条在途等待 ACK 的命令）
+    cli._tx_lock.acquire()
+    try:
+        ok = cli.emergency_now()
+        assert ok is True
+        assert link.sent[-1][1] == P.CMD_EMERGENCY_STOP
+    finally:
+        cli._tx_lock.release()
+
+
+def test_emergency_now_failure_when_closed():
+    link, cli, logs = _mk_client()
+    link.is_open = False
+    assert cli.emergency_now() is False
+    assert any("急停" in m for m in logs)
+
+
 def test_status_frame_does_not_resolve_pending():
     """状态帧与 ACK 同 ID(0x40)不同方向不同 cmd 值, 状态帧不得解除待定命令。"""
     link, cli, _ = _mk_client()

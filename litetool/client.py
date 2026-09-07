@@ -172,8 +172,21 @@ class LiteArmClient:
         return self._simple("disable", P.CMD_DISABLE)
 
     def emergency_stop(self) -> bool:
-        """急停：无确认框语义在 GUI 层；此方法本身只发命令。"""
+        """急停（等 ACK 版）：无确认框语义在 GUI 层；此方法本身只发命令。"""
         return self._simple("emergency_stop", P.CMD_EMERGENCY_STOP)
+
+    def emergency_now(self) -> bool:
+        """急停旁路通道：不加锁、不等 ACK，立即写帧。
+
+        用途：GUI 常驻急停按钮 —— 不允许被"在途等待 ACK 的运动命令"阻塞排队。
+        """
+        try:
+            self._link.send_bytes(P.pack_frame(P.CMD_EMERGENCY_STOP))
+            self._log("[OK] EMERGENCY_STOP 已发送（旁路通道）")
+            return True
+        except Exception as e:  # noqa: BLE001
+            self._log(f"[ERR] 急停发送失败: {e}")
+            return False
 
     def clear_faults(self) -> bool:
         return self._simple("clear_faults", P.CMD_CLEAR_FAULTS)

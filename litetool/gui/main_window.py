@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QMainWindow,
                              QVBoxLayout, QWidget)
 
 from litetool import checks
+from litetool import protocol as P
 from litetool.gui.bridge import GuiBridge
 from litetool.gui.control_page import ControlPage
 from litetool.gui.monitor_page import MonitorPage
@@ -179,9 +180,18 @@ class MainWindow(QMainWindow):
             self.session = None
         self._was_online = False
         self._last_seq = None
+        self._busy = False
+        self._pending_done = None
         self._log_ui("[INFO] 已断开")
         self._set_online_ui(False)
         self._lock_motion("未连接")
+
+    @staticmethod
+    def _err_text(name: str, code) -> str:
+        if code is None:
+            return f"[ERR] {name}: 无应答/超时"
+        txt = P.ERR_TEXT.get(code, f"未知错误码 0x{code:02X}")
+        return f"[ERR] {name} 被固件拒绝: {txt} (code 0x{code:02X})"
 
     # ================= 命令执行 =================
     def _run(self, name, fn, require_online=True, on_done=None):
@@ -290,9 +300,11 @@ class MainWindow(QMainWindow):
             if not self._confirm_move(plan):
                 self._log_ui("[INFO] move_j 已取消")
                 return
-        ok, _ = sess.client.move_j(qs, speed)
+        ok, code = sess.client.move_j(qs, speed)
         if ok:
             self._log_ui(f"[OK] move_j 已发送 sp={speed}")
+        else:
+            self._log_ui(self._err_text("move_j", code))
 
     def _on_move_mit(self, idx, q, dq, kp, kd, tau):
         sess = self.session
@@ -306,9 +318,11 @@ class MainWindow(QMainWindow):
             if not self._confirm_move(plan, labels=[f"J{idx + 1}"]):
                 self._log_ui("[INFO] move_mit 已取消")
                 return
-        ok, _ = sess.client.move_mit(idx, q, dq, kp, kd, tau)
+        ok, code = sess.client.move_mit(idx, q, dq, kp, kd, tau)
         if ok:
             self._log_ui(f"[OK] move_mit J{idx + 1} 单帧已发送")
+        else:
+            self._log_ui(self._err_text("move_mit", code))
 
     def _confirm_move(self, plan, labels=None) -> bool:
         lines = checks.confirm_lines(plan, labels=labels)

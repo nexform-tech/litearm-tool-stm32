@@ -87,7 +87,7 @@ class MonitorPage(QWidget):
                 "font-size:11px;}" % (
                     ("#ff6b6b" if on else "#3a3a3a"),
                     ("#ffffff" if on else "#b0b0b0")))
-        self.seq_lbl.setText(f"seq: {view.seq}")
+        self.seq_lbl.setText(f"seq: {view.seq}  丢帧: {seq_drops}")
         self.fps_lbl.setText(f"帧率: {fps:.0f}Hz")
         self.bad_lbl.setText(f"坏帧: {bad_frames}")
 

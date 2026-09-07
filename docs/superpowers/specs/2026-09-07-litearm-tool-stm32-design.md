@@ -80,6 +80,9 @@ litearm-tool-stm32/
   冻结在最后值。第一版不做自动重连，提供手动"重新连接"。
 - **关节数自适应**：连接后由首帧状态长度定 N（`(len-4)/21`），兼容 7 关节整机
   （151B）与 1 关节测试台（25B），GUI 表格行数随 N 生成。
+- **上行 ID 容错**：上行 `0x41` 在旧固件为 RSP_DETAIL（G8 已移除，温度并入状态
+  帧），与下行 GET_FIRMWARE 同 ID 仅方向不同；读线程解析器只处理上行表内 ID，
+  遇未知/遗留 ID（含 0x41、0x47 RSP_IK、0x49 RSP_JOINT_PARAM）一律忽略不报错。
 
 ## 5. 协议层（protocol.py）
 
@@ -88,9 +91,9 @@ litearm-tool-stm32/
 | CMD | ID | Payload | 响应 |
 |---|---|---|---|
 | MOVE_J | 0x01 | q[N]f32 + speed f32 | ACK/ERR |
-| MOVE_JS | 0x03 | q[N]+dq[N]f32 (+可选 tau_ff[N]) | ACK/ERR |
+| MOVE_JS | 0x03 | q[N]+dq[N]f32 (+可选 tau_ff[N]) | ACK/ERR（仅 client API，第一版无 GUI 入口） |
 | MOVE_MIT | 0x04 | idx u8 + q,dq,kp,kd,tau f32 | ACK/ERR |
-| MOVE_MIT_ALL | 0x05 | q,dq,kp,kd,tau 各[N]f32 | ACK/ERR |
+| MOVE_MIT_ALL | 0x05 | q,dq,kp,kd,tau 各[N]f32 | ACK/ERR（仅 client API，第一版无 GUI 入口） |
 | ENABLE | 0x10 | — | ACK/ERR(0x03 未就绪) |
 | DISABLE | 0x11 | — | ACK |
 | EMERGENCY_STOP | 0x12 | — | ACK |
@@ -114,6 +117,9 @@ RSP_STATUS(0x40) payload（G8 格式，`4+21·N` 字节）：
 ERR 错误码：0x01 载荷过短 / 0x02 数值非法(NaN/超限，固件已拒绝) / 0x03 未就绪 /
 0x04 需先 disable / 0x05 忙 / 0x00 未知命令。
 
+ACK/ERR 线格式：`RSP_ACK(0x45)` payload = `[被回显的 cmd u8]`（1B）；
+`RSP_ERR(0x46)` payload = `[被回显的 cmd u8, 错误码 u8]`（2B）。
+
 接口：`build_frame(cmd, payload) -> bytes`、`FrameParser.feed(bytes) -> [(cmd,
 payload)]`、`decode_status/ack/err/firmware/tcp(payload)`。
 
@@ -135,8 +141,10 @@ clamp、kp/kd/tau 范围 clamp、NaN 拦截。输入值直接下发；固件拒�
    触发后重新锁定运动页并记日志。
 4. **不提供连续 MIT 循环**：move_mit 只发单帧，避免上位机成为 100Hz 控制源。
 
-**控制页**（风险低，无需解锁）：enable/disable/clear_faults/home/reset 按钮（等
-ACK，ERR 显示中文含义）；enable 前若 FAULT flag 置位则提示先 clear_faults；
+**控制页**（风险低，无需解锁）：enable/disable/clear_faults/home 按钮（等
+ACK，ERR 显示中文含义）；**reset 例外**——RESET(0x14) 会重启机械臂控制，属
+意图层风险，点击弹确认框（"确认复位？将中断当前运动并重启控制栈"）后才发送；
+enable 前若 FAULT flag 置位则提示先 clear_faults；
 speed_percent 滑块(0–100)；GET_TCP 显示末端位姿；连接后自动 GET_FIRMWARE 显示
 版本于顶栏。
 

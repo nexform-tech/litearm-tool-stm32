@@ -34,11 +34,20 @@ def test_seq_gaps_count_missing_frames():
     assert sess.drops() == (2 + 33)
 
 
-def test_seq_wraparound_no_false_drops():
+def test_seq_8bit_wraparound_no_false_drops():
+    # 固件 seq 是 uint8_t (usb_cmd.c g_arm.seq++): 255->0 每 2.56s 回绕, 不得误计
     sess = _mk_session()
-    sess._on_frame(P.RSP_STATUS, _status_bytes(0xFFFF)[3:-2])
-    sess._on_frame(P.RSP_STATUS, _status_bytes(0x0000)[3:-2])   # 连续+1 回绕, 无丢帧
+    for seq in (253, 254, 255, 0, 1, 2):
+        sess._on_frame(P.RSP_STATUS, _status_bytes(seq)[3:-2])
     assert sess.drops() == 0
+
+
+def test_seq_8bit_genuine_loss_across_wrap():
+    # 253 -> 5: 中间 254,255,0,1,2,3,4 共 7 帧缺失 (mod 256 判据)
+    sess = _mk_session()
+    sess._on_frame(P.RSP_STATUS, _status_bytes(253)[3:-2])
+    sess._on_frame(P.RSP_STATUS, _status_bytes(5)[3:-2])
+    assert sess.drops() == 7
 
 
 def test_connect_resets_counters():

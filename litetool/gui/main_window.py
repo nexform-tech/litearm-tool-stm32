@@ -406,7 +406,7 @@ class MainWindow(QMainWindow):
             # 帧率（GUI 抽稀估计，仅展示用；丢帧计数用读线程 sess.drops()）
             now = time.monotonic()
             if self._last_seq is not None:
-                dseq = (st.seq - self._last_seq) & 0xFFFF
+                dseq = (st.seq - self._last_seq) & (P.SEQ_MOD - 1)
                 dt = now - self._last_seq_t
                 if dseq > 0 and dt > 0:
                     self._fps = dseq / dt

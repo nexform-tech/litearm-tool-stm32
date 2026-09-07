@@ -38,6 +38,10 @@ RSP_ERR = 0x46
 RSP_TCP = 0x48
 RSP_JOINT_PARAM = 0x49
 
+# 状态帧 seq 回绕周期：固件 g_arm.seq 为 uint8_t（usb_cmd.c:485 g_arm.seq++），
+# 每 256 帧(=2.56s@100Hz) 从 255 回绕到 0。上位机按 8 位掩码检丢帧。
+SEQ_MOD = 256
+
 # 固件安全/状态位（litearm.h）
 ARM_FLAG_FAULT = 1 << 0
 ARM_FLAG_WATCHDOG_TRIPPED = 1 << 1

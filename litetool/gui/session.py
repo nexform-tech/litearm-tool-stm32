@@ -50,9 +50,9 @@ class Session:
                 self._count_drops(view.seq)
 
     def _count_drops(self, seq: int):
-        """在读线程按 seq 差分统计丢帧（固件每帧 seq+1；100Hz 全量判据）。"""
+        """在读线程按 seq 差分统计丢帧（固件每帧 seq+1, seq 为 8 位回绕）。"""
         if self._prev_seq is not None:
-            gap = (seq - self._prev_seq) & 0xFFFF
+            gap = (seq - self._prev_seq) & (P.SEQ_MOD - 1)
             if gap > 1:
                 self._drops += gap - 1
         self._prev_seq = seq

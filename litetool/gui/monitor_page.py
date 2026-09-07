@@ -52,6 +52,13 @@ class MonitorPage(QWidget):
         self.mode_lbl.setFixedWidth(76)
         row.addWidget(self.mode_lbl)
 
+        # [1.5.0/M7] 臂使能指示 (flags bit9, 固件侧真实使能态)
+        row.addWidget(_static("臂"))
+        self.arm_lbl = QLabel("—")
+        self.arm_lbl.setFont(_MONO)
+        self.arm_lbl.setFixedWidth(52)
+        row.addWidget(self.arm_lbl)
+
         # 6 个 flag 灯：等宽固定，仅颜色随置位变化
         self.flag_chips = []
         self._chip_on = [False] * 6
@@ -150,6 +157,14 @@ class MonitorPage(QWidget):
             self.mode_lbl.setStyleSheet(
                 f"color:{_MODE_COLOR.get(view.mode_name, '#b0b0b0')}; font-weight:bold;")
 
+        # [1.5.0/M7] 臂使能位 (bit9)
+        en = getattr(view, "enabled", False)
+        if en != self._last.get("enabled"):
+            self._last["enabled"] = en
+            self.arm_lbl.setText("使能" if en else "失能")
+            self.arm_lbl.setStyleSheet(
+                f"color:{'#6fdd8b' if en else '#a0a0a0'}; font-weight:bold;")
+
         # flag 灯：只对置位变化的灯改样式
         for bit, chip in enumerate(self.flag_chips):
             on = bool(view.flags & (1 << bit))
@@ -176,15 +191,21 @@ class MonitorPage(QWidget):
             self.bad_val.setText(bad)
 
         # 表格：逐格只在文本/背景变化时更新
+        jf = getattr(view, "joint_fault", 0)
         for i, js in enumerate(view.joints):
             warn = js.t_mos > self._temp_alert or js.t_coil > self._temp_alert
             unknown = js.err not in ERR_STATE      # 0/1 为状态, 其余视为异常码
-            st_text = ERR_STATE.get(js.err, f"0x{js.err:02X}")
-            cells = ((1, f"{js.q:.3f}", "err" if unknown else "normal"),
-                     (2, f"{js.dq:.3f}", "err" if unknown else "normal"),
-                     (3, f"{js.tau:.3f}", "err" if unknown else "normal"),
+            faulted = bool(jf & (1 << i))          # [1.5.0/M7] 固件 G7 断轴锁存
+            if faulted:
+                st_text = "断轴"
+            else:
+                st_text = ERR_STATE.get(js.err, f"0x{js.err:02X}")
+            bad = unknown or faulted
+            cells = ((1, f"{js.q:.3f}", "err" if bad else "normal"),
+                     (2, f"{js.dq:.3f}", "err" if bad else "normal"),
+                     (3, f"{js.tau:.3f}", "err" if bad else "normal"),
                      (4, f"{js.t_mos:.1f}", "warn" if warn else "normal"),
                      (5, f"{js.t_coil:.1f}", "warn" if warn else "normal"),
-                     (6, st_text, "err" if unknown else "normal"))
+                     (6, st_text, "err" if bad else "normal"))
             for col, text, bg in cells:
                 self._set_cell(i, col, text, bg)

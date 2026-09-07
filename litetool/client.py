@@ -33,6 +33,8 @@ class StatusView:
     seq: int
     joints: list[JointState]
     received: float
+    joint_fault: int = 0        # [1.5.0/M7] G7 固件断轴位图 (旧固件帧=0)
+    enabled: bool = False       # [1.5.0/M7] flags bit9 固件侧使能位
 
     @property
     def n(self) -> int:
@@ -48,6 +50,10 @@ class StatusView:
     @property
     def has_fault(self) -> bool:
         return bool(self.flags & P.ARM_FLAG_FAULT)
+
+    def joint_fault_axes(self) -> list[int]:
+        """被固件锁存断开的轴号 (1-based)"""
+        return [i + 1 for i in range(self.n) if self.joint_fault & (1 << i)]
 
 
 class LiteArmClient:
@@ -80,9 +86,12 @@ class LiteArmClient:
         if cmd == P.RSP_STATUS:
             dec = P.decode_status_full(payload)
             if dec is not None:
-                flags, mode, seq, rows = dec
+                flags, mode, seq, rows, jf = dec
                 joints = [JointState(i, *row) for i, row in enumerate(rows)]
-                self._latest = StatusView(flags, mode, seq, joints, self._clock())
+                self._latest = StatusView(
+                    flags, mode, seq, joints, self._clock(),
+                    joint_fault=(jf if jf is not None else 0),
+                    enabled=P.flag_enabled(flags))
                 self._last_status_t = self._latest.received
             return
         if self._pending is None:

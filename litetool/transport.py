@@ -28,14 +28,19 @@ def find_ports():
         dev = p.device
         if not dev:
             continue
+        ours = (p.vid == USB_VID and p.pid == USB_PID)
         tag = "LiteArm STM32"
-        if p.vid == USB_VID and p.pid == USB_PID:
+        if ours:
             tag += " (板载 CDC)"
         elif p.vid:
             tag += f" VID:PID={p.vid:04X}:{p.pid:04X}"
-        rows.append({"device": dev, "description": f"{tag} — {p.description or ''}".strip()})
-    # 优先板载，其次 ttyACM*，再其余（保持稳定顺序）
-    rows.sort(key=lambda r: (0 if r["device"].startswith("/dev/ttyACM") else 1, r["device"]))
+        rows.append({"device": dev, "description": f"{tag} — {p.description or ''}".strip(),
+                     "_ours": ours})
+    # 板载 (VID:PID 精确匹配) 恒排最前 —— JLink 等其它 ttyACM 设备不得抢占首位;
+    # 其次 ttyACM*，再其余（保持稳定顺序）
+    rows.sort(key=lambda r: (0 if r["_ours"] else
+                             1 if r["device"].startswith("/dev/ttyACM") else 2,
+                             r["device"]))
     return rows
 
 

@@ -40,6 +40,22 @@ def test_find_ports_returns_list_of_dicts():
         assert "device" in p and "description" in p
 
 
+def test_find_ports_board_first_over_other_acm(monkeypatch):
+    """[真机踩坑] JLink 虚拟口(ttyACM1, 1366:0105)按名字排序会抢在板载
+    (ttyACM2, 1d50:606f)之前 —— VID:PID 精确匹配必须恒排最前。"""
+    class _P:
+        def __init__(self, device, vid, pid, description=""):
+            self.device, self.vid, self.pid, self.description = device, vid, pid, description
+
+    fake = [_P("/dev/ttyACM1", 0x1366, 0x0105, "J-Link CDC"),
+            _P("/dev/ttyACM2", 0x1D50, 0x606F, "STM32 VCP")]
+    import serial.tools.list_ports as lp
+    monkeypatch.setattr(lp, "comports", lambda: fake)
+    ports = transport.find_ports()
+    assert ports[0]["device"] == "/dev/ttyACM2"
+    assert "板载" in ports[0]["description"]
+
+
 def test_serial_link_delivers_crc_ok_frames_in_order():
     frames = [_frame_bytes(P.CMD_ENABLE),
               _frame_bytes(P.CMD_DISABLE),

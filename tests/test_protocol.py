@@ -65,27 +65,41 @@ def _status_payload(flags, seq, rows):
 
 
 def test_decode_status_full_single_joint():
+    """旧布局 (<=1.4.0): 4+21N, joint_fault 位为 None"""
     p = _status_payload(0, 0x0123, [(1.0, 2.0, 3.0, 30.0, 40.0, 0)])
     dec = P.decode_status_full(p)
     assert dec is not None
-    flags, mode, seq, rows = dec
+    flags, mode, seq, rows, jf = dec
     assert flags == 0 and mode == 0 and seq == 0x0123
     assert len(rows) == 1
     q, dq, tau, tm, tc, err = rows[0]
     assert (q, dq, tau, tm, tc, err) == (1.0, 2.0, 3.0, 30.0, 40.0, 0)
+    assert jf is None
+
+
+def test_decode_status_full_v15_layout():
+    """1.5.0/M7 布局: 6+21N, 尾 joint_fault u16; flags bit9=enabled"""
+    p = (_status_payload((1 << 9), 0x0200, [(1.0, 2.0, 3.0, 30.0, 40.0, 1)])
+         + bytes([0x40, 0x00]))
+    dec = P.decode_status_full(p)
+    assert dec is not None
+    flags, mode, seq, rows, jf = dec
+    assert seq == 0x0200 and jf == 0x0040
+    assert P.flag_enabled(flags) is True
+    assert rows[0][5] == 1
 
 
 def test_decode_status_full_seven_joints_and_mode_flags():
     rows = [(float(i), 0.0, 0.5 * i, 30.0 + i, 40.0 + i, i) for i in range(7)]
     flags = (1 << 0) | (P.MODE_EMERGENCY << 6)   # FAULT + EMERGENCY
-    p = _status_payload(flags, 42, rows)
-    assert len(p) == 4 + 21 * 7
+    p = _status_payload(flags, 42, rows) + bytes([0xFF, 0x00])   # 1.5.0 七关节 153B
+    assert len(p) == 6 + 21 * 7
     dec = P.decode_status_full(p)
     assert dec is not None
-    flags2, mode, seq, rows2 = dec
+    flags2, mode, seq, rows2, jf = dec
     assert flags2 == flags and mode == P.MODE_EMERGENCY and seq == 42
+    assert jf == 0x00FF
     assert len(rows2) == 7
-    # 每关节独立数值
     q5, *_ = rows2[5]
     assert q5 == 5.0
     assert rows2[5][5] == 5
@@ -123,6 +137,13 @@ def test_decode_err_returns_pair():
 def test_err_text_mapping_covers_codes():
     assert 0x02 in P.ERR_TEXT
     assert "非法" in P.ERR_TEXT[0x02]
+    # [1.5.0/L4] enable 锁存类拒绝专用码
+    assert 0x06 in P.ERR_TEXT and "reset" in P.ERR_TEXT[0x06].lower() or "复位" in P.ERR_TEXT[0x06]
+
+
+def test_seq_mod_is_16bit():
+    """[1.5.0/L1] seq 为真 u16: 回绕模 65536 (原 u8 时代为 256)"""
+    assert P.SEQ_MOD == 65536
 
 
 def test_cmd_rsp_id_lists_complete_for_tool():

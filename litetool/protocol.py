@@ -38,9 +38,10 @@ RSP_ERR = 0x46
 RSP_TCP = 0x48
 RSP_JOINT_PARAM = 0x49
 
-# 状态帧 seq 回绕周期：固件 g_arm.seq 为 uint8_t（usb_cmd.c:485 g_arm.seq++），
-# 每 256 帧(=2.56s@100Hz) 从 255 回绕到 0。上位机按 8 位掩码检丢帧。
-SEQ_MOD = 256
+# 状态帧 seq 回绕周期：1.5.0/L1 起固件 seq 为真 uint16（且仅发送成功才递增），
+# 65536 帧(≈11min@100Hz) 回绕。（1.4.0 及以前为 u8 装 16 位字段, 2.56s 回绕,
+# 上位机曾按 256 模适配；连接 1.4.x 固件时丢帧统计会偏大, 属兼容降级。）
+SEQ_MOD = 65536
 
 # 固件安全/状态位（litearm.h）
 ARM_FLAG_FAULT = 1 << 0
@@ -70,10 +71,16 @@ ERR_TEXT = {
     0x00: "未知命令",
     0x01: "载荷过短（参数校验不通过，未执行）",
     0x02: "数值非法（NaN/超限），固件已拒绝",
-    0x03: "未就绪（反馈未齐 / 急停锁存中）",
+    0x03: "未就绪/未使能（反馈未齐可重试；运动命令需先 enable）",
     0x04: "需先 disable（先失磁再做此操作）",
-    0x05: "忙（上一条命令仍在执行）",
+    0x05: "忙（上一条命令/IK 求解仍在执行）",
+    0x06: "锁存中，须先 reset 复位（EMERGENCY/单轴故障，重试无效）",
 }
+
+
+def flag_enabled(flags: int) -> bool:
+    """[1.5.0/M7] flags bit9 = 固件侧 enabled（旧固件无此位, 恒 False 降级）"""
+    return bool(flags & (1 << 9))
 
 
 # ---- CRC16-CCITT-FALSE (poly 0x1021 init 0xFFFF; 与固件 crc16.c 一致) ----
@@ -129,15 +136,23 @@ class FrameParser:
 
 # ---- 上行帧解码 ----
 def decode_status_full(p: bytes):
-    """状态帧完整解析: (flags, mode, seq, [(q,dq,tau,t_mos,t_coil,err)...]); 异常 None"""
+    """状态帧完整解析: (flags, mode, seq, [(q,dq,tau,t_mos,t_coil,err)...], joint_fault)
+
+    兼容两种布局: ≤1.4.0 = 4+21N（joint_fault 返回 None）;
+    1.5.0/M7 = 6+21N（尾部 joint_fault u16 = G7 固件断轴位图）。
+    flags bit9 = enabled（1.5.0 起，用 flag_enabled() 取）。结构异常返回 None。
+    """
     n = (len(p) - 4) // 21
-    if n < 1 or 4 + n * 21 != len(p):
+    if n < 1 or len(p) not in (4 + n * 21, 6 + n * 21):
         return None
     flags = struct.unpack_from("<H", p, 0)[0]
     seq = struct.unpack_from("<H", p, 2)[0]
     rows = [struct.unpack_from("<fffff", p, 4 + i * 21) + (p[4 + i * 21 + 20],)
             for i in range(n)]
-    return flags, (flags >> 6) & 0x7, seq, rows
+    jf = None
+    if len(p) == 6 + n * 21:
+        jf = p[4 + n * 21] | (p[5 + n * 21] << 8)
+    return flags, (flags >> 6) & 0x7, seq, rows, jf
 
 
 def decode_tcp(p: bytes):

@@ -44,7 +44,6 @@ def _mk_client(offline_timeout=0.5):
 def test_status_updates_latest_view():
     link, cli, _ = _mk_client()
     assert cli.status is None and cli.online is False
-    p = P.decode_status_full(_status_frame_bytes()[3:-2])  # 取 payload
     link.inject(P.RSP_STATUS, _status_frame_bytes()[3:-2], cli)
     assert cli.online is True
     assert cli.status is not None
@@ -52,6 +51,19 @@ def test_status_updates_latest_view():
     assert cli.status.mode == P.MODE_MOVE_J
     assert cli.status.joints[0].q == pytest.approx(1.0)
     assert cli.status.joints[0].t_mos == pytest.approx(25.0)
+
+
+def test_status_v15_enabled_and_joint_fault():
+    """[1.5.0/M7] 新布局: flags bit9=enabled, 尾 joint_fault 透传到 StatusView"""
+    link, cli, _ = _mk_client()
+    payload = (struct.pack("<HH", (1 << 9) | (P.MODE_MOVE_J << 6), 5)
+               + struct.pack("<fffffB", 1.0, 0.0, 0.0, 25.0, 35.0, 0x01)
+               + struct.pack("<H", 0x0001))          # joint_fault = J1 锁存(单关节帧)
+    link.inject(P.RSP_STATUS, payload, cli)
+    st = cli.status
+    assert st is not None and st.enabled is True
+    assert st.joint_fault == 0x0001
+    assert st.joint_fault_axes() == [1]
 
 
 def test_ack_pairs_with_sent_command():

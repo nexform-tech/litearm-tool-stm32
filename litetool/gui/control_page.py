@@ -27,7 +27,7 @@ class ControlPage(QWidget):
         g.addLayout(row1)
 
         row2 = QHBoxLayout()
-        row2.addWidget(QLabel("速度倍率:"))
+        row2.addWidget(QLabel("全局限速(调速器):"))
         self.speed = QSlider(Qt.Horizontal)
         self.speed.setRange(0, 100)
         self.speed.setValue(100)
@@ -35,7 +35,7 @@ class ControlPage(QWidget):
         self.speed_label = QLabel("100%")
         self.speed.valueChanged.connect(
             lambda v: self.speed_label.setText(f"{v}%"))
-        btn_spd = QPushButton("应用")
+        btn_spd = QPushButton("应用")   # [1.5.1/L5] 调速器=全局封顶: 实际速度=min(命令sp, 本值)
         btn_spd.clicked.connect(lambda: self.set_speed.emit(self.speed.value()))
         row2.addWidget(self.speed)
         row2.addWidget(self.speed_label)

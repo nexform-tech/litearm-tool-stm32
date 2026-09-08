@@ -196,7 +196,8 @@ class MonitorPage(QWidget):
         jf = getattr(view, "joint_fault", 0)
         for i, js in enumerate(view.joints):
             warn = js.t_mos > self._temp_alert or js.t_coil > self._temp_alert
-            unknown = js.err not in ERR_STATE      # 0/1 为状态, 其余视为异常码
+            # 0/1 为正常状态; 其余(含 13=超时保护)一律异常码 → 红底
+            unknown = js.err not in (0, 1)
             faulted = bool(jf & (1 << i))          # [1.5.0/M7] 固件 G7 断轴锁存
             if faulted:
                 st_text = "断轴"

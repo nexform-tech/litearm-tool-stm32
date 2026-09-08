@@ -18,8 +18,10 @@ _CHIP_ON = "QLabel{background:#ff6b6b;color:#ffffff;border-radius:4px;padding:2p
 _CHIP_OFF = "QLabel{background:#3a3a3a;color:#b0b0b0;border-radius:4px;padding:2px 8px;font-size:11px;}"
 _MONO = QFont("DejaVu Sans Mono", 11)
 
-# DM 电机状态字节: 0=失能 1=使能 (用户在真机确认); 其余为未知/故障码
-ERR_STATE = {0: "失能", 1: "使能"}
+# DM 电机状态字节: 0=失能 1=使能 (用户在真机确认); 13=CAN 超时保护
+# (1.5.2/M6b 真机 halt 实测: MCU 猝死 CAN 静默 100ms 后七轴 err 全变 13);
+# 其余为未知/故障码
+ERR_STATE = {0: "失能", 1: "使能", 13: "超时保护"}
 
 
 def _num_label(width: int) -> QLabel:

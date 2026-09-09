@@ -269,21 +269,45 @@ class LiteArmClient:
         return self._cmd(P.CMD_SET_FF_SCALAR, payload, timeout=timeout)
 
     def get_ff_vec(self, item: int, timeout: float = 1.0):
-        """0x2B 读回逐关节前馈向量 -> (item, 7-tuple) | None"""
-        ok, payload = self._transact(P.CMD_GET_FF_VEC, bytes([int(item) & 0xFF]),
-                                     rsp=P.RSP_FF_VEC, timeout=timeout)
-        if ok and payload is not None:
-            return P.decode_ff_vec(payload)
-        return None
+        """0x2B 读回逐关节前馈向量 -> (item, 7-tuple) | None
+
+        [Minor-5] 应答做 item 关联校验: 回显 item 与请求不符视为陈旧应答,
+        丢弃并重新发命令, 直至超时返回 None (防串扰)。
+        """
+        req = bytes([int(item) & 0xFF])
+        deadline = self._clock() + timeout
+        while True:
+            remain = deadline - self._clock()
+            if remain <= 0:
+                return None
+            ok, payload = self._transact(P.CMD_GET_FF_VEC, req,
+                                         rsp=P.RSP_FF_VEC, timeout=remain)
+            if not ok or payload is None:
+                return None
+            dec = P.decode_ff_vec(payload)
+            if dec is not None and dec[0] == item:
+                return dec
+            time.sleep(0.01)               # 陈旧串扰 -> 略退避后再发
 
     def get_ff_scalar(self, item: int, sub: int = 0, timeout: float = 1.0):
-        """0x2C 读回全局标量 -> (item, sub, f32) | None"""
-        ok, payload = self._transact(P.CMD_GET_FF_SCALAR,
-                                     bytes([int(item) & 0xFF, int(sub) & 0xFF]),
-                                     rsp=P.RSP_FF_SCALAR, timeout=timeout)
-        if ok and payload is not None:
-            return P.decode_ff_scalar(payload)
-        return None
+        """0x2C 读回全局标量 -> (item, sub, f32) | None
+
+        [Minor-5] 应答做 item/sub 关联校验 (同上)。
+        """
+        req = bytes([int(item) & 0xFF, int(sub) & 0xFF])
+        deadline = self._clock() + timeout
+        while True:
+            remain = deadline - self._clock()
+            if remain <= 0:
+                return None
+            ok, payload = self._transact(P.CMD_GET_FF_SCALAR, req,
+                                         rsp=P.RSP_FF_SCALAR, timeout=remain)
+            if not ok or payload is None:
+                return None
+            dec = P.decode_ff_scalar(payload)
+            if dec is not None and dec[0] == item and dec[1] == sub:
+                return dec
+            time.sleep(0.01)               # 陈旧串扰 -> 略退避后再发
 
     # ---- 运动下发（安全收口在 GUI 侧 checks.py；本层直发） ----
     def move_j(self, qs: list[float], speed: float = 0.2):

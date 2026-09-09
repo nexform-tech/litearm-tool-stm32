@@ -48,6 +48,8 @@ class ParamsPage(QWidget):
         self._busy = False
         self._ext_busy = False          # MainWindow 侧运动/控制命令在途
         self._loading = False
+        self._device_synced = False     # 成功"刷新当前"后置 True —— 此前禁止任何下发
+                                        # (防 QDoubleSpinBox 默认=range 下限被盲发)
         self._baseline = None           # 最近设备读回/整发成功快照 (diff 的"旧")
         self._synced = {}               # {row_key: {joint: float}}
         self._synced_glob = None        # global 基线 (含 ff_mask)
@@ -204,6 +206,8 @@ class ParamsPage(QWidget):
 
     def set_client(self, client):
         self._client = client
+        # 会话(重)建后设备参数未知 -> 禁下发, 待 [刷新当前] 成功
+        self._device_synced = False
         self._refresh_state()
 
     def set_online(self, onl: bool):
@@ -211,8 +215,6 @@ class ParamsPage(QWidget):
             self._online = onl
             if not onl:
                 self.status.setText("离线 — 断开或 500ms 无状态帧; 重连后自动恢复")
-            elif self._client is not None and not self._busy:
-                self.status.setText("就绪 — 可 [刷新当前] / 编辑下发 / 导入导出")
             self._refresh_state()
 
     def _can_run(self) -> bool:
@@ -229,21 +231,32 @@ class ParamsPage(QWidget):
         if self._client is None:
             self.status.setText("未连接 — 连接后可用 (读回 0x2B/0x2C 需固件 27961a1+)")
             self._set_ops_enabled(False)
-        else:
-            self._set_ops_enabled(self._can_run())
+            return
+        if not self._online:
+            self._set_ops_enabled(False)
+            return
+        idle = self._can_run()
+        self._set_ops_enabled(idle)
+        if idle and not self._device_synced:
+            # Critical-1: 未读回设备数据前禁一切下发 (防控件默认值盲发)
+            self.status.setText("已连接 — 尚未读取设备参数, 请先 [刷新当前];"
+                                " 在此之前禁下发/编辑")
 
     def _set_ops_enabled(self, on: bool):
-        for b in (self.btn_refresh, self.btn_apply_row, self.btn_apply_all,
-                  self.btn_import, self.btn_export, self.btn_save, self.btn_global):
+        """on=在线且空闲; 还需 _device_synced 才允许需要设备基线的下发/编辑。"""
+        for b in (self.btn_refresh, self.btn_import, self.btn_export, self.btn_save):
             b.setEnabled(on)
-        self.table.setEnabled(on)
+        ready = on and self._device_synced
+        for b in (self.btn_apply_row, self.btn_apply_all, self.btn_global):
+            b.setEnabled(ready)
+        self.table.setEnabled(ready)
         for cb in self._ff_cbs:
-            cb.setEnabled(on)
+            cb.setEnabled(ready)
         for w in self._g_spins.values():
             for s in (w if isinstance(w, list) else [w]):
-                s.setEnabled(on)
+                s.setEnabled(ready)
         if self._g_model is not None:
-            self._g_model.setEnabled(on)
+            self._g_model.setEnabled(ready)
 
     def _set_busy_ui(self, busy: bool):
         self._busy = busy
@@ -337,7 +350,8 @@ class ParamsPage(QWidget):
                 self.status.setText("导出失败 — 读回为空 (固件需 27961a1+)")
                 self._pending_export = None
             else:
-                self.status.setText("刷新失败 — 请检查串口/固件 (读回需固件 27961a1+)")
+                self.status.setText("刷新失败 — 请检查串口/固件 (读回需固件 27961a1+);"
+                                    " 设备参数未确认前禁下发")
             return
         self._loading = True
         try:
@@ -348,7 +362,11 @@ class ParamsPage(QWidget):
             self._apply_global_to_ui(snap["global"])
         finally:
             self._loading = False
+        # Minor-4/Critical-1: 读回成功 = 设备基线有效, 重置 per-cell _synced 与下发许可
+        self._sync_from_snapshot(snap)
+        self._device_synced = True
         self._baseline = snap
+        self._refresh_state()
         if self._pending_export:
             path, self._pending_export = self._pending_export, None
             try:
@@ -361,7 +379,7 @@ class ParamsPage(QWidget):
             return
         self.status.setText(f"刷新完成 — 7 关节 × {len(C.JOINT_PARAMS)} 项 + 全局"
                             f" (ff_mask={snap['global']['ff_mask']} = 0x"
-                            f"{snap['global']['ff_mask']:X})")
+                            f"{snap['global']['ff_mask']:X}); 已允许编辑/下发")
         self._log("[OK] 调参[刷新] 读回全量完成")
 
     def _apply_global_to_ui(self, g: dict):
@@ -483,7 +501,43 @@ class ParamsPage(QWidget):
         sel = sorted({i.row() for i in self.table.selectedIndexes()})
         return [C.JOINT_PARAMS[ri].key for ri in sel if ri < len(C.JOINT_PARAMS)]
 
+    def _require_device_sync(self, what: str) -> bool:
+        if not self._device_synced:
+            self.status.setText(f"未读取设备数据 — 请先 [刷新当前], 已拒绝 {what}")
+            return False
+        return True
+
+    def _confirm_enabled_write(self, desc: str) -> bool:
+        """臂 enable 态下的控制律写二次确认 (0x22/0x23/0x26/0x27/0x28 等实时生效)。"""
+        st = self._client.status
+        if st is not None and st.enabled:
+            if QMessageBox.warning(
+                    self, "臂已使能 — 写确认",
+                    f"{desc}\n\n机械臂处于 enable 态, 该写入会立即作用于控制律/前馈"
+                    " (限位墙/积分/摩擦等随写即变)。\n确认继续?",
+                    QMessageBox.Ok | QMessageBox.Cancel,
+                    QMessageBox.Cancel) != QMessageBox.Ok:
+                self.status.setText("已取消 — enable 态写确认未通过")
+                return False
+        return True
+
+    def _limits_error(self, mat: list) -> str | None:
+        """0x23 限位写前: 校验当前 q 在新 [q_min,q_max] 内, 越界返回错误文案。"""
+        st = self._client.status
+        if st is None or not st.joints:
+            return None                      # 无实时 q 时交给固件 (仍在软限内运动)
+        n = min(st.n, C.NUM_JOINTS, len(mat))
+        for j in range(n):
+            qmin, qmax = mat[j]["q_min"], mat[j]["q_max"]
+            q = st.joints[j].q
+            if not (qmin <= q <= qmax):
+                return (f"J{j + 1} 当前 q={q:.4f} rad 不在新限位 [{qmin:.4f}, {qmax:.4f}]"
+                        " 内 — 拒绝下发 (防即时 POS_VIOL/FAULT)")
+        return None
+
     def _apply_rows_selected(self, all_rows: bool = False):
+        if not self._require_device_sync("下发"):
+            return
         keys = list(JOINT_KEYS) if all_rows else self._selected_row_keys()
         if not keys:
             self.status.setText("未选中行 — 请先点选一行 (或用 [下发全部])")
@@ -499,6 +553,15 @@ class ParamsPage(QWidget):
             p = C.JOINT_BY_KEY[k]
             if p.kind in GROUP_KEYS:
                 group |= set(GROUP_KEYS[p.kind])
+        kinds = {C.JOINT_BY_KEY[k].kind for k in group}
+        if "limits" in kinds:
+            err = self._limits_error(mat)
+            if err:
+                QMessageBox.warning(self, "限位写被拒绝", err)
+                self.status.setText(err)
+                return
+        if not self._confirm_enabled_write("逐关节/成组参数下发 (0x22/0x23/0x26)"):
+            return
         cli = self._client
         ops = self._build_row_ops(group, mat)
 
@@ -534,6 +597,14 @@ class ParamsPage(QWidget):
         return ops
 
     # ================= 结果处理 (逐关节/批量共用) =================
+    def _sync_from_snapshot(self, snap: dict):
+        """读回/整发成功后, 以设备值为基线重置 per-cell _synced (Minor-4)。"""
+        self._synced = {}
+        for j, d in enumerate(snap["joints"]):
+            for k, v in d.items():
+                if v is not None:
+                    self._synced.setdefault(k, {})[j] = float(v)
+
     def _commit_row_success(self, ok_cells):
         for (rk, j), val in ok_cells.items():
             self._synced.setdefault(rk, {})[j] = float(val)
@@ -571,7 +642,11 @@ class ParamsPage(QWidget):
         return g
 
     def _on_apply_global(self):
+        if not self._require_device_sync("下发全局"):
+            return
         g = self._global_from_ui()
+        if not self._confirm_enabled_write("全局参数/前馈下发 (0x28 + ff_mask 0x27)"):
+            return
         base = self._synced_glob
         mask_changed = base is None or base["ff_mask"] != g["ff_mask"]
         if mask_changed:
@@ -677,6 +752,14 @@ class ParamsPage(QWidget):
             self.status.setText("批量下发已取消")
             return
         mat = snap["joints"]
+        # 限位写前: 新 [q_min,q_max] 必须包含当前 q (全量必含 0x23 组)
+        err = self._limits_error(mat)
+        if err:
+            QMessageBox.warning(self, "限位写被拒绝", err)
+            self.status.setText(err)
+            return
+        if not self._confirm_enabled_write("批量整套参数下发 (0x22/0x23/0x26/0x28/0x27)"):
+            return
         ops = self._build_row_ops(set(JOINT_KEYS), mat)
         glob = snap["global"]
         cli = self._client
@@ -692,7 +775,7 @@ class ParamsPage(QWidget):
                     save_ok = bool(ok)
                 except Exception:  # noqa: BLE001
                     save_ok = False
-            return {"row": rowres, "glob": glob,
+            return {"row": rowres, "glob": glob, "mat": mat,
                     "leaf_ok": leaf_ok, "model_ok": model_ok, "mask_ok": mask_ok,
                     "save_ok": save_ok}
 
@@ -736,6 +819,19 @@ class ParamsPage(QWidget):
                                         for k, v in sg.items()}
         gfail = sum(1 for k, ok in leaf_ok.items() if not ok) \
             + (0 if model_ok else 1) + (0 if mask_ok else 1)
+        if not failc and gfail == 0:
+            # 全量成功 = 设备状态已知 (整发快照), 允许后续下发并建立基线
+            mat = res["mat"]
+            self._device_synced = True
+            self._sync_from_snapshot({"joints": mat})
+            self._baseline = {
+                "joints": [{k: float(v) for k, v in d.items()} for d in mat],
+                "global": {k: (list(v) if isinstance(v, list) else v)
+                           for k, v in sg.items()}}
+            for ri in range(len(C.JOINT_PARAMS)):
+                for j in range(C.NUM_JOINTS):
+                    self._refresh_cell_color(ri, j)
+            self._refresh_state()
         msg = (f"批量下发完成: 关节成功 {len(okc)}/失败 {len(failc)}, "
                f"全局失败 {gfail}")
         if res["save_ok"] is True:
@@ -834,9 +930,8 @@ def _send_global(cli, g):
     model_ok = _set_scalar(cli, C.GLOBAL_BY_KEY["friction_model"].item, 0,
                            float(g["friction_model"]))
     try:
-        mask_ok = bool(cli.set_ff_flags(int(g["ff_mask"]))[0]) \
-            if isinstance(cli.set_ff_flags(int(g["ff_mask"])), tuple) \
-            else bool(cli.set_ff_flags(int(g["ff_mask"])))
+        r = cli.set_ff_flags(int(g["ff_mask"]))       # 0x27 只发一次
+        mask_ok = bool(r[0]) if isinstance(r, tuple) else bool(r)
     except Exception:  # noqa: BLE001
         mask_ok = False
     return g, leaf_ok, model_ok, mask_ok

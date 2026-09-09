@@ -301,3 +301,55 @@ def test_param_save_roundtrip_ack():
     link.inject(P.RSP_ACK, bytes([P.CMD_PARAM_SAVE]), cli)
     t.join(timeout=3.0)
     assert result["r"] == (True, None)
+
+
+def test_get_ff_scalar_ignores_stale_item_echo():
+    """[Minor-5] item 关联校验: 首帧陈旧应答被丢弃并重发 (同步自动应答)。"""
+    class _L(FakeLink):
+        def __init__(self, cli):
+            super().__init__()
+            self.cli = cli
+            self.n = 0
+
+        def send_bytes(self, data):
+            super().send_bytes(data)
+            if data[1] != P.CMD_GET_FF_SCALAR:
+                return
+            self.n += 1
+            req_item, req_sub = data[3], data[4]
+            item = req_item
+            if self.n == 1:                     # 首帧回错 item 模拟串扰
+                item = (req_item % 9) + 1
+                if item == req_item:
+                    item = (item % 9) + 1
+            payload = bytes([P.RSP_FF_SCALAR, item, req_sub]) + struct.pack("<f", 3.14)
+            self.cli.handle_frame(P.RSP_FF_SCALAR, payload)
+
+    link = _L(None)
+    cli = C.LiteArmClient(link)
+    link.cli = cli
+    res = cli.get_ff_scalar(3, 0, timeout=1.0)
+    assert res is not None and res[0] == 3 and res[1] == 0
+    assert res[2] == pytest.approx(3.14)        # f32 精度
+    assert link.n == 2                          # 陈旧帧被丢弃后重发一次
+
+
+def test_get_ff_scalar_returns_none_if_only_stale():
+    """[Minor-5] 全部应答都陈旧 -> 超时返回 None (不误收)。"""
+    class _L(FakeLink):
+        def __init__(self, cli):
+            super().__init__()
+            self.cli = cli
+
+        def send_bytes(self, data):
+            super().send_bytes(data)
+            if data[1] != P.CMD_GET_FF_SCALAR:
+                return
+            wrong = (data[3] % 9) + 1
+            payload = bytes([P.RSP_FF_SCALAR, wrong, data[4]]) + struct.pack("<f", 2.5)
+            self.cli.handle_frame(P.RSP_FF_SCALAR, payload)
+
+    link = _L(None)
+    cli = C.LiteArmClient(link)
+    link.cli = cli
+    assert cli.get_ff_scalar(5, 1, timeout=0.3) is None

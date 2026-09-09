@@ -26,6 +26,7 @@ from litetool.gui.motion_page import MotionPage
 from litetool.gui.params_page import ParamsPage
 from litetool.gui.plot_page import PlotPage
 from litetool.gui.session import Session
+from litetool.gui.tuning_guide_page import TuningGuidePage
 from litetool.gui.widgets import LogPanel
 from litetool import transport
 
@@ -116,12 +117,15 @@ class MainWindow(QMainWindow):
         self.control = ControlPage()
         self.motion = MotionPage(self._settings)
         self.params = ParamsPage()
+        self.guide = TuningGuidePage()
         tabs = QTabWidget()
         tabs.addTab(self.monitor, "监控")
         tabs.addTab(self.plot, "曲线")
         tabs.addTab(self.control, "控制")
         tabs.addTab(self.motion, "运动")
         tabs.addTab(self.params, "参数")
+        tabs.addTab(self.guide, "调参指南")
+        self.tabs = tabs
 
         # 日志面板（暗色，可折叠高度）
         self.log_panel = LogPanel()
@@ -150,6 +154,7 @@ class MainWindow(QMainWindow):
         self.motion.move_mit.connect(self._on_move_mit)
         self.params.set_log(self.bridge.sig_log.emit)
         self.params.busy_changed.connect(self._on_params_busy)
+        self.params.show_guide.connect(self._on_guide_from_params)
 
     # ================= 串口 =================
     def _refresh_ports(self):
@@ -222,6 +227,11 @@ class MainWindow(QMainWindow):
         """参数页后台调参操作在途: 叠加忙态, 禁止并发的运动/控制命令。"""
         self._params_busy = busy
         self._apply_busy()
+
+    def _on_guide_from_params(self, key: str):
+        """参数页 [调参指南] -> 切到指南页并定位该参数详解。"""
+        self.tabs.setCurrentWidget(self.guide)
+        self.guide.reveal(key)
 
     def _run(self, name, fn, require_online=True, on_done=None):
         if self._busy:

@@ -209,6 +209,17 @@ def test_fmt_value_shows_mask_hex_and_decimals():
     assert C.fmt_value("J1.kp", 360.0) == "360.0"
 
 
+def test_all_params_have_role_hint_detail():
+    """[调参指南] catalog 元数据完整 (tooltip/指南页同源)。"""
+    for p in C.JOINT_PARAMS:
+        assert p.role and p.hint and p.detail, p.key
+    for p in C.GLOBAL_PARAMS:
+        assert p.role and p.hint and p.detail, p.key
+    assert len(C.FF_BIT_DETAIL) == len(C.FF_BITS) == 9
+    assert all(C.FF_BIT_DETAIL)
+    assert set(C.FF_DETAIL_BY_NAME) == {name for _b, name, _l in C.FF_BITS}
+
+
 def test_firmware_defaults_presets_loadable():
     """templates/presets 全部能规范化 (真机台账值)。"""
     for path in (REPO / "templates" / "params_example.yaml",

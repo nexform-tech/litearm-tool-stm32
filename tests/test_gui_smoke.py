@@ -43,6 +43,35 @@ def test_mainwindow_has_params_tab():
     w.close()
 
 
+def test_tuning_guide_page_builds_offscreen():
+    """[调参指南] 页可建: 详解块 33 项 (16 关节+8 全局+9 ff位), reveal 可用。"""
+    from PyQt5.QtWidgets import QApplication
+    from litetool.gui.tuning_guide_page import TuningGuidePage
+
+    app = QApplication.instance() or QApplication([])
+    g = TuningGuidePage()
+    assert len(g._key_widget) >= 33
+    assert "kp" in g._key_widget and "gravity" in g._key_widget
+    assert "FRICTION" in g._key_widget
+    g.reveal("kp")
+    g.reveal("FRICTION")
+    g.close()
+
+
+def test_mainwindow_has_guide_tab_and_jump():
+    """主窗口含"调参指南"页签; params.show_guide 切页并定位。"""
+    from PyQt5.QtWidgets import QApplication
+    from litetool import settings as settings_mod
+    from litetool.gui.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    w = MainWindow(settings_mod.Settings.load(None))
+    assert w.tabs.count() >= 6
+    w._on_guide_from_params("kp")          # 不连接也可用 (指南纯说明)
+    assert w.tabs.currentWidget() is w.guide
+    w.close()
+
+
 def test_params_page_builds_and_edits_offscreen():
     """params_page 离线可构建; 无 session 时禁用; 有 client 时编辑越界红标、已改未发黄标。"""
     from PyQt5.QtWidgets import QApplication

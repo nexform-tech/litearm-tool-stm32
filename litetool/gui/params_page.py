@@ -33,6 +33,7 @@ GROUP_KEYS = {"ctrl": ("kp", "kd", "tau_max"), "limits": ("q_min", "q_max")}
 
 class ParamsPage(QWidget):
     busy_changed = pyqtSignal(bool)       # 后台调参操作忙态 -> MainWindow 叠加
+    show_guide = pyqtSignal(str)          # 请求打开调参指南并跳转到指定参数 key (''=只开页)
     _sig_refreshed = pyqtSignal(object)
     _sig_rows_done = pyqtSignal(object)
     _sig_global_done = pyqtSignal(object)
@@ -82,9 +83,13 @@ class ParamsPage(QWidget):
         self.btn_export.clicked.connect(self._on_export)
         self.btn_save = QPushButton("固化到 Flash…")
         self.btn_save.clicked.connect(self._on_save_flash)
+        self.btn_guide = QPushButton("❓ 调参指南")
+        self.btn_guide.setToolTip("打开[调参指南]页并跳到选中行的参数详解 (纯说明, 无需连接)")
+        self.btn_guide.clicked.connect(self._on_open_guide)
         for b in (self.btn_refresh, self.btn_apply_row, self.btn_apply_all,
                   self.btn_import, self.btn_export, self.btn_save):
             bar.addWidget(b)
+        bar.addWidget(self.btn_guide)
         bar.addStretch(1)
         lay.addLayout(bar)
 
@@ -111,13 +116,14 @@ class ParamsPage(QWidget):
         for ri, p in enumerate(C.JOINT_PARAMS):
             head = QTableWidgetItem(p.label)
             head.setFlags(Qt.ItemIsEnabled)
-            head.setToolTip(f"{p.key}  范围 {p.range_text()}\n写口: {self._write_desc(p)}")
+            head.setToolTip(self._row_tooltip(p))
             head.setBackground(QColor("#eceff4"))
             self.table.setItem(ri, 0, head)
             for j in range(C.NUM_JOINTS):
                 it = QTableWidgetItem("")
                 it.setData(ROLE_VAL, None)
                 it.setFlags(Qt.ItemIsEnabled | Qt.ItemIsEditable | Qt.ItemIsSelectable)
+                it.setToolTip(self._param_tooltip(p))
                 it.setBackground(BG[0])
                 self.table.setItem(ri, 1 + j, it)
         self.table.itemChanged.connect(self._on_cell_changed)
@@ -128,47 +134,81 @@ class ParamsPage(QWidget):
         v1.addWidget(tip)
         col.addWidget(g1)
 
-        # 全局标量
-        g2 = QGroupBox("全局参数 (写 0x28 item / 读 0x2C item)")
+        # 全局标量 —— 紧凑多列网格 (每格=小标题+控件; 悬停有详解)
+        g2 = QGroupBox("全局参数 (写 0x28 / 读 0x2C) — 悬停各项看详解")
         gg = QGridLayout(g2)
+        gg.setHorizontalSpacing(8)
+        gg.setVerticalSpacing(6)
         self._g_spins = {}
         self._g_model = None
-        r = 0
-        for gp in C.GLOBAL_PARAMS:
+        NCOL = 3
+
+        def _cap(text, tt) -> QLabel:
+            lab = QLabel(text)
+            lab.setStyleSheet("color:#444;font-size:11px;")
+            lab.setToolTip(tt)
+            return lab
+
+        def _mk_global_cell(gp):
+            """建一格: 小标题(带详解 tooltip) + 控件; 返回用于放 grid 的 QWidget。"""
+            cell = QWidget()
+            cv = QVBoxLayout(cell)
+            cv.setContentsMargins(2, 2, 2, 2)
+            cv.setSpacing(2)
+            tt = self._param_tooltip(gp)
             if gp.key == "friction_model":
-                gg.addWidget(QLabel(f"{gp.label}  {gp.range_text()}"), r, 0)
+                cap = _cap("friction_model 0=v1 / 1=v2", tt)
                 self._g_model = QComboBox()
                 self._g_model.addItem("v1 — 误差方向 tanh")
                 self._g_model.addItem("v2 — SE1 速度方向")
-                self._g_model.setToolTip("friction_model (0x28 item7): 0=v1 1=v2")
-                gg.addWidget(self._g_model, r, 1, 1, 3)
-                r += 1
+                self._g_model.setToolTip(tt)
+                cv.addWidget(cap)
+                cv.addWidget(self._g_model)
             elif gp.is_array:
-                for k, _sub in enumerate(gp.subs):
-                    lab = f"{gp.label} {('X', 'Y', 'Z')[k]} ({gp.unit})"
-                    gg.addWidget(QLabel(lab), r, 0)
+                cap = _cap(f"{gp.label}  (x, y, z)", tt)
+                hb = QHBoxLayout()
+                hb.setContentsMargins(0, 0, 0, 0)
+                hb.setSpacing(2)
+                spins = []
+                for ax in ("x", "y", "z"):
                     sp = self._mk_spin(gp)
-                    self._g_spins.setdefault(gp.key, []).append(sp)
-                    gg.addWidget(sp, r, 1, 1, 3)
-                    r += 1
+                    sp.setFixedWidth(100)
+                    sp.setToolTip(f"{ax} 分量\n\n{tt}\n\n范围 {gp.range_text()}")
+                    spins.append(sp)
+                    hb.addWidget(sp)
+                self._g_spins[gp.key] = spins
+                cv.addWidget(cap)
+                cv.addLayout(hb)
             else:
-                gg.addWidget(QLabel(f"{gp.label} ({gp.unit})  {gp.range_text()}"), r, 0)
+                cap = _cap(gp.label, tt)
                 sp = self._mk_spin(gp)
+                sp.setFixedWidth(150)
                 self._g_spins[gp.key] = sp
-                gg.addWidget(sp, r, 1, 1, 3)
-                r += 1
-        self.btn_global = QPushButton("下发全局 (含 ff_mask)")
+                cv.addWidget(cap)
+                cv.addWidget(sp)
+            return cell
+
+        for k, gp in enumerate(C.GLOBAL_PARAMS):
+            gg.addWidget(_mk_global_cell(gp), k // NCOL, k % NCOL)
+        self.btn_global = QPushButton("下发全局\n(含 ff_mask)")
+        self.btn_global.setMinimumHeight(44)
         self.btn_global.clicked.connect(self._on_apply_global)
-        gg.addWidget(self.btn_global, r, 0, 1, 2)
+        self.btn_global.setToolTip("把上表全局标量 + 右侧 ff_mask 一次性下发 RAM (0x28/0x27, 每写等 ACK)")
+        gg.addWidget(self.btn_global, len(C.GLOBAL_PARAMS) // NCOL,
+                     len(C.GLOBAL_PARAMS) % NCOL, Qt.AlignTop)
         col.addWidget(g2)
 
-        # ff_mask 位
-        g3 = QGroupBox("ff_mask 前馈使能位 (固件 FF_*, 下发走 0x27; 改动需二次确认)")
+        # ff_mask 位 —— 一排小复选框, 缩写显示, 悬停看全名+含义
+        g3 = QGroupBox("ff_mask 前馈使能位 (写 0x27) — 缩写 M/G/I/C/F/Intg/Wall/Q/V, 悬停看含义")
         ffg = QHBoxLayout(g3)
+        ffg.setSpacing(8)
+        shorts = {"MASTER": "M", "G": "G", "INERTIA": "I", "CORIOLIS": "C",
+                  "FRICTION": "F", "INTEGRAL": "Intg", "WALL": "Wall",
+                  "QUANT": "Q", "VELREF": "V"}
         self._ff_cbs = []
-        for i, (_bit, name, label) in enumerate(C.FF_BITS):
-            cb = QCheckBox(name)
-            cb.setToolTip(f"bit{i}: {label}")
+        for i, (mask, name, label) in enumerate(C.FF_BITS):
+            cb = QCheckBox(shorts.get(name, name))
+            cb.setToolTip(self._ff_tooltip(i, mask, name, label))
             cb.toggled.connect(lambda _on, j=i: self._on_ff_toggled(j))
             self._ff_cbs.append(cb)
             ffg.addWidget(cb)
@@ -192,12 +232,32 @@ class ParamsPage(QWidget):
             return "0x23 (q_min/q_max 成组, 须 q_min<q_max)"
         return f"0x26 item {p.item} (7 关节整组)"
 
+    @staticmethod
+    def _param_tooltip(p) -> str:
+        """role/hint/detail 三合一详细悬停 (与[调参指南]逐项同源)。"""
+        return "\n".join(x for x in (p.role, p.hint, p.detail) if x)
+
+    def _row_tooltip(self, p) -> str:
+        return (f"{p.label} ({p.key}) · 写口 {self._write_desc(p)} · 范围 {p.range_text()}"
+                f"\n\n{self._param_tooltip(p)}")
+
+    def _cell_tooltip(self, p, v) -> str:
+        base = self._param_tooltip(p)
+        return f"{p.key} = {v!r}\n\n{base}" if v is not None else base
+
+    @staticmethod
+    def _ff_tooltip(i, mask, name, label) -> str:
+        detail = C.FF_BIT_DETAIL[i] if i < len(C.FF_BIT_DETAIL) else label
+        return (f"{name}  (bit{i} · 0x{mask:02X})\n{label}\n\n"
+                f"{detail}\n\n改后需 [下发全局] 才生效 (发送前有确认)")
+
     def _mk_spin(self, gp) -> QDoubleSpinBox:
         sp = QDoubleSpinBox()
         sp.setRange(gp.lo, gp.hi)
         sp.setDecimals(gp.decimals)
         sp.setSingleStep(max((gp.hi - gp.lo) / 100.0, 1e-4))
-        sp.setToolTip(f"范围 {gp.range_text()}")
+        tt = self._param_tooltip(gp)
+        sp.setToolTip(f"{tt}\n\n范围 {gp.range_text()}")
         return sp
 
     # ================= 状态 / 会话 =================
@@ -416,7 +476,7 @@ class ParamsPage(QWidget):
         it.setData(ROLE_VAL, float(val))
         it.setForeground(QColor("#000000"))
         it.setBackground(BG[0])
-        it.setToolTip(f"{p.key} = {val!r}")
+        it.setToolTip(self._cell_tooltip(p, float(val)))
 
     # ================= 单元格编辑 =================
     def _cell_val(self, ri, j):
@@ -463,11 +523,11 @@ class ParamsPage(QWidget):
         err = C.check_joint(p, v, joint_idx=j)
         it.setData(ROLE_VAL, v)
         if err:
-            it.setToolTip(err)
+            it.setToolTip(f"{err}\n\n{self._param_tooltip(p)}")
             it.setBackground(BG[2])
             it.setForeground(FG_INVALID)
         else:
-            it.setToolTip(f"{p.key} = {v!r}")
+            it.setToolTip(self._cell_tooltip(p, v))
             self._refresh_cell_color(ri, j)
 
     def _on_ff_toggled(self, _idx):
@@ -500,6 +560,10 @@ class ParamsPage(QWidget):
     def _selected_row_keys(self) -> list:
         sel = sorted({i.row() for i in self.table.selectedIndexes()})
         return [C.JOINT_PARAMS[ri].key for ri in sel if ri < len(C.JOINT_PARAMS)]
+
+    def _on_open_guide(self):
+        keys = self._selected_row_keys()
+        self.show_guide.emit(keys[0] if keys else "")
 
     def _require_device_sync(self, what: str) -> bool:
         if not self._device_synced:

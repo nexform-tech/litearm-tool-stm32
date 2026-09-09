@@ -65,7 +65,10 @@ payload 内冗余回填 RSP id，协议解码已按真机布局适配）。
   （陈旧应答丢弃重发，超时判失败）。
 
 范围镜像表在 `litetool/param_catalog.py`（纯 Python，无 Qt，供测试/yaml/UI 共用），
-数值以固件 `params.c` 与 `flash_store.c apply_loaded` 为准。下表为速查：
+数值以固件 `params.c` 与 `flash_store.c apply_loaded` 为准。参数页另配 **"调参指南"**
+页签（动力学/控制律公式+符号↔界面映射、读前须知、"症状→建议参数"速查、可收起/展开的
+逐参数详解——与各参数悬停 tooltip 同源，选中行点 [❓ 调参指南] 直达对应详解）。
+下表为速查：
 
 - 逐关节：kp[0,500] kd[0,5] tau_max[0.1,120] q_min/q_max[-15,15](须 min<max)
   friction[0,50] ki[0,1000] i_max[0,100] wall_stiff[0,2000] wall_damp[0,50]
@@ -94,7 +97,8 @@ python3 main.py            # 普通用户即可（串口在 dialout 组则无需
 main.py                 入口
 litetool/
   protocol.py           帧编解码/CRC/G8 状态帧/ACK/ERR/TCP/调参命令（纯函数）
-  param_catalog.py      调参参数目录镜像表 + schema 规范化/diff/ff_mask（纯 Python）
+  param_catalog.py      调参参数目录镜像表 + schema/diff/ff_mask + role/hint/detail（纯 Python）
+  tuning_guide.py       调参指南内容（公式/符号映射/读前须知/症状速查, 纯 Python）
   checks.py             Δq 意图层确认（唯一"安全"模块）
   client.py             状态缓存 + 命令 ACK 配对 + 急停旁路通道 + 调参读写
   transport.py          find_ports + SerialLink 后台读线程
@@ -105,7 +109,8 @@ litetool/
     plot_model.py       状态环形缓冲（线程安全）
     monitor_page.py     监控页    plot_page.py  曲线页
     control_page.py     控制页    motion_page.py 运动页
-    params_page.py      参数调参页（逐关节表/全局/批量导入导出/固化成 Flash）
+    params_page.py      参数调参页（逐关节表/紧凑全局/批量导入导出/固化成 Flash）
+    tuning_guide_page.py 调参指南页（公式+症状速查 + 可展开逐参数详解, tooltip 同源）
     main_window.py      主窗口组装 + 命令总线 + 急停/锁定/Δq 流程
 templates/params_example.yaml   导入模板（含单位/范围注释）
 presets/                        出厂 / SE1 摩擦 预设

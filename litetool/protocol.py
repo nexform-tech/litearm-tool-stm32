@@ -29,6 +29,17 @@ CMD_GET_STATUS = 0x40        # 与 RSP_STATUS 同值, 仅方向区分
 CMD_GET_FIRMWARE = 0x41
 CMD_GET_TCP = 0x43
 
+# ---- [调参页] 运行时参数读/写口（写口固件 master 已支持; 读口 0x2B/0x2C 由并行
+# 固件实施者按本协议实现, 联调时以真机实测为准——ID 若漂移改这里+param_catalog） ----
+CMD_SET_JOINT_PARAM = 0x22   # [idx, kp, kd, tau_max] f32x3 -> ACK
+CMD_SET_JOINT_LIMITS = 0x23  # [idx, q_min, q_max]    f32x2 -> ACK
+CMD_PARAM_SAVE = 0x25        # 空载荷 -> ACK (异步擦写; 须 disable 态)
+CMD_SET_FF_VEC = 0x26        # [item, f32[7]] 逐关节前馈向量 -> ACK
+CMD_SET_FF_FLAGS = 0x27      # [u32 ff_mask LE] -> ACK
+CMD_SET_FF_SCALAR = 0x28     # [item, sub, f32] 全局标量 -> ACK
+CMD_GET_FF_VEC = 0x2B        # [item] -> RSP_FF_VEC (并行固件, 协议定稿)
+CMD_GET_FF_SCALAR = 0x2C     # [item, sub] -> RSP_FF_SCALAR (并行固件, 协议定稿)
+
 # 上行 RSP
 RSP_STATUS = 0x40
 RSP_DETAIL = 0x41            # G8 已移除, 仅兼容旧固件
@@ -37,6 +48,8 @@ RSP_ACK = 0x45
 RSP_ERR = 0x46
 RSP_TCP = 0x48
 RSP_JOINT_PARAM = 0x49
+RSP_FF_VEC = 0x4B            # [item, f32[7]] GET_FF_VEC 应答
+RSP_FF_SCALAR = 0x4C         # [item, sub, f32] GET_FF_SCALAR 应答
 
 # 状态帧 seq 回绕周期：1.5.0/L1 起固件 seq 为真 uint16（且仅发送成功才递增），
 # 65536 帧(≈11min@100Hz) 回绕。（1.4.0 及以前为 u8 装 16 位字段, 2.56s 回绕,
@@ -177,3 +190,35 @@ def decode_err(p: bytes):
     if len(p) < 2:
         return (p[0] if p else 0), 0
     return p[0], p[1]
+
+
+# ---- [调参页] 参数上行帧解码 ----
+def decode_joint_param(p: bytes):
+    """RSP_JOINT_PARAM(0x49) -> (idx, kp, kd, tau_max, q_min, q_max)"""
+    if len(p) != 1 + 5 * 4:
+        return None
+    idx = p[0]
+    kp, kd, tau, q_min, q_max = struct.unpack_from("<5f", p, 1)
+    return idx, kp, kd, tau, q_min, q_max
+
+
+def decode_ff_vec(p: bytes):
+    """RSP_FF_VEC(0x4B) -> (item, 7-tuple f32)
+
+    固件 27961a1 实测布局 (以固件为准): data=[0x4B, item, 7×f32 LE] 共 30B ——
+    payload 内首字节冗余回填了 RSP id (与 RSP_JOINT_PARAM 21B 无 id 字节不同)。
+    """
+    if len(p) != 1 + 1 + 7 * 4:
+        return None
+    return p[1], struct.unpack_from("<7f", p, 2)
+
+
+def decode_ff_scalar(p: bytes):
+    """RSP_FF_SCALAR(0x4C) -> (item, sub, f32)
+
+    固件 27961a1 实测布局 (勘误: 协议稿 6B 漏算 RSP id 字节): data=[0x4C, item,
+    sub, f32 LE] 共 7B。ff_mask (item 9) 以数值 (float)ff_mask 载回, ≤0x1FF 精确。
+    """
+    if len(p) != 1 + 1 + 1 + 4:
+        return None
+    return p[1], p[2], struct.unpack_from("<f", p, 3)[0]

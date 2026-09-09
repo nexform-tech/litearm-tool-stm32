@@ -1,0 +1,157 @@
+# =============================================================================
+# LiteArm STM32 运行时参数 模板 (导入/导出同构; 范围值以固件 params.c /
+# flash_store.c apply_loaded 为准, GUI 导入时会再校验一次)
+#
+# 结构:
+#   joints:  长度恒 7 的数组, 顺序 = J1..J7 (name 仅助读, 位置才是权威)
+#   global:  全局标量 + ff_mask
+#
+# 数值范围速查 (GUI 表头/悬停也有):
+#   关节项:
+#     kp[0,500] kd[0,5] tau_max[0.1,120]            (写 0x22)
+#     q_min/q_max[-15,15], 须 q_min<q_max           (写 0x23)
+#     friction[0,50] ki[0,1000] i_max[0,100]
+#     wall_stiff[0,2000] wall_damp[0,50] wall_tau_max[0,50]
+#     gs=gravity_scale[0,20] is=inertia_scale[0,20]
+#     friction_v[0,20] friction_fc0[0,50] friction_fc1[-50,0]  (写 0x26 item)
+#   全局项:
+#     fric_db[1e-4,0.5] wall_margin[0,0.5] friction_slew[0,500]
+#     payload_mass[0,20] payload_com[-1,1]×3 gravity[-50,50]×3
+#     friction_model {0=v1 误差方向, 1=v2 SE1 速度方向}
+#     fric_v2_eps[1e-3,0.5]
+#     ff_mask: MASTER0x01 G0x02 INERTIA0x04 CORIOLIS0x08 FRICTION0x10
+#              INTEGRAL0x20 WALL0x40 QUANT0x80 VELREF0x100
+# =============================================================================
+joints:
+  - name: J1          # DM6248P; q_min/q_max = URDF 硬限位内缩 1°
+    kp: 360.0         # 关节 MIT 刚度 Nm/rad
+    kd: 5.0           # 阻尼 Nm·s/rad
+    tau_max: 78.0     # 力矩钳幅 Nm
+    q_min: -2.809547  # 软限位下界 rad
+    q_max: 2.809547   # 软限位上界 rad
+    friction: 0.0     # v1 库仑摩擦 Nm (v2 用时保持 0)
+    ki: 40.0          # 积分增益
+    i_max: 20.0       # 积分钳幅 Nm
+    wall_stiff: 0.0   # 限位虚拟墙刚度 Nm/rad (默认关)
+    wall_damp: 0.0
+    wall_tau_max: 0.0
+    gravity_scale: 1.0   # gs 重力项缩放
+    inertia_scale: 1.0   # is 惯量项缩放
+    friction_v: 0.7516675846   # (v2) 粘滞摩擦 Nm·s/rad
+    friction_fc0: 1.2365977725 # (v2) 正库仑 Nm
+    friction_fc1: -1.2027613259 # (v2) 负库仑 Nm
+  - name: J2
+    kp: 420.0
+    kd: 5.0
+    tau_max: 78.0
+    q_min: -1.727547
+    q_max: 1.727547
+    friction: 0.0
+    ki: 40.0
+    i_max: 20.0
+    wall_stiff: 0.0
+    wall_damp: 0.0
+    wall_tau_max: 0.0
+    gravity_scale: 0.93
+    inertia_scale: 1.0
+    friction_v: 0.6422411449
+    friction_fc0: 2.2810411248
+    friction_fc1: -1.6098626827
+  - name: J3
+    kp: 220.0
+    kd: 5.0
+    tau_max: 21.0
+    q_min: -2.809547
+    q_max: 2.809547
+    friction: 0.0
+    ki: 25.0
+    i_max: 6.0
+    wall_stiff: 0.0
+    wall_damp: 0.0
+    wall_tau_max: 0.0
+    gravity_scale: 0.88
+    inertia_scale: 1.0
+    friction_v: 0.198322635
+    friction_fc0: 0.3937211882
+    friction_fc1: -0.4179275663
+  - name: J4          # 非对称限位 (上限近 0)
+    kp: 220.0
+    kd: 5.0
+    tau_max: 21.0
+    q_min: -3.071547
+    q_max: 0.017547
+    friction: 0.0
+    ki: 25.0
+    i_max: 6.0
+    wall_stiff: 0.0
+    wall_damp: 0.0
+    wall_tau_max: 0.0
+    gravity_scale: 0.87
+    inertia_scale: 1.0
+    friction_v: 0.256907392
+    friction_fc0: 0.5860973702
+    friction_fc1: -0.4929894835
+  - name: J5
+    kp: 50.0
+    kd: 2.5
+    tau_max: 10.0
+    q_min: -2.809547
+    q_max: 2.809547
+    friction: 0.0
+    ki: 10.0
+    i_max: 4.0
+    wall_stiff: 0.0
+    wall_damp: 0.0
+    wall_tau_max: 0.0
+    gravity_scale: 1.0
+    inertia_scale: 1.0
+    friction_v: 0.0291239433
+    friction_fc0: 0.0939571985
+    friction_fc1: -0.0984806607
+  - name: J6
+    kp: 50.0
+    kd: 2.5
+    tau_max: 10.0
+    q_min: -1.553547
+    q_max: 1.553547
+    friction: 0.0
+    ki: 10.0
+    i_max: 3.0
+    wall_stiff: 0.0
+    wall_damp: 0.0
+    wall_tau_max: 0.0
+    gravity_scale: 1.0
+    inertia_scale: 1.0
+    friction_v: 0.0843532073
+    friction_fc0: 0.1179036092
+    friction_fc1: -0.0867767902
+  - name: J7
+    kp: 50.0
+    kd: 2.5
+    tau_max: 10.0
+    q_min: -1.553547
+    q_max: 1.553547
+    friction: 0.0
+    ki: 10.0
+    i_max: 3.0
+    wall_stiff: 0.0
+    wall_damp: 0.0
+    wall_tau_max: 0.0
+    gravity_scale: 1.0
+    inertia_scale: 1.0
+    friction_v: 0.0420698459
+    friction_fc0: 0.0771025486
+    friction_fc1: -0.0788818003
+global:
+  fric_db: 0.02        # 摩擦 tanh 死区带宽 rad [1e-4,0.5]
+  wall_margin: 0.0524  # 限位墙提前角 rad [0,0.5]
+  friction_slew: 60.0  # 摩擦变化率限 Nm/s [0,500]
+  payload_mass: 0.0    # 末端负载质量 kg [0,20]
+  payload_com: [0.0, 0.0, 0.0]   # 负载质心偏移 m [-1,1]×3
+  gravity: [0.0, 0.0, -9.81]     # base 系重力向量 m/s² [-50,50]×3
+  friction_model: 1    # 0=v1 误差方向 tanh; 1=v2 SE1 速度方向
+  fric_v2_eps: 0.02    # v2 tanh 平滑带宽 rad/s [1e-3,0.5]
+  # ff_mask 逐位: MASTER=1 G=2 INERTIA=4 CORIOLIS=8 FRICTION=16
+  #               INTEGRAL=32 WALL=64 QUANT=128 VELREF=256
+  # 0x1BF=447 = 出厂默认 (除 WALL 全开: master+G+惯量+科氏+摩擦+积分+量化+速度参考)
+  ff_mask: 447

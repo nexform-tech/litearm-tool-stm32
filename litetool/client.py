@@ -227,6 +227,64 @@ class LiteArmClient:
         ok, payload = self._transact(P.CMD_GET_TCP, rsp=P.RSP_TCP, timeout=timeout)
         return P.decode_tcp(payload) if ok and payload is not None else None
 
+    # ---- [调参页] 运行时参数读/写（写口固件已支持; 读口 0x2B/0x2C 以协议为准） ----
+    def set_joint_param(self, idx: int, kp: float, kd: float, tau_max: float,
+                        timeout: float = 1.0):
+        """0x22 单关节 kp/kd/tau_max 运行时改写 -> RAM"""
+        payload = bytes([int(idx) & 0xFF]) + struct.pack("<3f", kp, kd, tau_max)
+        return self._cmd(P.CMD_SET_JOINT_PARAM, payload, timeout=timeout)
+
+    def set_joint_limits(self, idx: int, q_min: float, q_max: float,
+                         timeout: float = 1.0):
+        """0x23 单关节软限位运行时改写 -> RAM (须 q_min < q_max)"""
+        payload = bytes([int(idx) & 0xFF]) + struct.pack("<2f", q_min, q_max)
+        return self._cmd(P.CMD_SET_JOINT_LIMITS, payload, timeout=timeout)
+
+    def get_joint_param(self, idx: int, timeout: float = 1.0):
+        """0x24 读回单关节参数 -> (idx, kp, kd, tau_max, q_min, q_max) | None"""
+        ok, payload = self._transact(P.CMD_GET_JOINT_PARAM, bytes([int(idx) & 0xFF]),
+                                     rsp=P.RSP_JOINT_PARAM, timeout=timeout)
+        if ok and payload is not None:
+            return P.decode_joint_param(payload)
+        return None
+
+    def param_save(self, timeout: float = 5.0):
+        """0x25 固化参数到 Flash (异步擦写; 固件要求 disable 态, 否则 ERR code 0x04)"""
+        return self._cmd(P.CMD_PARAM_SAVE, timeout=timeout)
+
+    def set_ff_vec(self, item: int, values, timeout: float = 1.0):
+        """0x26 逐关节前馈向量 (item 1..11, 7×f32) -> RAM"""
+        vals = [float(v) for v in values]
+        payload = bytes([int(item) & 0xFF]) + struct.pack("<7f", *vals)
+        return self._cmd(P.CMD_SET_FF_VEC, payload, timeout=timeout)
+
+    def set_ff_flags(self, mask: int, timeout: float = 1.0):
+        """0x27 ff_mask u32 (LE) -> RAM"""
+        return self._cmd(P.CMD_SET_FF_FLAGS, struct.pack("<I", int(mask) & 0xFFFFFFFF),
+                         timeout=timeout)
+
+    def set_ff_scalar(self, item: int, sub: int, value: float, timeout: float = 1.0):
+        """0x28 全局标量 (item 1..8, sub 为分量下标) -> RAM"""
+        payload = bytes([int(item) & 0xFF, int(sub) & 0xFF]) + struct.pack("<f", value)
+        return self._cmd(P.CMD_SET_FF_SCALAR, payload, timeout=timeout)
+
+    def get_ff_vec(self, item: int, timeout: float = 1.0):
+        """0x2B 读回逐关节前馈向量 -> (item, 7-tuple) | None"""
+        ok, payload = self._transact(P.CMD_GET_FF_VEC, bytes([int(item) & 0xFF]),
+                                     rsp=P.RSP_FF_VEC, timeout=timeout)
+        if ok and payload is not None:
+            return P.decode_ff_vec(payload)
+        return None
+
+    def get_ff_scalar(self, item: int, sub: int = 0, timeout: float = 1.0):
+        """0x2C 读回全局标量 -> (item, sub, f32) | None"""
+        ok, payload = self._transact(P.CMD_GET_FF_SCALAR,
+                                     bytes([int(item) & 0xFF, int(sub) & 0xFF]),
+                                     rsp=P.RSP_FF_SCALAR, timeout=timeout)
+        if ok and payload is not None:
+            return P.decode_ff_scalar(payload)
+        return None
+
     # ---- 运动下发（安全收口在 GUI 侧 checks.py；本层直发） ----
     def move_j(self, qs: list[float], speed: float = 0.2):
         payload = b"".join(struct.pack("<f", v) for v in qs) + struct.pack("<f", speed)

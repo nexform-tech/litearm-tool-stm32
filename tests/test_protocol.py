@@ -153,3 +153,58 @@ def test_cmd_rsp_id_lists_complete_for_tool():
                  "CMD_GET_STATUS", "CMD_GET_FIRMWARE", "CMD_GET_TCP",
                  "RSP_STATUS", "RSP_FIRMWARE", "RSP_ACK", "RSP_ERR", "RSP_TCP"):
         assert hasattr(P, name), name
+
+
+# ---- [调参页] 运行时参数命令/响应 ----
+def test_param_cmd_ids_match_firmware():
+    """ID 与固件 usb_cmd.h 27961a1+ 一致 (读口 0x2B/0x2C 为并行实施定稿)。"""
+    assert P.CMD_SET_JOINT_PARAM == 0x22
+    assert P.CMD_SET_JOINT_LIMITS == 0x23
+    assert P.CMD_GET_JOINT_PARAM == 0x24
+    assert P.CMD_PARAM_SAVE == 0x25
+    assert P.CMD_SET_FF_VEC == 0x26
+    assert P.CMD_SET_FF_FLAGS == 0x27
+    assert P.CMD_SET_FF_SCALAR == 0x28
+    assert P.CMD_GET_FF_VEC == 0x2B
+    assert P.CMD_GET_FF_SCALAR == 0x2C
+    assert P.RSP_JOINT_PARAM == 0x49
+    assert P.RSP_FF_VEC == 0x4B
+    assert P.RSP_FF_SCALAR == 0x4C
+
+
+def test_decode_joint_param_21b():
+    p = struct.pack("<B5f", 2, 360.0, 5.0, 78.0, -2.8, 2.8)
+    assert len(p) == 21
+    idx, kp, kd, tau, q_min, q_max = P.decode_joint_param(p)
+    assert (idx, kp, kd, tau) == (2, 360.0, 5.0, 78.0)
+    assert (q_min, q_max) == pytest.approx((-2.8, 2.8))
+    assert P.decode_joint_param(p[:-1]) is None
+
+
+def test_decode_ff_vec_firmware_30b_layout():
+    """固件 RSP_FF_VEC data = [0x4B, item, 7×f32] 30B (payload 内含 RSP id 字节)。"""
+    vals = tuple(float(i) + 0.5 for i in range(7))
+    p = bytes([P.RSP_FF_VEC, 3]) + struct.pack("<7f", *vals)
+    assert len(p) == 1 + 1 + 28
+    item, got = P.decode_ff_vec(p)
+    assert item == 3 and got == vals
+    assert P.decode_ff_vec(p[:-1]) is None
+
+
+def test_decode_ff_scalar_firmware_7b_layout():
+    """固件 RSP_FF_SCALAR data = [0x4C, item, sub, f32] 7B (勘误: 非 6B)。"""
+    p = bytes([P.RSP_FF_SCALAR, 9, 0]) + struct.pack("<f", 511.0)   # ff_mask 数值载回
+    assert len(p) == 7
+    item, sub, val = P.decode_ff_scalar(p)
+    assert (item, sub, int(round(val))) == (9, 0, 0x1FF)
+    p2 = bytes([P.RSP_FF_SCALAR, 5, 2]) + struct.pack("<f", 0.25)   # payload_com[2]
+    assert P.decode_ff_scalar(p2) == (5, 2, 0.25)
+    assert P.decode_ff_scalar(p[:-1]) is None
+
+
+def test_set_ff_vec_frame_payload_shape():
+    payload = bytes([7]) + struct.pack("<7f", *range(7))
+    raw = P.pack_frame(P.CMD_SET_FF_VEC, payload)
+    frs = P.FrameParser().feed(raw)
+    assert len(frs) == 1 and frs[0].crc_ok
+    assert frs[0].cmd == P.CMD_SET_FF_VEC and frs[0].payload == payload

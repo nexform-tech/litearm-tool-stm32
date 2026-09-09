@@ -23,6 +23,49 @@ LiteArm 运控固件（`litearm-stm32`，STM32H723）的桌面上位机工具。
    不会被"在途等待 ACK 的命令"排队阻塞。
 4. `reset` 弹确认框；`enable` 在 FAULT/急停锁存时被禁用。
 5. `move_mit` 仅支持**单帧**下发，不提供 100Hz 连续流控制。
+6. **参数页（调参）**：数值先在 GUI 按固件钳幅校验（越界红标拒发），ff_mask 改动、
+   批量导入应用、`param_save` 固化 均弹确认；下发生效为即时 RAM 修改。
+
+## 参数调参页（"参数"页签）
+
+运行时参数写口在固件 master 已支持；**读回 0x2B/0x2C 需固件 `27961a1+`**
+（参数读回命令，并行实施已合入 master；`RSP_FF_VEC` 30B / `RSP_FF_SCALAR` 7B 的
+payload 内冗余回填 RSP id，协议解码已按真机布局适配）。
+
+| 区 | 写口 | 读口 | 说明 |
+| --- | --- | --- | --- |
+| 关节控制/限位 | `0x22` kp/kd/tau_max、`0x23` q_min/q_max | `0x24`→`0x49` (idx+5×f32) | 逐关节 |
+| 逐关节向量 | `0x26` item 1..11（friction/ki/i_max/wall 系/gs/is/friction_v2） | `0x2B`→`0x4B` (7×f32) | 一次一整组 |
+| 全局标量 | `0x28` item 1..8 | `0x2C`→`0x4C` | 含 payload_mass/gravity/friction_model |
+| ff_mask | `0x27` u32 | `0x2C` item 9（f32 数值载回, ≤0x1FF 精确） | 复选框 |
+| 固化 | `0x25` param_save（须 disable 态） | — | 二次确认 |
+
+用法：
+
+1. 连接后切到 **参数** 页 → [刷新当前]：`0x24×7` + `0x2B item1-11` + `0x2C item1-9`
+   一次读回并落表（表里 kp/kd/tau 与固件台账一致，如
+   kp=[360,420,220,220,50,50,50]、ff_mask=0x1BF、friction_model=1）。
+2. 双击表格单元格改值：黄=已改未下发，红=越界/下发失败；[下发选中行]（kp/kd/tau_max
+   与 q_min/q_max 成组整发）或 [下发全部]，每个写口等 ACK，失败格标红并打日志。
+3. 全局标量用下侧 spin/编辑框；ff_mask 用复选框组，[下发全局] 发送（改动会先确认）。
+4. 批量：`presets/`（`current_master_defaults` 出厂 0x1BF / `se1_friction` 只开
+   master+摩擦位）或 [导入 YAML/JSON…]（模板 `templates/params_example.yaml` 含
+   单位/范围注释）→ **diff 预览对话框**逐格显示旧→新 → [应用] 顺序全 ACK →
+   可勾选"下发后固化 Flash"（会再弹二次确认；须先在控制页 [失能]）。
+   [导出当前]：读回全量写 YAML，与导入同构 —— 同文件再导入 diff 应为空（闭环）。
+5. 状态行显示最近操作结果/ACK/ERR；断线自动禁用并提示，重连后恢复。
+
+范围镜像表在 `litetool/param_catalog.py`（纯 Python，无 Qt，供测试/yaml/UI 共用），
+数值以固件 `params.c` 与 `flash_store.c apply_loaded` 为准。下表为速查：
+
+- 逐关节：kp[0,500] kd[0,5] tau_max[0.1,120] q_min/q_max[-15,15](须 min<max)
+  friction[0,50] ki[0,1000] i_max[0,100] wall_stiff[0,2000] wall_damp[0,50]
+  wall_tau_max[0,50] gs/is[0,20] friction_v[0,20] fc0[0,50] fc1[-50,0]
+- 全局：fric_db[1e-4,0.5] wall_margin[0,0.5] friction_slew[0,500]
+  payload_mass[0,20] payload_com[-1,1]×3 gravity[-50,50]×3
+  friction_model{0=v1 误差方向, 1=v2 SE1 速度方向} fric_v2_eps[1e-3,0.5]
+- ff_mask 位：MASTER=0x01 G=0x02 INERTIA=0x04 CORIOLIS=0x08 FRICTION=0x10
+  INTEGRAL=0x20 WALL=0x40 QUANT=0x80 VELREF=0x100
 
 ## 使用
 
@@ -41,9 +84,10 @@ python3 main.py            # 普通用户即可（串口在 dialout 组则无需
 ```
 main.py                 入口
 litetool/
-  protocol.py           帧编解码/CRC/G8 状态帧/ACK/ERR/TCP（纯函数）
+  protocol.py           帧编解码/CRC/G8 状态帧/ACK/ERR/TCP/调参命令（纯函数）
+  param_catalog.py      调参参数目录镜像表 + schema 规范化/diff/ff_mask（纯 Python）
   checks.py             Δq 意图层确认（唯一"安全"模块）
-  client.py             状态缓存 + 命令 ACK 配对 + 急停旁路通道
+  client.py             状态缓存 + 命令 ACK 配对 + 急停旁路通道 + 调参读写
   transport.py          find_ports + SerialLink 后台读线程
   settings.py           config.yaml 合并（容错）
   gui/
@@ -52,17 +96,22 @@ litetool/
     plot_model.py       状态环形缓冲（线程安全）
     monitor_page.py     监控页    plot_page.py  曲线页
     control_page.py     控制页    motion_page.py 运动页
+    params_page.py      参数调参页（逐关节表/全局/批量导入导出/固化成 Flash）
     main_window.py      主窗口组装 + 命令总线 + 急停/锁定/Δq 流程
+templates/params_example.yaml   导入模板（含单位/范围注释）
+presets/                        出厂 / SE1 摩擦 预设
 tests/                  离线测试（无硬件可跑）
 ```
 
 线程模型：串口读线程（收帧→状态缓存→环形缓冲全量入）｜ 命令工作线程（每次一条，
-`_tx_lock` 保证串行）｜ GUI 主线程（20Hz 采样刷新表格/状态灯，30Hz 重绘曲线）。
+`_tx_lock` 保证串行；参数页逐写口等 ACK，忙态经 `busy_changed` 与主命令互斥）｜
+GUI 主线程（20Hz 采样刷新表格/状态灯，30Hz 重绘曲线）。
 
 ## 测试
 
 ```bash
-python3 -m pytest          # 61 用例：协议(黄金向量)/checks/客户端(FakeLink)/传输/配置/曲线模型
+python3 -m pytest          # 94 用例：协议(含调参读口编解码)/checks/客户端(FakeLink)/
+                           #         传输/配置/曲线模型/参数目录(schema/范围/diff)/GUI 冒烟
 ```
 
 ## 真机验收清单（需 STM32 + 电机/CAN 在线）

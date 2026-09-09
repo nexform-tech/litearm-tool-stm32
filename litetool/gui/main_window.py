@@ -23,6 +23,7 @@ from litetool.gui.bridge import GuiBridge
 from litetool.gui.control_page import ControlPage
 from litetool.gui.monitor_page import MonitorPage
 from litetool.gui.motion_page import MotionPage
+from litetool.gui.params_page import ParamsPage
 from litetool.gui.plot_page import PlotPage
 from litetool.gui.session import Session
 from litetool.gui.widgets import LogPanel
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
         self.bridge = GuiBridge()
 
         self._busy = False
+        self._params_busy = False       # 参数页后台调参操作在途
         self._was_online = False
         self._safety_latched = False
         self._fault_logged = False
@@ -113,11 +115,13 @@ class MainWindow(QMainWindow):
         self.plot = PlotPage(window_s=self._settings.plot_window_s)
         self.control = ControlPage()
         self.motion = MotionPage(self._settings)
+        self.params = ParamsPage()
         tabs = QTabWidget()
         tabs.addTab(self.monitor, "监控")
         tabs.addTab(self.plot, "曲线")
         tabs.addTab(self.control, "控制")
         tabs.addTab(self.motion, "运动")
+        tabs.addTab(self.params, "参数")
 
         # 日志面板（暗色，可折叠高度）
         self.log_panel = LogPanel()
@@ -144,6 +148,8 @@ class MainWindow(QMainWindow):
         self.control.set_speed.connect(self._on_set_speed)
         self.motion.move_j.connect(self._on_move_j)
         self.motion.move_mit.connect(self._on_move_mit)
+        self.params.set_log(self.bridge.sig_log.emit)
+        self.params.busy_changed.connect(self._on_params_busy)
 
     # ================= 串口 =================
     def _refresh_ports(self):
@@ -180,6 +186,7 @@ class MainWindow(QMainWindow):
         self._ui_n = 0
         self.plot.set_joints(0)
         self.motion.set_joints(0)
+        self.params.set_client(sess.client)
         self._log_ui(f"[INFO] 已连接 {device}")
         self._run("固件版本", sess.client.get_firmware,
                   require_online=False, on_done=self._on_firmware)
@@ -198,6 +205,7 @@ class MainWindow(QMainWindow):
         self._ui_n = 0
         self.plot.set_joints(0)
         self.motion.set_joints(0)
+        self.params.set_client(None)
         self._log_ui("[INFO] 已断开")
         self._set_online_ui(False)
         self._lock_motion("未连接")
@@ -210,9 +218,17 @@ class MainWindow(QMainWindow):
         return f"[ERR] {name} 被固件拒绝: {txt} (code 0x{code:02X})"
 
     # ================= 命令执行 =================
+    def _on_params_busy(self, busy: bool):
+        """参数页后台调参操作在途: 叠加忙态, 禁止并发的运动/控制命令。"""
+        self._params_busy = busy
+        self._apply_busy()
+
     def _run(self, name, fn, require_online=True, on_done=None):
         if self._busy:
             self._log_ui(f"[WARN] 忙，忽略 {name}")
+            return
+        if self._params_busy:
+            self._log_ui(f"[WARN] 参数调参操作在途，忽略 {name}")
             return
         if self.session is None:
             self._log_ui(f"[WARN] 未连接，忽略 {name}")
@@ -439,10 +455,12 @@ class MainWindow(QMainWindow):
         self.btn_conn.setText("断开" if self.session is not None else "连接")
         self.control.set_online(onl)
         self.motion.set_online(onl)
+        self.params.set_online(onl)
 
     def _apply_busy(self):
         self.control.set_busy(self._busy)
         self.motion.set_busy(self._busy)
+        self.params.set_busy(self._busy or self._params_busy)
 
     def _lock_motion(self, reason: str):
         self.motion.lock(reason)

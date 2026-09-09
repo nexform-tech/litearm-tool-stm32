@@ -195,3 +195,109 @@ def test_status_frame_does_not_resolve_pending():
     link.inject(P.RSP_STATUS, _status_frame_bytes()[3:-2], cli)
     t.join(timeout=1.0)
     assert result["ok"] is False            # 未被状态帧误解除
+
+
+# ---- [调参页] 参数读写 client 层 ----
+def test_set_joint_param_frames_bytes():
+    link, cli, _ = _mk_client()
+    result = {}
+
+    def run():
+        result["r"] = cli.set_joint_param(2, 360.0, 5.0, 78.0)
+
+    t = threading.Thread(target=run)
+    t.start()
+    time.sleep(0.05)
+    assert link.sent[-1] == P.pack_frame(P.CMD_SET_JOINT_PARAM,
+                                         bytes([2]) + struct.pack("<3f", 360.0, 5.0, 78.0))
+    link.inject(P.RSP_ACK, bytes([P.CMD_SET_JOINT_PARAM]), cli)
+    t.join(timeout=2.0)
+    assert result["r"] == (True, None)
+
+
+def test_get_joint_param_receives_decoded():
+    link, cli, _ = _mk_client()
+    result = {}
+
+    def run():
+        result["v"] = cli.get_joint_param(0)
+
+    t = threading.Thread(target=run)
+    t.start()
+    time.sleep(0.05)
+    assert link.sent[-1] == P.pack_frame(P.CMD_GET_JOINT_PARAM, bytes([0]))
+    payload = struct.pack("<B5f", 0, 360.0, 5.0, 78.0, -2.8, 2.8)
+    link.inject(P.RSP_JOINT_PARAM, payload, cli)
+    t.join(timeout=2.0)
+    idx, kp, kd, tau, q_min, q_max = result["v"]
+    assert (idx, kp, kd, tau) == (0, 360.0, 5.0, 78.0)
+
+
+def test_get_ff_vec_receives_decoded_30b():
+    """0x2B -> 0x4B 应答 payload=[0x4B, item, 7×f32] 30B; 前导 RSP id 被解码剥离。"""
+    link, cli, _ = _mk_client()
+    result = {}
+
+    def run():
+        result["v"] = cli.get_ff_vec(3)
+
+    t = threading.Thread(target=run)
+    t.start()
+    time.sleep(0.05)
+    assert link.sent[-1] == P.pack_frame(P.CMD_GET_FF_VEC, bytes([3]))
+    vals = tuple(float(i) for i in range(7))
+    payload = bytes([P.RSP_FF_VEC, 3]) + struct.pack("<7f", *vals)
+    link.inject(P.RSP_FF_VEC, payload, cli)
+    t.join(timeout=2.0)
+    assert result["v"] == (3, vals)
+
+
+def test_get_ff_scalar_receives_decoded_7b():
+    """0x2C -> 0x4C 应答 payload=[0x4C, item, sub, f32] 7B; ff_mask 数值载回。"""
+    link, cli, _ = _mk_client()
+    result = {}
+
+    def run():
+        result["v"] = cli.get_ff_scalar(9, 0)
+
+    t = threading.Thread(target=run)
+    t.start()
+    time.sleep(0.05)
+    assert link.sent[-1] == P.pack_frame(P.CMD_GET_FF_SCALAR, bytes([9, 0]))
+    payload = bytes([P.RSP_FF_SCALAR, 9, 0]) + struct.pack("<f", 511.0)
+    link.inject(P.RSP_FF_SCALAR, payload, cli)
+    t.join(timeout=2.0)
+    item, sub, val = result["v"]
+    assert (item, sub, int(round(val))) == (9, 0, 0x1FF)
+
+
+def test_set_ff_flags_frames_u32_le():
+    link, cli, _ = _mk_client()
+    result = {}
+
+    def run():
+        result["r"] = cli.set_ff_flags(0x1BF)
+
+    t = threading.Thread(target=run)
+    t.start()
+    time.sleep(0.05)
+    assert link.sent[-1] == P.pack_frame(P.CMD_SET_FF_FLAGS, struct.pack("<I", 0x1BF))
+    link.inject(P.RSP_ACK, bytes([P.CMD_SET_FF_FLAGS]), cli)
+    t.join(timeout=2.0)
+    assert result["r"] == (True, None)
+
+
+def test_param_save_roundtrip_ack():
+    link, cli, _ = _mk_client()
+    result = {}
+
+    def run():
+        result["r"] = cli.param_save(timeout=2.0)
+
+    t = threading.Thread(target=run)
+    t.start()
+    time.sleep(0.05)
+    assert link.sent[-1] == P.pack_frame(P.CMD_PARAM_SAVE)
+    link.inject(P.RSP_ACK, bytes([P.CMD_PARAM_SAVE]), cli)
+    t.join(timeout=3.0)
+    assert result["r"] == (True, None)

@@ -74,6 +74,12 @@ class MainWindow(QMainWindow):
         self.plot_timer.timeout.connect(self._tick_plot)
         self.plot_timer.start()
 
+        # [段②] 零重力拖动保活: 固件侧 CMD_ZERO_G 自带 watchdog_kick, 必须周期重发
+        # (0x20/0x21 都刻意不 kick)。50ms 远低于固件 100ms 命令看门狗。
+        self._zg_timer = QTimer(self)
+        self._zg_timer.setInterval(50)
+        self._zg_timer.timeout.connect(self._zg_keepalive)
+
         self._set_online_ui(False)
         self._lock_motion("初始锁定 — 连接并解锁后可用")
 
@@ -148,6 +154,7 @@ class MainWindow(QMainWindow):
         self.bridge.sig_log.connect(self.log_panel.append_line)
         self.bridge.sig_done.connect(self._on_done)
         self.control.cmd.connect(self._on_ctrl_cmd)
+        self.control.zero_g.connect(self._on_zero_g)
         self.control.tcp_req.connect(self._on_get_tcp)
         self.control.set_speed.connect(self._on_set_speed)
         self.motion.move_j.connect(self._on_move_j)
@@ -196,7 +203,67 @@ class MainWindow(QMainWindow):
         self._run("固件版本", sess.client.get_firmware,
                   require_online=False, on_done=self._on_firmware)
 
+    # ---- [段②] 零重力拖动 ----
+    def _on_zero_g(self, on: bool):
+        sess = self.session
+        if sess is None or sess.link is None or sess.client is None:
+            self.control.set_zero_g_state(False, "未连接")
+            return
+        if on:
+            st = sess.status
+            if st is None or not getattr(st, "enabled", False):
+                self._log_ui("[ERR] 零重力需先 [使能 enable] —— 未发送")
+                self.control.set_zero_g_state(False, "需先使能")
+                return
+            if st.mode == 6 or st.has_fault:
+                self._log_ui("[ERR] FAULT/急停锁存 —— 零重力未发送")
+                self.control.set_zero_g_state(False, "故障锁存")
+                return
+            try:
+                sess.link.send_bytes(P.pack_frame(P.CMD_ZERO_G, bytes([1])))
+            except Exception as e:  # noqa: BLE001
+                self._log_ui(f"[ERR] 零重力进入失败: {e}")
+                self.control.set_zero_g_state(False, "")
+                return
+            self._zg_timer.start()
+            self._log_ui("[OK] 零重力拖动: 已进入 (本工具以 20Hz 自动保活)")
+            self.control.set_zero_g_state(True, "拖动中 — 已自动保活")
+        else:
+            self._zg_timer.stop()
+            try:
+                sess.link.send_bytes(P.pack_frame(P.CMD_ZERO_G, bytes([0])))
+            except Exception:  # noqa: BLE001
+                pass
+            self._log_ui("[INFO] 零重力拖动: 已退出")
+            self.control.set_zero_g_state(False, "")
+
+    def _zg_keepalive(self):
+        """20Hz 重发 (fire-and-forget, 不等 ACK —— 丢一条还有下一条兜底)。"""
+        sess = self.session
+        if sess is None or sess.link is None:
+            self._stop_zero_g("连接已断开")
+            return
+        try:
+            sess.link.send_bytes(P.pack_frame(P.CMD_ZERO_G, bytes([1])))
+        except Exception:  # noqa: BLE001
+            self._stop_zero_g("串口异常")
+            return
+        st = sess.status
+        if st is not None and st.mode != P.MODE_ZERO_G:
+            self._stop_zero_g(f"固件已退出零重力 (当前 mode={st.mode_name})")
+
+    def _stop_zero_g(self, reason: str = ""):
+        """外部原因导致的停止 (掉线/故障/固件自行退出): 停心跳 + 复位按钮。"""
+        if not self._zg_timer.isActive() and not self.control.btn_zg.isChecked():
+            return
+        self._zg_timer.stop()
+        self.control.set_zero_g_state(False, reason)
+        if reason:
+            self._log_ui(f"[WARN] 零重力已停止: {reason}")
+
     def _disconnect(self):
+        self._zg_timer.stop()
+        self.control.set_zero_g_state(False, "")
         if self.session is not None:
             self.session.close()
             self.session = None

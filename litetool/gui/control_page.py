@@ -8,6 +8,7 @@ class ControlPage(QWidget):
     cmd = pyqtSignal(str)        # 'enable'|'disable'|'clear_faults'|'home'|'reset'
     set_speed = pyqtSignal(int)
     tcp_req = pyqtSignal()
+    zero_g = pyqtSignal(bool)    # [段②] 进入(True)/退出(False) 零重力拖动
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,6 +54,26 @@ class ControlPage(QWidget):
         row3.addStretch(1)
         g.addLayout(row3)
 
+        # ---- [段②] 零重力拖动 (拖动示教) ----
+        row4 = QHBoxLayout()
+        self.btn_zg = QPushButton("进入零重力拖动")
+        self.btn_zg.setMinimumHeight(34)
+        self.btn_zg.setCheckable(True)
+        self.btn_zg.setToolTip(
+            "进入后臂进入重力补偿状态, 可用手自由拖动; 松手由虚拟弹簧保持位置。\n\n"
+            "⚠ 固件侧靠看门狗保活: 本工具在进入期间以 20Hz 自动重发命令\n"
+            "   (每条在固件内都会 kick 看门狗), 因此界面卡死/拔线时臂会\n"
+            "   自动落到 fail-soft 持位, 不会失控。\n"
+            "⚠ 退出前先把关节推回软限位内 —— 零重力会跳过位置越限锁存,\n"
+            "   但一旦退出该锁存立刻生效, 且关节停在限外时重启会重新锁死。")
+        self.btn_zg.clicked.connect(self._on_zg_clicked)
+        self.zg_lbl = QLabel("")
+        self.zg_lbl.setStyleSheet("color:#888;")
+        row4.addWidget(self.btn_zg)
+        row4.addWidget(self.zg_lbl)
+        row4.addStretch(1)
+        g.addLayout(row4)
+
         self.hint_lbl = QLabel("")
         self.hint_lbl.setWordWrap(True)
         g.addWidget(self.hint_lbl)
@@ -84,6 +105,22 @@ class ControlPage(QWidget):
         busy = getattr(self, "_busy", False)
         for b in self._ops:
             b.setEnabled(onl and not busy)
+        self.btn_zg.setEnabled(onl)          # 保活期间不禁用, 否则退不出去
+
+    # ---- [段②] 零重力拖动 ----
+    def _on_zg_clicked(self, checked: bool):
+        self.zero_g.emit(bool(checked))
+
+    def set_zero_g_state(self, on: bool, text: str = ""):
+        """由主窗口回写【实际】状态 (以固件 mode 为准, 不只跟随按钮)。
+
+        例如固件因看门狗/急停退出零重力时, 主窗口会把按钮复位回去。
+        """
+        self.btn_zg.blockSignals(True)
+        self.btn_zg.setChecked(on)
+        self.btn_zg.blockSignals(False)
+        self.btn_zg.setText("退出零重力拖动" if on else "进入零重力拖动")
+        self.zg_lbl.setText(text)
 
     def set_tcp_text(self, text: str):
         self.tcp_lbl.setText(text)

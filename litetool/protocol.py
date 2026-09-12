@@ -27,6 +27,11 @@ CMD_GET_JOINT_PARAM = 0x24
 CMD_HOME = 0x2A
 CMD_GET_STATUS = 0x40        # 与 RSP_STATUS 同值, 仅方向区分
 CMD_GET_FIRMWARE = 0x41
+# [段②] 零重力（拖动示教）进入/退出: [u8] 1=进 0=退 -> ACK
+# 固件侧【自带 watchdog_kick】, 重发即保活 (上位机需周期重发, 否则 0.1s 后
+# 看门狗把模式掐回 fail-soft 持位)
+CMD_ZERO_G = 0x06
+
 CMD_GET_TCP = 0x43
 
 # ---- [调参页] 运行时参数读/写口（写口固件 master 已支持; 读口 0x2B/0x2C 由并行
@@ -71,13 +76,14 @@ MODE_MOVE_JS = 3
 MODE_MOVE_MIT = 4
 MODE_MOVE_MIT_ALL = 5
 MODE_EMERGENCY = 6
+MODE_ZERO_G = 7
 
 FLAG_NAMES = {0: "FAULT", 1: "WD_TRIPPED", 2: "FB_STALE",
               3: "TEMP_WARN", 4: "POS_VIOL", 5: "OVERSPEED"}
 FLAG_LABELS = {0: "故障", 1: "看门狗", 2: "反馈过期", 3: "超温",
                4: "越限位", 5: "超速"}
 MODE_NAMES = {0: "INIT", 1: "MOVE_J", 2: "MOVE_P", 3: "MOVE_JS",
-              4: "MOVE_MIT", 5: "MIT_ALL", 6: "EMERGENCY"}
+              4: "MOVE_MIT", 5: "MIT_ALL", 6: "EMERGENCY", 7: "ZERO_G"}
 
 # ERR 码中文映射（RSP_ERR payload = [echoed_cmd, code]）
 ERR_TEXT = {

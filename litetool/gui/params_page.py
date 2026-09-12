@@ -157,10 +157,11 @@ class ParamsPage(QWidget):
             cv.setSpacing(2)
             tt = self._param_tooltip(gp)
             if gp.key == "friction_model":
-                cap = _cap("friction_model 0=v1 / 1=v2", tt)
+                cap = _cap("friction_model 0=v1 / 1=v2 / 2=drag", tt)
                 self._g_model = QComboBox()
                 self._g_model.addItem("v1 — 误差方向 tanh")
                 self._g_model.addItem("v2 — SE1 速度方向")
+                self._g_model.addItem("v2-drag — 拖动专用(零速无增益)")
                 self._g_model.setToolTip(tt)
                 cv.addWidget(cap)
                 cv.addWidget(self._g_model)

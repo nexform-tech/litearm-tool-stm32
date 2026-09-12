@@ -24,7 +24,8 @@ def test_joint_catalog_order_and_kind():
     assert [p.key for p in C.JOINT_PARAMS] == [
         "kp", "kd", "tau_max", "q_min", "q_max",
         "friction", "ki", "i_max", "wall_stiff", "wall_damp", "wall_tau_max",
-        "gravity_scale", "inertia_scale", "friction_v", "friction_fc0", "friction_fc1"]
+        "gravity_scale", "inertia_scale", "friction_v", "friction_fc0", "friction_fc1",
+        "zg_kp", "zg_kd", "zg_damping", "kd_extra"]
     kinds = {p.kind for p in C.JOINT_PARAMS}
     assert kinds == {"ctrl", "limits", "vec"}
 
@@ -39,6 +40,9 @@ def test_joint_ranges_match_firmware_clamp():
         "wall_tau_max": (0.0, 50.0), "gravity_scale": (0.0, 20.0),
         "inertia_scale": (0.0, 20.0), "friction_v": (0.0, 20.0),
         "friction_fc0": (0.0, 50.0), "friction_fc1": (-50.0, 0.0),
+        # [段②/段③]
+        "zg_kp": (0.0, 500.0), "zg_kd": (0.0, 5.0), "zg_damping": (0.0, 50.0),
+        "kd_extra": (0.0, 50.0),
     }
     assert {p.key: (p.lo, p.hi) for p in C.JOINT_PARAMS} == spec
 
@@ -49,14 +53,22 @@ def test_vec_item_numbers_match_write_protocol():
     assert got == {"friction": 1, "ki": 2, "i_max": 3, "wall_stiff": 4,
                    "wall_damp": 5, "wall_tau_max": 6, "gravity_scale": 7,
                    "inertia_scale": 8, "friction_v": 9, "friction_fc0": 10,
-                   "friction_fc1": 11}
+                   "friction_fc1": 11,
+                   "zg_kp": 12, "zg_kd": 13, "zg_damping": 14, "kd_extra": 15}
 
 
 def test_global_ranges_match_firmware():
     spec = {"fric_db": (1e-4, 0.5), "wall_margin": (0.0, 0.5),
             "friction_slew": (0.0, 500.0), "payload_mass": (0.0, 20.0),
             "payload_com": (-1.0, 1.0), "gravity": (-50.0, 50.0),
-            "fric_v2_eps": (1e-3, 0.5)}
+            "fric_v2_eps": (1e-3, 0.5),
+            # [段② 零重力]
+            "drag_gain": (0.0, 5.0), "drag_db": (1e-3, 0.5),
+            "drag_kd_margin": (0.0, 5.0), "zg_vel_thr": (0.01, 5.0),
+            "zg_engage_sec": (0.0, 5.0), "zg_engage_kp": (0.0, 500.0),
+            "zg_engage_kd": (0.0, 5.0), "wall_fw_kd": (0.0, 5.0),
+            # [段③ §6.2]
+            "hold_kp_gain": (0.0, 5.0)}
     for gp in C.GLOBAL_PARAMS:
         if gp.key == "friction_model":
             assert gp.model is True
@@ -65,11 +77,13 @@ def test_global_ranges_match_firmware():
         assert (gp.lo, gp.hi) == (lo, hi), gp.key
 
 
-def test_friction_model_only_accepts_0_or_1():
-    assert C.check_value(0, 1, 0, model=True) is None
-    assert C.check_value(0, 1, 1, model=True) is None
-    assert C.check_value(0, 1, 2, model=True) is not None
-    assert C.check_value(0, 1, 0.5, model=True) is not None
+def test_friction_model_accepts_0_1_2():
+    """[段②] 2 = drag 版 (拖动用), 与固件 params_ff_scalar case 7 一致。"""
+    assert C.check_value(0, 2, 0, model=True) is None
+    assert C.check_value(0, 2, 1, model=True) is None
+    assert C.check_value(0, 2, 2, model=True) is None
+    assert C.check_value(0, 2, 3, model=True) is not None
+    assert C.check_value(0, 2, 0.5, model=True) is not None
 
 
 def test_check_joint_out_of_range_and_q_relation():
@@ -150,7 +164,7 @@ def test_normalize_rejects_bad_value():
         C.normalize_snapshot({"joints": [s] + good["joints"][1:],
                               "global": good["global"]})
     g = dict(good["global"])
-    g["friction_model"] = 2                  # 仅 0/1
+    g["friction_model"] = 3                  # 仅 0/1/2
     with pytest.raises(ValueError):
         C.normalize_snapshot({"joints": good["joints"], "global": g})
     g = dict(good["global"])
@@ -172,8 +186,9 @@ def test_snapshot_flat_covers_all_leaves():
     s = _load_example()
     flat = C.snapshot_flat(s)
     assert flat["J1.kp"] == pytest.approx(360.0)
-    # 关节 7×16=112; 全局叶 = 非数组 6 + payload_com[3] + gravity[3] = 12, +ff_mask
-    assert len(flat) == 7 * len(C.JOINT_PARAMS) + 13
+    # 关节 7×20=140; 全局叶 = 非数组 15 (14 标量 + friction_model)
+    #            + payload_com[3] + gravity[3] = 21, +ff_mask = 22
+    assert len(flat) == 7 * len(C.JOINT_PARAMS) + 22
     assert "global.gravity[2]" in flat
     assert flat["global.ff_mask"] == 447
 

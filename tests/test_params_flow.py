@@ -151,6 +151,6 @@ def test_send_global_sends_ff_flags_once():
     assert len(ff_cnt) == 1                       # 0x27 只发一次
     assert scalar_cnt                              # 0x28 逐叶各一次
     assert all(leaf_ok.values()) and model_ok and mask_ok
-    # 0x28 帧数 = 循环叶 (fric_db/wall_margin/friction_slew/payload_mass + payload_com[3]
-    #            + gravity[3] + fric_v2_eps = 11) + friction_model(1) = 12
-    assert len(scalar_cnt) == 12
+    # 0x28 帧数 = 循环叶 (5 基础标量 + 9 零重力/到位增刚 + payload_com[3]
+    #            + gravity[3] = 20) + friction_model(1) = 21
+    assert len(scalar_cnt) == 21

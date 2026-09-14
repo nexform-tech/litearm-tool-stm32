@@ -1208,11 +1208,24 @@ class ParamsPage(QWidget):
                f"全局失败 {gfail}") if wrote_global else \
               (f"导入下发完成: 摩擦项成功 {len(okc)}/失败 {len(failc)}, "
                f"模型 {'成功' if dyn_ok else '失败'}")
+        # [2026-09-14] 固化的三种结局都要说清楚 —— 尤其**未固化**这一支。
+        # 固件侧 0x30/0x32/0x33/0x26 全都只写 RAM (0x32 只 flash_store_mark_dirty() 标脏),
+        # 唯一的落盘入口是 0x25 PARAM_SAVE。所以"没勾固化"= 掉电即回退整次导入,
+        # 而原实现在这一支**什么都不说** —— 操作员会以为已经生效并归档。
+        unsaved = False
         if res["save_ok"] is True:
             msg += "; 已固化到 Flash"
         elif res["save_ok"] is False:
             msg += "; 固化失败 (enable 态会返回 0x04 须先失能)"
+        else:
+            unsaved = True
+            msg += ("; ⚠ **未固化** —— 本次改动只在 RAM, 掉电即回退。"
+                    "请勾选『下发后固化到 Flash』重跑, 或点 [固化 Flash…]")
         self.status.setText(msg)
+        self.status.setStyleSheet(
+            "background:#4a2020;color:#ffd0d0;padding:5px 8px;border-radius:3px;"
+            if unsaved else
+            "background:#23232a;color:#d8d8e0;padding:5px 8px;border-radius:3px;")
         self._log(f"[{'OK' if not failc and gfail == 0 else 'ERR'}] 调参[批量] {msg}")
 
     # ================= 导出 =================

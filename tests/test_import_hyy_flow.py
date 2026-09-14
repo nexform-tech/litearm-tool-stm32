@@ -315,3 +315,45 @@ def test_unmapped_reaches_dialog():
                              model_new=model, notes=notes, unmapped=un)
     assert dlg.has_model
     dlg.close()
+
+
+# ---------------------------------------------------------------------------
+# 固化状态必须显式上报 (RAM vs Flash 的边界)
+# ---------------------------------------------------------------------------
+def _batch_res(snap, save_ok, model_ok=True):
+    return {"row": {"ok": {("friction_v", j): 1.0 for j in range(7)}, "fail": {}},
+            "glob": None, "leaf_ok": {}, "fre_model_ok": True, "mask_ok": True,
+            "dyn_model": {"commit": (model_ok, None), "aborted": None},
+            "model_diffs": [], "model_now": None, "save_ok": save_ok,
+            "mat": snap["joints"]}
+
+
+def test_unsaved_import_is_loudly_reported():
+    """**未勾"下发后固化"必须显式报警**。
+
+    固件侧 0x30/0x32/0x33/0x26 全都只写 RAM (`0x32` 只 `flash_store_mark_dirty()` 标脏),
+    唯一的落盘入口是 `0x25 PARAM_SAVE`。所以"没勾固化"= 掉电即回退整次导入。
+    原实现在这一支**什么都不说** —— 操作员会以为已经生效并归档。
+    """
+    snap = load_snap()
+    pg, _ = _page(snap=snap)
+    pg._on_batch_done(_batch_res(snap, save_ok=None))
+    txt = pg.status.text()
+    assert "未固化" in txt, txt
+    assert "RAM" in txt and "掉电" in txt, txt
+    assert "固化 Flash" in txt or "固化到 Flash" in txt, "要给出补救动作"
+
+
+def test_saved_import_says_so():
+    """反向用例: 勾了固化就要说已固化 —— 否则上面那条无法区分。"""
+    snap = load_snap()
+    pg, _ = _page(snap=snap)
+    pg._on_batch_done(_batch_res(snap, save_ok=True))
+    assert "已固化到 Flash" in pg.status.text()
+
+
+def test_save_failure_is_reported():
+    snap = load_snap()
+    pg, _ = _page(snap=snap)
+    pg._on_batch_done(_batch_res(snap, save_ok=False))
+    assert "固化失败" in pg.status.text()

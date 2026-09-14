@@ -357,3 +357,43 @@ def test_save_failure_is_reported():
     pg, _ = _page(snap=snap)
     pg._on_batch_done(_batch_res(snap, save_ok=False))
     assert "固化失败" in pg.status.text()
+
+
+# ---------------------------------------------------------------------------
+# 固化勾选框默认状态 (2026-09-14 用户裁决: 默认勾选)
+# ---------------------------------------------------------------------------
+def test_save_checkbox_defaults_to_checked():
+    """**默认勾选** —— 固件侧唯一的落盘入口是 0x25, 一次漏勾就白做一台。
+
+    反向用例在下面: 取消勾选时确认框必须明确说出"不会固化"。
+    """
+    dlg = PP.ParamDiffDialog(_host(), load_snap(), load_snap())
+    assert dlg.save_checkbox.isChecked() is True
+    dlg.close()
+
+
+def test_hyy_confirm_says_whether_it_will_flash(monkeypatch):
+    """确认框必须**明说**这次会不会固化 —— 勾了写 flash、没勾只在 RAM。"""
+    snap = load_snap()
+    arm = FakeArm(n=7)
+
+    def run(checked):
+        pg, _ = _page(snap=snap, arm=arm)
+        texts = []
+        monkeypatch.setattr(PP.QMessageBox, "warning",
+                            staticmethod(lambda *a, **k: texts.append(str(a[2] if len(a) > 2 else a)) or QMessageBox.Ok))
+        monkeypatch.setattr(PP.QMessageBox, "Ok", QMessageBox.Ok, raising=False)
+        monkeypatch.setattr(PP.QMessageBox, "Cancel", QMessageBox.Cancel, raising=False)
+        # 直接把 confirim 框捕获下来, 不进 worker
+        monkeypatch.setattr(pg, "_pre_op", lambda *a, **k: True)
+        monkeypatch.setattr(pg, "_require_device_sync", lambda *a, **k: True)
+        monkeypatch.setattr(pg, "_confirm_enabled_write", lambda *a, **k: True)
+        monkeypatch.setattr(pg, "_start", lambda *a, **k: None)
+        pg._apply_hyy_snapshot(snap, {"body": [[0.0]*10]*9, "jm": [0.0]*7},
+                               flash_save=checked)
+        return " ".join(texts)
+
+    t_on = run(True)
+    assert "固化" in t_on and "不会固化" not in t_on, t_on
+    t_off = run(False)
+    assert "不会固化" in t_off and "RAM" in t_off, t_off

@@ -1025,7 +1025,7 @@ class ParamsPage(QWidget):
                   f" 固化={flash_save}")
         self._apply_full_snapshot(snap, flash_save=flash_save)
 
-    def _apply_hyy_snapshot(self, snap: dict, model: dict, flash_save: bool = False):
+    def _apply_hyy_snapshot(self, snap: dict, model: dict, flash_save: bool = False):  # noqa: D401
         """HYY 导入的下发: 与 `_apply_full_snapshot` 同一道闸, **多一段模型 + 读回闸**。"""
         if not self._require_device_sync("HYY 导入下发"):
             return
@@ -1034,7 +1034,11 @@ class ParamsPage(QWidget):
                 f"**只导动力学辨识的产物**, 其余一项不碰:\n"
                 f"  · 摩擦三元组 fv/fc0/fc1 (0x26 item 9/10/11, {C.NUM_JOINTS} 轴各一组)\n"
                 f"  · **动力学模型** body1..7 + jm (0x30/0x33) → commit (0x32, 须失能)\n"
-                f"  · 读回逐项比对 (不一致则**中止, 不固化**)\n\n"
+                f"  · 读回逐项比对 (不一致则**中止, 不固化**)\n"
+                + ("  · **随后固化到 Flash** (param_save, 须失能, 擦写期间 CPU 停 ~1s)\n"
+                   if flash_save else
+                   "  · ⚠ **不会固化到 Flash** —— 本次改动只在 RAM, 掉电即回退\n")
+                + "\n"
                 f"不动: kp/kd/tau_max/软限位/全局标量/ff_mask —— 它们是设备自身口径,\n"
                 f"      yaml 里对应的 smin-smax / torque_max / gravity 是 HYY 控制器配置,\n"
                 f"      不是辨识结果 (见未映射清单)。\n\n"
@@ -1417,7 +1421,13 @@ class ParamDiffDialog(QDialog):
             lay.addWidget(txt)
 
         bottom = QHBoxLayout()
+        # [2026-09-14 用户裁决] **默认勾选**。
+        # 理由: 固件侧 0x30/0x32/0x33/0x26 全都只写 RAM (0x32 只标脏), 唯一的落盘入口是
+        # 0x25; 而产线上"导入完就是要固化"是常态 —— 默认不勾时一次漏勾就白做一台。
+        # 代价: 擦写 sector 7 有 ~1s 的 CPU 停顿且须失能, 所以**保留**下发前的二次确认
+        # (见 _on_import / _apply_hyy_snapshot 的确认框文案)。
         self.save_checkbox = QCheckBox("下发后固化到 Flash (param_save; 须先失能)")
+        self.save_checkbox.setChecked(True)
         bottom.addWidget(self.save_checkbox)
         bottom.addStretch(1)
         b_ok = QPushButton("应用")

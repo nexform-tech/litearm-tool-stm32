@@ -1031,33 +1031,29 @@ class ParamsPage(QWidget):
             return
         if QMessageBox.warning(
                 self, "确认导入下发",
-                f"将按固件写口顺序逐条下发:\n"
-                f"  · 全局标量 + friction_model + ff_mask (0x28/0x27)\n"
-                f"  · 关节 {C.NUM_JOINTS} × {len(C.JOINT_PARAMS)} 项 (0x22/0x23/0x26)\n"
-                f"  · **动力学模型** 7 body + jm (0x30/0x33) → commit (0x32, 须失能)\n"
+                f"**只导动力学辨识的产物**, 其余一项不碰:\n"
+                f"  · 摩擦三元组 fv/fc0/fc1 (0x26 item 9/10/11, {C.NUM_JOINTS} 轴各一组)\n"
+                f"  · **动力学模型** body1..7 + jm (0x30/0x33) → commit (0x32, 须失能)\n"
                 f"  · 读回逐项比对 (不一致则**中止, 不固化**)\n\n"
+                f"不动: kp/kd/tau_max/软限位/全局标量/ff_mask —— 它们是设备自身口径,\n"
+                f"      yaml 里对应的 smin-smax / torque_max / gravity 是 HYY 控制器配置,\n"
+                f"      不是辨识结果 (见未映射清单)。\n\n"
                 "模型是力矩前馈的输入 —— 请确认臂已失能且有人看护。",
                 QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Cancel) != QMessageBox.Ok:
             self.status.setText("导入下发已取消")
             return
         mat = snap["joints"]
-        err = self._limits_error(mat)
-        if err:
-            QMessageBox.warning(self, "限位写被拒绝", err)
-            self.status.setText(err)
+        if not self._confirm_enabled_write("HYY 导入 (0x26 item9-11 + 0x30/0x33/0x32)"):
             return
-        if not self._confirm_enabled_write("HYY 导入 (0x22/0x23/0x26/0x28/0x27/0x30/0x32/0x33)"):
-            return
-        ops = self._build_row_ops(set(JOINT_KEYS), mat)
-        glob = snap["global"]
+        # [2026-09-14 范围收窄] 只发**实际变了的那几项**: 摩擦三元组。
+        # 不发 kp/kd/tau_max/限位 (0x22/0x23) —— 它们与设备当前值相同, 重写一遍是纯粹的
+        # 额外风险 (基线若陈旧就会把旧值写回设备), 且与"只导辨识产物"的裁决不符。
+        ops = self._build_row_ops({"friction_v", "friction_fc0", "friction_fc1"}, mat)
 
         def worker(arm):
-            # ① 全局先发 —— item4/5/6 (payload/gravity) 会触发固件的 load_eff()。
-            #    放在模型 commit 之前, 避免"commit 后用旧 payload 重建"的多余一步。
-            g, leaf_ok, fre_model_ok, mask_ok = PIO.send_global(arm, glob)
-            # ② 关节参数
+            # ① 摩擦三元组 (0x26 item 9/10/11)
             rowres = PIO.run_ops(arm, ops)
-            # ③ 模型 (7×0x30 + 0x33 + 0x32 commit) —— 任一帧失败即中止且不 commit
+            # ② 模型 (7×0x30 + 0x33 + 0x32 commit) —— 任一帧失败即中止且不 commit
             mres = MIO.send_model(arm, model, MIO.MASK_WRITTEN)
             # ④ **读回闸, 必须在固化之前**: 0x25 会把"当时"的 bank 落盘,
             #    先固化则不一致时错的模型已在 flash 里, 掉电还会被装回来。
@@ -1073,8 +1069,9 @@ class ParamsPage(QWidget):
                 save_ok = bool(PIO.save_params(arm, 6.0)[0])
             # ⑥ 读回生效模型, 供基线重建
             mnow = MIO.read_model_safe(arm)
-            return {"row": rowres, "glob": glob, "mat": mat,
-                    "leaf_ok": leaf_ok, "fre_model_ok": fre_model_ok, "mask_ok": mask_ok,
+            # glob/leaf_ok/... 置空: 本次不写 global, `_on_batch_done` 据此跳过全局统计
+            return {"row": rowres, "glob": None, "mat": mat,
+                    "leaf_ok": {}, "fre_model_ok": True, "mask_ok": True,
                     "dyn_model": mres, "model_diffs": diffs, "model_now": mnow,
                     "save_ok": save_ok}
 
@@ -1147,31 +1144,38 @@ class ParamsPage(QWidget):
             self._paint(JOINT_KEYS.index(rk), j, 3)
             txt = PIO.err_text(code)
             self._log(f"[ERR] 调参[批量] {rk} J{j + 1}: {txt}")
-        g = res["glob"]
-        leaf_ok, fre_model_ok, mask_ok = res["leaf_ok"], res["fre_model_ok"], res["mask_ok"]
-        # 同步 global 基线: 成功叶取下发值, 失败叶保留旧
-        old = self._synced_glob
-        sg = {k: (list(v) if isinstance(v, list) else v)
-              for k, v in (old if old is not None else g).items()}
-        for gp in C.GLOBAL_PARAMS:
-            if gp.key == "friction_model":
-                if fre_model_ok:
-                    sg[gp.key] = g[gp.key]
-                continue
-            if leaf_ok.get(gp.key):
-                sg[gp.key] = (list(g[gp.key]) if isinstance(g[gp.key], list)
-                              else g[gp.key])
-        if mask_ok:
-            sg["ff_mask"] = g["ff_mask"]
-        self._loading = True
-        try:
-            self._apply_global_to_ui(sg)
-        finally:
-            self._loading = False
-        # baseline: 关节成功项已并入; global 更新
-        if self._baseline is not None:
-            self._baseline["global"] = {k: (list(v) if isinstance(v, list) else v)
-                                        for k, v in sg.items()}
+        # `glob is None` = 本次**没写 global** (HYY 导入只发摩擦三元组 + 模型段)。
+        # 那就一个 global 叶也不动 —— 不碰 `_synced_glob`、不碰 `_baseline["global"]`,
+        # 也不重建 UI 控件 (它们的值本来就是对的)。
+        g = res.get("glob")
+        leaf_ok = res.get("leaf_ok") or {}
+        fre_model_ok = res.get("fre_model_ok", True)
+        mask_ok = res.get("mask_ok", True)
+        wrote_global = g is not None
+        sg = None
+        if wrote_global:
+            old = self._synced_glob
+            sg = {k: (list(v) if isinstance(v, list) else v)
+                  for k, v in (old if old is not None else g).items()}
+            for gp in C.GLOBAL_PARAMS:
+                if gp.key == "friction_model":
+                    if fre_model_ok:
+                        sg[gp.key] = g[gp.key]
+                    continue
+                if leaf_ok.get(gp.key):
+                    sg[gp.key] = (list(g[gp.key]) if isinstance(g[gp.key], list)
+                                  else g[gp.key])
+            if mask_ok:
+                sg["ff_mask"] = g["ff_mask"]
+            self._loading = True
+            try:
+                self._apply_global_to_ui(sg)
+            finally:
+                self._loading = False
+            # baseline: 关节成功项已并入; global 更新
+            if self._baseline is not None:
+                self._baseline["global"] = {k: (list(v) if isinstance(v, list) else v)
+                                            for k, v in sg.items()}
         # [2026-09-14] 动力学模型的结果 —— 独立键 `dyn_model`。
         # ⚠ 上面那个 `fre_model_ok` 是 **friction_model** 的写结果 (旧名 `fre_model_ok`
         #   与"动力学模型"同义, 会造成误读; 已改名)。
@@ -1192,13 +1196,18 @@ class ParamsPage(QWidget):
             mat = res["mat"]
             self._device_synced = True
             self._sync_from_snapshot({"joints": mat})
-            self._rebuild_baseline(mat, sg, res.get("model_now"))
+            # `sg is None` 时保留既有 global 基线 (`_rebuild_baseline` 会照抄)
+            self._rebuild_baseline(mat, sg if sg is not None else
+                                   (self._baseline or {}).get("global", {}),
+                                   res.get("model_now"))
             for ri in range(len(C.JOINT_PARAMS)):
                 for j in range(C.NUM_JOINTS):
                     self._refresh_cell_color(ri, j)
             self._refresh_state()
         msg = (f"批量下发完成: 关节成功 {len(okc)}/失败 {len(failc)}, "
-               f"全局失败 {gfail}")
+               f"全局失败 {gfail}") if wrote_global else \
+              (f"导入下发完成: 摩擦项成功 {len(okc)}/失败 {len(failc)}, "
+               f"模型 {'成功' if dyn_ok else '失败'}")
         if res["save_ok"] is True:
             msg += "; 已固化到 Flash"
         elif res["save_ok"] is False:

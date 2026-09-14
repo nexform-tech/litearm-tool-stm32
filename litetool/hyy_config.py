@@ -8,38 +8,43 @@
 真源样例: `/home/llx/hanbin/SE1/robot_config/DeviceConfig.yaml`
           (`sha256[:16] = b423bf1ff35db041`)
 
-## 映射范围 (四项 + 模型段)
+## 映射范围 = **只有 `dynamics_parameters`**（= HYY 辨识的产物）
 
 | yaml 来源 | → 快照字段 | 规则 |
 |---|---|---|
 | `joint[i].dynamics_parameters.fv/.fc0/.fc1` | `joints[i].friction_v/.friction_fc0/.friction_fc1` | 按 catalog 范围校验 (**固件写口会静默钳幅**, 工具必须先拦) |
-| `joint[i].axis.smin/smax` | `joints[i].q_min/.q_max` | 符号修正 (见 `S_SE1`) 后与 URDFv5 硬限位−1° **取交集** |
-| `joint[i].axis.torque_max` | `joints[i].tau_max` | 原样 (安全类字段, UI 独立高亮) |
-| `robot_group.robot[0].gravity` | `global.gravity` | 原样 (安全类字段) |
 | `joint[i].dynamics_parameters.{m,cm*,ix*}` | `model.body[i+1]` | 逐关节 10 值, body 索引 = 关节号+1 |
 | `joint[i].dynamics_parameters.jm` | `model.jm[i]` | 7 值 |
 
-**不映射**: DH 几何 / `direction` / `encoder_ruler` / `gear_ratio` / `endlimit.*` / `tool.*`
-等 —— 逐项列入 `unmapped` 并附原因, 不静默丢弃 (见 `UNMAPPED_REASONS`)。
+**只导辨识产物, 不导控制器配置**（用户 2026-09-14 裁决）。以下三项**刻意不映射**：
+
+| 字段 | 为什么**不**导 |
+|---|---|
+| `joint[i].axis.smin/smax` | HYY **控制器的关节限位配置**, 不是辨识结果; 且与本机 URDF 口径不同 —— J4 按它映射出的上界是 `+0.64`, 而 URDFv5 机械硬限位是 `+0.035`, 直接下发等于把软限位放到机械限位之外 |
+| `joint[i].axis.torque_max` | HYY **控制器的力矩钳幅配置** (`20,20,28,28,10,10,10`), 不是辨识结果。本机 `tau_max` 是 `78,78,21,21,10,10,10` (电机硬件口径), 拿它覆盖会把 J1/J2 的力矩天花板**砍到 1/4** |
+| `robot_group.robot[0].gravity` | 常量配置 (HYY 用本地 g `−9.802`, 本机 `−9.81`), 不是辨识结果 |
+
+**不映射的还有**: DH 几何 / `direction` / `encoder_ruler` / `gear_ratio` / `endlimit.*` /
+`tool.*` / `fv2`/`fv3` 等 —— 逐项列入 `unmapped` 并附原因, 不静默丢弃 (见 `UNMAPPED_REASONS`)。
 
 ## 两条容易踩的坑
 
 1. **`expected_mask` 只写 body1..7 + jm** (0x2FE): body0=base 不参与递推、body8=ee 是
    payload 复合位, 都不该由导入改写 (固件也拒绝 body8 质量非 0)。
-2. **软限位必须取交集**: J4 按 yaml 映射出的上界是 +0.64, 而 URDFv5 机械硬限位是 +0.035
-   —— 直接下发等于把软限位放到机械限位之外 (越限锁存不受 `enabled` 门控、`reset` 清不掉)。
+2. **`to_snapshot` 必须产出完整快照** —— 未映射字段从设备 `baseline` 逐项取回,
+   不导的项原样保持设备当前值。
 """
 from __future__ import annotations
 
 import hashlib
 import math
+import struct
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from litetool import param_catalog as C
 
-__all__ = ["HyyConfigError", "HyyConfig", "LimitNote", "parse_hyy_config", "to_snapshot",
-           "map_limits", "symbol_fix", "S_SE1", "URDF_HARD_LIMITS", "LIMIT_SHRINK",
+__all__ = ["HyyConfigError", "HyyConfig", "parse_hyy_config", "to_snapshot",
            "MODEL_BODY_KEYS", "UNMAPPED_REASONS", "unmapped_report"]
 
 
@@ -50,23 +55,9 @@ class HyyConfigError(ValueError):
 # ---------------------------------------------------------------------------
 # 常量表 (镜像, 附出处; 由 tests/test_hyy_config.py 守着)
 # ---------------------------------------------------------------------------
-
-#: 关节符号真源 = `hyy_mapping.json` 的 `winner_id.s` (hyy_fk_align.py 的 MDH 对齐裁决产物)。
-#: ⚠ **不是** yaml 里的 `axis.direction` —— 两者 Hamming 距离 = 1 (仅 J6 不同:
-#: direction=[T,T,T,F,T,F,F] 翻转 {J4,J6,J7}, s 翻转 {J4,J7})。
-#: 本份数据上两条规则结果恰好相同 (J6 的 smin/smax = ∓1.57 对称, 取负是恒等操作),
-#: 但那是巧合: 只要将来 J6 限位不对称, 用 direction 就会算错 2·min(|smin|,|smax|)。
-S_SE1: Tuple[int, ...] = (1, 1, 1, -1, 1, 1, -1)
-
-#: URDFv5 机械硬限位 (rad)。真源 `litearm-stm32/assets/litearm/urdf/litearm.urdf` 的 <limit>。
-#: 已实测: `litearm.urdf` 与 `litearm_id.urdf` 的限位值完全相同。
-URDF_HARD_LIMITS: Tuple[Tuple[float, float], ...] = (
-    (-2.827, 2.827), (-1.745, 1.745), (-2.827, 2.827), (-3.089, 0.035),
-    (-2.827, 2.827), (-1.571, 1.571), (-1.571, 1.571),
-)
-
-#: 硬限位内缩 1° (= joint_limit_macros.h 的取整口径)
-LIMIT_SHRINK = 0.0174532925
+# [2026-09-14 裁决] 本模块**不再映射软限位** —— `axis.smin/smax` 是 HYY 控制器的
+# 关节限位配置, 不是辨识产物。故原先那套"符号修正 (S_SE1) + 与 URDF 硬限位取交集"
+# 的代码已删除, 其知识保留在下方 UNMAPPED_REASONS 的注释里 (含 J4 冲突的实测值)。
 
 #: 模型段每刚体的 10 个字段 (顺序 **必须**与固件 `DYN_MODEL_BODY_PARAMS` 一致:
 #: `dyn.h` 注释 + `dyn_model_data.h` 的 DYN_INERTIA 排列 = ixx ixy ixz iyy iyz izz)。
@@ -85,6 +76,9 @@ NO_PORT = "无 CDC 写口 (编译期常量)"
 KINEMATIC = "连杆几何, 同型号恒定, 本设计不改"
 NON_RUNTIME = "非运行时参数"
 AXIS_FIXED = "轴配置 (方向/编码器/减速比), 编译期常量"
+#: [2026-09-14] `axis.smin/smax` / `axis.torque_max` / `gravity` 归入此类 —— 它们是
+#: **HYY 控制器的配置**, 不是辨识产物, 用户裁决不导 (见模块 docstring 的对照表)。
+HYY_CTRL_CFG = "HYY 控制器配置, 非辨识产物 (本机用自身口径) "
 
 
 @dataclass(frozen=True)
@@ -118,6 +112,18 @@ def _num(d: dict, key: str, where: str) -> float:
     if not math.isfinite(f):
         raise HyyConfigError(f"{where}.{key} 非有限 ({f})")
     return f
+
+
+def _f32(v) -> float:
+    """把 yaml 的 float64 固定成 **float32** —— 固件存的就是 float32。
+
+    [2026-09-14 真机验出的 bug] 不 cast 的后果: yaml 侧的 `0.7516675845629472` 与
+    设备读回的 `0.7516675591468811`（同一 float32 的两种 float64 写法）在
+    `diff_snapshots` 的精确比较下**判为不同** ⇒ 每次导入都刷出 21 行假"修改"。
+    让操作员学会无视红字, 比报错更危险。
+    （`model_io.model_diff` 一开始就做了 cast, 所以模型段没这个毛病。）
+    """
+    return struct.unpack("<f", struct.pack("<f", float(v)))[0]
 
 
 def _walk_keys(obj, prefix: str, out: List[str]) -> None:
@@ -210,40 +216,6 @@ def parse_hyy_config(path: str) -> HyyConfig:
 # ---------------------------------------------------------------------------
 # 映射
 # ---------------------------------------------------------------------------
-def symbol_fix(lo: float, hi: float, idx: int) -> Tuple[float, float]:
-    """第 1 步: 符号修正。`x = s·q` (s 取 `S_SE1`) ⇒ `q = x/s`; s=-1 时上下界交换。"""
-    s = S_SE1[idx] if idx < len(S_SE1) else 1
-    a, b = lo / s, hi / s
-    return (a, b) if a <= b else (b, a)
-
-
-def map_limits(lo: float, hi: float, idx: int) -> Tuple[float, float]:
-    """SE1 的 `smin/smax` -> 我方关节空间区间 (符号修正 + 与 URDFv5 硬限位−1° 取交集)。
-
-    两步:
-      1. 符号修正: 见 `symbol_fix`。
-      2. 交集: 与 `URDF_HARD_LIMITS[idx] ∓ LIMIT_SHRINK` 取 `max(下界)` / `min(上界)`。
-         **必须取** —— J4 的 yaml 上界 +0.64 超出机械硬限位 +0.035; 不取交集等于把软限位
-         放到机械限位之外 (J4 越限锁存不受 `enabled` 门控、`reset` 也清不掉)。
-    """
-    mlo, mhi = symbol_fix(lo, hi, idx)
-    hard_lo, hard_hi = URDF_HARD_LIMITS[idx]
-    return max(mlo, hard_lo + LIMIT_SHRINK), min(mhi, hard_hi - LIMIT_SHRINK)
-
-
-@dataclass(frozen=True)
-class LimitNote:
-    idx: int
-    mapped: Tuple[float, float]
-    clipped: Tuple[float, float]
-
-    @property
-    def conflict(self) -> bool:
-        """映射值超出机械硬限位 => 交集已取 URDF 侧 (安全侧), 需显式告警。"""
-        hl, hh = URDF_HARD_LIMITS[self.idx]
-        return self.mapped[0] < hl - 1e-12 or self.mapped[1] > hh + 1e-12
-
-
 def _check_range(key: str, v: float, where: str) -> None:
     """按 param_catalog 的范围校验 (关节项与全局项同源, 与固件钳幅一致)。
 
@@ -259,20 +231,21 @@ def _check_range(key: str, v: float, where: str) -> None:
         raise HyyConfigError(err)
 
 
-def to_snapshot(cfg: HyyConfig, baseline: Optional[dict],
-                include_gravity: bool = True, include_limits: bool = True,
-                include_tau_max: bool = True) -> Tuple[dict, dict, List[str]]:
+def to_snapshot(cfg: HyyConfig, baseline: Optional[dict]) -> Tuple[dict, dict, List[str]]:
     """把 yaml 映射成 `param_catalog.normalize_snapshot` 形状的**完整**快照。
 
     返回 `(snapshot, model, notes)`:
-      - `snapshot`: `{joints: [...×7], global: {...}}` —— 所有键齐全 (未映射的从
-        `baseline` 取), 可直接喂 `C.normalize_snapshot` / diff / 下发。
+      - `snapshot`: `{joints: [...×7], global: {...}}` —— 所有键齐全。
+        **只有摩擦三元组来自 yaml**; 其余一律从 `baseline` 原样取回 (不动设备当前值)。
       - `model`: `{body: [[10 floats] × 9], jm: [7]}` —— 单独交付给 `model_io`。
-      - `notes`: 面向操作员的中文提示 (J4 冲突等)。
+      - `notes`: 面向操作员的中文提示。
 
     ⚠ `baseline is None` 时**拒绝** —— `normalize_snapshot` 强制要求 `global` 的
       15 个标量 + 2 个数组 + `friction_model` + `ff_mask` 全部存在, 缺一项即 raise;
-      而没有设备基线就无从补齐。
+      而没有设备基线就无从补齐未映射字段。
+
+    **只导辨识产物**: `dynamics_parameters` 的摩擦三元组 + 模型段。`axis.smin/smax` /
+    `axis.torque_max` / `gravity` 刻意不导 (见模块 docstring 的说明)。
     """
     if baseline is None:
         raise HyyConfigError("尚无设备基线 —— 请先点 [刷新当前] 再导入 (导入需要基线补齐未映射字段)")
@@ -286,61 +259,34 @@ def to_snapshot(cfg: HyyConfig, baseline: Optional[dict],
     for i, j in enumerate(cfg.joints):
         where = f"J{i + 1}"
         d = j["dynamics_parameters"]
-        ax = j["axis"]
 
-        # 1) 摩擦三元组 (先按 catalog 范围校验 —— 固件写口会静默钳幅)
+        # 唯一的关节级映射: 摩擦三元组。
+        # 先按 catalog 范围校验 —— 固件对摩擦写口会**静默钳幅** (超范围不报错,
+        # 只改成边界值), 那样"写进去的"与"读回来的"不一致, 读回闸会报差异而真因在钳幅。
         fv, fc0, fc1 = _num(d, "fv", where), _num(d, "fc0", where), _num(d, "fc1", where)
         _check_range("friction_v", fv, where)
         _check_range("friction_fc0", fc0, where)
         _check_range("friction_fc1", fc1, where)
 
-        # 2) 软限位 (符号修正 + 交集)
-        smin, smax = _num(ax, "smin", where), _num(ax, "smax", where)
-        q_lo, q_hi = map_limits(smin, smax, i)
-        # mapped = 符号修正后、**取交集前**的值 (用于冲突判据); clipped = 交集后
-        ln = LimitNote(idx=i, mapped=symbol_fix(smin, smax, i), clipped=(q_lo, q_hi))
-        if include_limits:
-            _check_range("q_min", q_lo, where)
-            _check_range("q_max", q_hi, where)
-            if not q_lo < q_hi:
-                raise HyyConfigError(f"{where}: 限位交集为空 ([{q_lo}, {q_hi}])")
-            if ln.conflict:
-                notes.append(
-                    f"⚠ J{i + 1}: yaml 映射限位 [{ln.mapped[0]:.4f}, {ln.mapped[1]:.4f}] 超出 "
-                    f"URDFv5 机械硬限位 [{URDF_HARD_LIMITS[i][0]:.4f}, {URDF_HARD_LIMITS[i][1]:.4f}] "
-                    f"—— 交集已取 URDF 侧 (安全侧); 放宽需先真机确认机械行程")
-
-        # 3) tau_max (安全类字段)
-        tmax = _num(ax, "torque_max", where)
-        _check_range("tau_max", tmax, where)
-
         base = dict(baseline["joints"][i])
-        if include_tau_max:
-            base["tau_max"] = tmax
-        if include_limits:
-            base["q_min"], base["q_max"] = q_lo, q_hi
-        base["friction_v"], base["friction_fc0"], base["friction_fc1"] = fv, fc0, fc1
-        # 台架 1J 的 baseline 在 J2..J7 是 None (read_snapshot 的设计) ——
-        # check_value 拒 None, 故上表四项必须把 None 列填满 (它们都有 yaml 来源)。
         for k, v in list(base.items()):
             # 只看参数键 (`name` 是助读字段, 不是参数)
             if v is None and k in C.JOINT_BY_KEY:
                 raise HyyConfigError(
                     f"{where}.{k} 在设备基线上为空 —— 台架上 J2..J7 无读回值。"
-                    f"导入需要整臂基线 (四项映射只能填 q_min/q_max/tau_max/摩擦)")
+                    f"导入需要整臂基线")
+        # **cast 成 float32** —— 见 `_f32` 的说明: 设备存的是 float32, 不 cast 会让
+        # diff 每次都报这 21 项假"修改"。
+        base["friction_v"], base["friction_fc0"], base["friction_fc1"] = \
+            _f32(fv), _f32(fc0), _f32(fc1)
+        # q_min/q_max/tau_max/kp/kd/... 全部保持设备当前值 (原样从 baseline 取回)
         joints.append(base)
 
-        # 4) 模型段: body[i+1] = 该关节; body0 (base) 与 body8 (ee) 保持 0
-        model_body[i + 1] = [float(d[k]) for k in MODEL_BODY_KEYS]
-        model_jm[i] = float(d["jm"])
+        # 模型段: body[i+1] = 该关节; body0 (base) 与 body8 (ee) 保持 0
+        model_body[i + 1] = [_f32(d[k]) for k in MODEL_BODY_KEYS]
+        model_jm[i] = _f32(d["jm"])
 
-    glob = dict(baseline["global"])
-    if include_gravity:
-        grav = list(cfg.gravity)
-        _check_range("gravity", grav[0], "global")
-        _check_range("gravity", grav[1], "global")
-        _check_range("gravity", grav[2], "global")
-        glob["gravity"] = grav
+    glob = {k: (list(v) if isinstance(v, list) else v) for k, v in baseline["global"].items()}
 
     snap = {"joints": joints, "global": glob}
     C.normalize_snapshot(snap)          # 自检: 产物必须过固件同源的校验
@@ -356,12 +302,6 @@ MAPPED_KEYS = {
     "robot_group.robot[].joint[].dynamics_parameters.fv",
     "robot_group.robot[].joint[].dynamics_parameters.fc0",
     "robot_group.robot[].joint[].dynamics_parameters.fc1",
-    "robot_group.robot[].joint[].axis.smin",
-    "robot_group.robot[].joint[].axis.smax",
-    "robot_group.robot[].joint[].axis.torque_max",
-    "robot_group.robot[].gravity.x",
-    "robot_group.robot[].gravity.y",
-    "robot_group.robot[].gravity.z",
 } | {f"robot_group.robot[].joint[].dynamics_parameters.{k}" for k in MODEL_BODY_KEYS} \
   | {"robot_group.robot[].joint[].dynamics_parameters.jm"}
 
@@ -398,6 +338,20 @@ for _k in ("id", "initial_offset", "initial_offset2", "sensor_offset", "sensor_o
     UNMAPPED_REASONS[f"robot_group.robot[].joint[].axis.{_k}"] = AXIS_FIXED
 for _k in ("fv2", "fv3"):
     UNMAPPED_REASONS[f"robot_group.robot[].joint[].dynamics_parameters.{_k}"] = NO_PORT
+
+# [2026-09-14 裁决] 只导辨识产物; 这三项是 HYY 控制器配置, 刻意不导。
+# 实测差异 (本机 vs yaml):
+#   smin/smax  : 本机 = URDF 硬限位−1° (J1 ±2.809547 / J4 [-3.071547, +0.017547]);
+#                yaml 映射后 J4 上界 +0.64 —— 超出机械硬限位 +0.035, 直接下发不安全
+#   torque_max : 本机 78,78,21,21,10,10,10 (电机硬件口径);
+#                yaml 20,20,28,28,10,10,10 —— 覆盖会把 J1/J2 的力矩天花板砍到 1/4
+#   gravity    : 本机 (0,0,-9.81); yaml (0,0,-9.802) (HYY 用本地 g)
+UNMAPPED_REASONS["robot_group.robot[].joint[].axis.smin"] = HYY_CTRL_CFG
+UNMAPPED_REASONS["robot_group.robot[].joint[].axis.smax"] = HYY_CTRL_CFG
+UNMAPPED_REASONS["robot_group.robot[].joint[].axis.torque_max"] = HYY_CTRL_CFG
+UNMAPPED_REASONS["robot_group.robot[].gravity.x"] = HYY_CTRL_CFG
+UNMAPPED_REASONS["robot_group.robot[].gravity.y"] = HYY_CTRL_CFG
+UNMAPPED_REASONS["robot_group.robot[].gravity.z"] = HYY_CTRL_CFG
 
 
 def unmapped_report(cfg: HyyConfig) -> List[Tuple[str, str]]:

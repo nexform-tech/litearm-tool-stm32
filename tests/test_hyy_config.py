@@ -93,85 +93,64 @@ def test_A12_friction_bitwise_matches_firmware_defaults(cfg, baseline):
 
 
 # ---------------------------------------------------------------------------
-# ★ A13/A14: 限位 —— 符号修正 + 与 URDFv5 硬限位−1° 取交集
+# ★ 只导辨识产物: 软限位 / tau_max / gravity 刻意**不**导
 # ---------------------------------------------------------------------------
-def test_A14_symbol_table_and_hamming(cfg):
-    """符号真源是 `hyy_mapping.json` 的 `s`, **不是** yaml 的 `direction`。
+def test_control_config_fields_are_not_imported(cfg, baseline):
+    """`axis.smin/smax` / `axis.torque_max` / `gravity` 是 HYY **控制器配置**,
+    不是辨识产物 ⇒ 导入后必须**保持设备当前值不动**。
 
-    两者 Hamming 距离 = 1, 位置在 J6。本份数据上两条规则结果恰好相同
-    (J6 的 smin/smax = ∓1.57 对称), 但那是巧合 —— 所以锚点必须**正面断言 `s` 本身**,
-    而不是断言"两条规则一致"(那条恒真, 对 `s` 抄错零分辨力)。
+    两条实测理由 (写在这里是因为它们是真金白银踩出来的):
+      · `torque_max` = `20,20,28,28,10,10,10`, 而本机 `tau_max` = `78,78,21,21,10,10,10`
+        ⇒ 覆盖会把 J1/J2 的力矩天花板**砍到 1/4**, 而它是幅值的唯一兜底。
+      · `smin/smax` 映射后 J4 上界 = `+0.64`, 超出 URDFv5 机械硬限位 `+0.035`
+        ⇒ 下发等于把软限位放到机械限位之外。
+
+    所以本用例是**反向断言**: 这三项在 snapshot 里必须逐项等于 baseline。
     """
-    assert H.S_SE1 == (1, 1, 1, -1, 1, 1, -1)
-    assert {i for i, s in enumerate(H.S_SE1) if s < 0} == {3, 6}     # J4 / J7
-    direction = [bool(j["axis"]["direction"]) for j in cfg.joints]
-    assert direction == [True, True, True, False, True, False, False]
-    flipped_dir = {i for i, d in enumerate(direction) if not d}       # {3,5,6}
-    hamming = {i for i in range(7) if (H.S_SE1[i] < 0) != (not direction[i])}
-    assert hamming == {5}, "s 与 direction 的差异应仅在 J6 (0-based idx 5)"
-
-
-def test_A13_limits_intersection(cfg, baseline):
-    """交集后的 7 组限位逐位吻合 (取自分支 `hyy_limits.json` 的独立裁决结果)。"""
     snap, _, _ = H.to_snapshot(cfg, baseline)
-    exp_min = [-2.79, -1.7275467075, -2.79, -3.05, -2.79, -1.5535467075, -1.5535467075]
-    exp_max = [2.79, 1.7275467075, 2.79, 0.0175467075, 2.79, 1.5535467075, 1.5535467075]
-    for i in range(7):
-        assert snap["joints"][i]["q_min"] == pytest.approx(exp_min[i], abs=1e-9)
-        assert snap["joints"][i]["q_max"] == pytest.approx(exp_max[i], abs=1e-9)
+    for i in range(C.NUM_JOINTS):
+        for k in ("q_min", "q_max", "tau_max"):
+            assert snap["joints"][i][k] == baseline["joints"][i][k], (
+                f"J{i + 1}.{k} 被导入改了 —— 该项属控制器配置, 不该导")
+    assert snap["global"]["gravity"] == baseline["global"]["gravity"]
 
 
-def test_A13_group1_symbol_fixed_before_intersection(cfg):
-    """第一组断言: 符号修正后、**取交集前**的 lo/hi (只依赖 yaml + `S_SE1`)。
-
-    与上一条拆开是为了定位 —— 实现错一半时能立刻看出是符号还是交集出问题。
-    """
-    exp_lo = [-2.79, -1.74, -2.79, -3.05, -2.79, -1.57, -1.57]
-    exp_hi = [2.79, 1.74, 2.79, 0.64, 2.79, 1.57, 1.57]
-    for i, j in enumerate(cfg.joints):
-        ax = j["axis"]
-        lo, hi = H.symbol_fix(ax["smin"], ax["smax"], i)
-        assert lo == pytest.approx(exp_lo[i])
-        assert hi == pytest.approx(exp_hi[i])
-
-
-def test_j4_conflict_is_flagged(cfg, baseline):
-    """J4 的 yaml 上界 +0.64 超出机械硬限位 +0.035 —— 必须显式告警, 不能静默截断。"""
-    _, _, notes = H.to_snapshot(cfg, baseline)
-    assert any("J4" in x and "硬限位" in x for x in notes), notes
-    # 且交集确实取了 URDF 侧 (安全侧)
-    lo, hi = H.map_limits(-0.64, 3.05, 3)
-    assert hi == pytest.approx(0.0175467075, abs=1e-9)
-    assert lo == pytest.approx(-3.05, abs=1e-9)
+def test_control_config_fields_are_in_unmapped_list(cfg):
+    """不导可以, 但**必须说出来** —— 逐项进未映射清单并附原因, 不静默丢弃。"""
+    got = dict(H.unmapped_report(cfg))
+    for k in ("robot_group.robot[].joint[].axis.smin",
+              "robot_group.robot[].joint[].axis.smax",
+              "robot_group.robot[].joint[].axis.torque_max",
+              "robot_group.robot[].gravity.x",
+              "robot_group.robot[].gravity.y",
+              "robot_group.robot[].gravity.z"):
+        assert k in got, f"{k} 既没导、也没进清单 = 静默丢弃"
+        assert "HYY 控制器配置" in got[k], got[k]
+    assert "robot_group.robot[].joint[].axis.smin" not in H.MAPPED_KEYS
 
 
-def test_limits_always_contain_current_zero(cfg):
-    """7 个关节的最终限位都必须含 q=0 (home 位) —— 否则下发即越限。"""
-    for i, j in enumerate(cfg.joints):
-        lo, hi = H.map_limits(j["axis"]["smin"], j["axis"]["smax"], i)
-        assert lo < 0.0 < hi, f"J{i + 1} 限位 [{lo}, {hi}] 不含 q=0"
-
-
-# ---------------------------------------------------------------------------
-# 其余三项映射
-# ---------------------------------------------------------------------------
-def test_tau_max_and_gravity(cfg, baseline):
+def test_only_dynamics_parameters_are_mapped(cfg, baseline):
+    """映射集合应**恰为** `dynamics_parameters` (摩擦三元组 + 模型段)。"""
+    expected = {
+        "robot_group.robot[].joint[].dynamics_parameters.fv",
+        "robot_group.robot[].joint[].dynamics_parameters.fc0",
+        "robot_group.robot[].joint[].dynamics_parameters.fc1",
+        "robot_group.robot[].joint[].dynamics_parameters.jm",
+    } | {f"robot_group.robot[].joint[].dynamics_parameters.{k}"
+         for k in C.MODEL_BODY_KEYS}
+    assert H.MAPPED_KEYS == expected
+    # 且 snapshot 里除摩擦三元组外, 关节侧逐项 == baseline
     snap, _, _ = H.to_snapshot(cfg, baseline)
-    assert [j["tau_max"] for j in snap["joints"]] == [20.0, 20.0, 28.0, 28.0, 10.0, 10.0, 10.0]
-    assert snap["global"]["gravity"] == pytest.approx([0.0, 0.0, -9.802])
-
-
-def test_tau_max_is_safety_flagged():
-    """`tau_max` / `q_min` / `q_max` / `gravity` 必须标 safety —— yaml 的 torque_max
-    (20,20,...) 与固件默认 (78,78,...) 相差极大, 而范围校验不会响。"""
-    assert C.JOINT_BY_KEY["tau_max"].safety
-    assert C.JOINT_BY_KEY["q_min"].safety
-    assert C.JOINT_BY_KEY["q_max"].safety
-    assert C.GLOBAL_BY_KEY["gravity"].safety
-    assert not C.JOINT_BY_KEY["kp"].safety
+    for i in range(C.NUM_JOINTS):
+        for k, v in snap["joints"][i].items():
+            if k in ("friction_v", "friction_fc0", "friction_fc1") or k == "name":
+                continue
+            assert v == baseline["joints"][i][k], f"J{i + 1}.{k} 被意外改动"
 
 
 # ---------------------------------------------------------------------------
+# 模型段
+# ---------------------------------------------------------------------------# ---------------------------------------------------------------------------
 # 模型段
 # ---------------------------------------------------------------------------
 def test_model_section_maps_body_i_plus_1(cfg, baseline):
@@ -323,12 +302,43 @@ def test_mapped_keys_are_not_in_unmapped(cfg):
     assert not (got & H.MAPPED_KEYS)
 
 
-# ---------------------------------------------------------------------------
-# 软限位常量的出处
-# ---------------------------------------------------------------------------
-def test_urdf_hard_limits_shape():
-    assert len(H.URDF_HARD_LIMITS) == 7
-    for lo, hi in H.URDF_HARD_LIMITS:
-        assert lo < hi
-    assert H.URDF_HARD_LIMITS[3] == (-3.089, 0.035), "J4 硬限位非对称, 是交集告警的根源"
-    assert H.LIMIT_SHRINK == pytest.approx(0.0174532925)
+
+
+def test_snapshot_values_are_float32_representable(cfg, baseline):
+    """快照里的数值必须是 **float32 可精确表示** 的。
+
+    回归守卫: 设备存的是 float32; 若快照留着 yaml 的 float64, `diff_snapshots` 的
+    精确比较会把"同一个 float32 的两种写法"判成不同 ⇒ 每次导入刷出 21 行假"修改"。
+    （2026-09-14 真机验出来的: yaml `0.7516675845629472` vs 设备 `0.7516675591468811`。）
+    """
+    import struct
+    def f32(v): return struct.unpack("<f", struct.pack("<f", float(v)))[0]
+
+    snap, model, _ = H.to_snapshot(cfg, baseline)
+    for i in range(C.NUM_JOINTS):
+        for k in ("friction_v", "friction_fc0", "friction_fc1"):
+            v = snap["joints"][i][k]
+            assert f32(v) == v, f"J{i + 1}.{k}={v!r} 不是 float32 可表示值 -> diff 会假报修改"
+    for b in model["body"]:
+        for v in b:
+            assert f32(v) == v
+    for v in model["jm"]:
+        assert f32(v) == v
+
+
+def test_diff_is_empty_when_device_already_matches_yaml(cfg, baseline):
+    """端到端: 把基线模拟成"设备读回"(float32), 导入同一份 yaml ⇒ diff 必须为空。
+
+    这是产线最重要的那条性质 —— **重放同一份 yaml 不该改变现状**, 界面上也不该
+    出现任何一行"修改"。
+    """
+    import struct
+    def f32(v): return struct.unpack("<f", struct.pack("<f", float(v)))[0]
+
+    dev = {"joints": [{k: (f32(v) if isinstance(v, float) else v) for k, v in j.items()}
+                      for j in baseline["joints"]],
+           "global": baseline["global"]}
+    snap, model, _ = H.to_snapshot(cfg, dev)
+    changed = sorted({d[0] for d in C.diff_snapshots(dev, snap)})
+    assert changed == [], f"重放同一份 yaml 却报出改动: {changed}"
+    assert H.MAPPED_KEYS  # 保留: 上面为空是因为值相同, 不是因为没映射

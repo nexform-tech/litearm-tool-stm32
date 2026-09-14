@@ -45,7 +45,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from litetool import param_catalog as C
 
 __all__ = ["HyyConfigError", "HyyConfig", "parse_hyy_config", "to_snapshot",
-           "MODEL_BODY_KEYS", "UNMAPPED_REASONS", "unmapped_report"]
+           "MODEL_BODY_KEYS", "UNMAPPED_REASONS", "unmapped_report",
+           "FrictionAsymmetry", "friction_asymmetry", "suspicious_joints",
+           "asymmetry_message", "FC_ASYM_RATIO", "FC_ASYM_MIN_DELTA"]
 
 
 class HyyConfigError(ValueError):
@@ -292,6 +294,110 @@ def to_snapshot(cfg: HyyConfig, baseline: Optional[dict]) -> Tuple[dict, dict, L
     C.normalize_snapshot(snap)          # 自检: 产物必须过固件同源的校验
     model = {"body": model_body, "jm": model_jm}
     return snap, model, notes
+
+
+# ---------------------------------------------------------------------------
+# 摩擦对称性检查 —— 机械健康哨兵
+# ---------------------------------------------------------------------------
+# 固件的摩擦模型 (`law.c` / `tuning_guide.py:20`):
+#     τ_fric v2 = fv·q̇ + fc0·max(tanh(q̇/ε),0) + fc1·max(−tanh(q̇/ε),0)
+# 即 **fc0 = 正向库仑 (≥0)、fc1 = 负向库仑 (≤0)**。所以 `|fc0|` 与 `|fc1|` 就是
+# 同一关节**正、反两个方向的摩擦力幅值**。
+#
+# 健康关节两向摩擦应大致对称; 相差悬殊通常指向**机械问题** (轴承发卡 / 减速器磨损 /
+# 异物 / 预紧异常), 或辨识时该关节被外力干扰 —— 两种情况都值得让人先看一眼再导入。
+#
+# 阈值锚点来自 SE1 实测 (一台**已知正常**的臂, `|fc0|`/`|fc1|` 比值):
+#     J1 1.03 · J2 1.42 · J3 1.06 · J4 1.19 · J5 1.05 · J6 1.36 · J7 1.02
+# 健康臂最大值 1.42 ⇒ 取 2.0, 留约 40% 余量。
+# (取 1.5 只剩 6% 余量, 每台好臂都会弹窗, 很快会被操作员学会条件反射点掉 ——
+#  那比不报警更糟, 与 [[hyy-model-import]] 里"让操作员学会无视红字比报错更危险"
+#  是同一条教训。)
+FC_ASYM_RATIO = 2.0
+
+#: **纯比值会在摩擦趋近 0 的关节上误报**: `fc0=0.001 / fc1=−0.003` 比值 3.0 而差值
+#: 仅 0.002 Nm, 毫无物理意义。故比值之外**必须**再加绝对差值下限。
+#: 实测数据里最小的有效 |fc| 是 J7 的 0.077, 取下限 0.05 不会误伤。
+FC_ASYM_MIN_DELTA = 0.05
+
+
+@dataclass(frozen=True)
+class FrictionAsymmetry:
+    """单个关节正/反库仑摩擦的对称性。"""
+
+    joint: int                  # 1-based
+    fc0: float                  # 正向库仑 (≥0)
+    fc1: float                  # 负向库仑 (≤0)
+
+    @property
+    def a(self) -> float:
+        return abs(self.fc0)
+
+    @property
+    def b(self) -> float:
+        return abs(self.fc1)
+
+    @property
+    def delta(self) -> float:
+        return abs(self.a - self.b)
+
+    @property
+    def ratio(self) -> float:
+        """`max/min`。一侧恰好为 0 时是 ∞ —— 单侧有摩擦本身就是强信号。"""
+        lo, hi = sorted((self.a, self.b))
+        return math.inf if lo <= 0.0 else hi / lo
+
+    @property
+    def suspicious(self) -> bool:
+        """比值超标 **且** 差值有物理量级 —— 两个条件缺一不可。"""
+        return self.ratio > FC_ASYM_RATIO and self.delta >= FC_ASYM_MIN_DELTA
+
+
+def friction_asymmetry(cfg: HyyConfig) -> List[FrictionAsymmetry]:
+    """逐关节算正/反库仑摩擦对称性 (**全部**关节, 不过滤)。
+
+    数值校验 (`_num`) 与 `to_snapshot` 同源 —— 本函数可独立调用。
+    """
+    out: List[FrictionAsymmetry] = []
+    for i, j in enumerate(cfg.joints):
+        where = f"J{i + 1}"
+        d = j["dynamics_parameters"]
+        out.append(FrictionAsymmetry(joint=i + 1,
+                                     fc0=_num(d, "fc0", where),
+                                     fc1=_num(d, "fc1", where)))
+    return out
+
+
+def suspicious_joints(cfg: HyyConfig) -> List[FrictionAsymmetry]:
+    """只返回**可疑**的关节 (空 = 全对称, 正常路径)。"""
+    return [x for x in friction_asymmetry(cfg) if x.suspicious]
+
+
+def asymmetry_message(items: List[FrictionAsymmetry]) -> Tuple[str, str]:
+    """`(一句话结论, 逐关节明细)` —— **富文本 (HTML 子集)**, 供 `QMessageBox` 直接渲染。
+
+    ⚠ 换行与加粗必须写 `<br>` / `<b>`, **不能**用 Markdown 的 `**` 和 `\\n`:
+
+      - `QMessageBox` 不认 Markdown, `**` 会**原样打出来** (离屏渲染实测);
+      - 文本一旦含 HTML 标签, Qt 就切到**富文本模式**, 此时 `\\n` 不再换行。
+
+    两件事是连在一起的 —— 只把 `**` 换成 `<b>` 而留着 `\\n`, 版面会从"分行"塌成
+    "挤成一坨"。所以本函数整体按富文本写。
+    """
+    n = len(items)
+    head = (f"检测到 <b>{n}</b> 个关节的<b>正、反方向库仑摩擦严重不对称</b>"
+            f"<br>判据: 比值 &gt; {FC_ASYM_RATIO:g} 且差值 ≥ {FC_ASYM_MIN_DELTA:g} Nm")
+
+    rows: List[str] = []
+    for x in items:
+        r = "∞" if math.isinf(x.ratio) else f"{x.ratio:.2f}"
+        # 每个关节固定两行 —— 单行版在窄窗口下会**折在数字中间** (离屏渲染实测),
+        # 显式换行不依赖窗口宽度, 也就不会有那种难看的断点。
+        rows.append(f"&nbsp;&nbsp;J{x.joint}:&nbsp; |fc0| = <b>{x.a:.3f}</b> Nm , "
+                    f"|fc1| = <b>{x.b:.3f}</b> Nm"
+                    f"<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+                    f"比值 <b>{r}</b> , 差值 {x.delta:.3f} Nm")
+    return head, "<br>".join(rows)
 
 
 # ---------------------------------------------------------------------------

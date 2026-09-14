@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 import struct
 from pathlib import Path
 
@@ -342,3 +343,155 @@ def test_diff_is_empty_when_device_already_matches_yaml(cfg, baseline):
     changed = sorted({d[0] for d in C.diff_snapshots(dev, snap)})
     assert changed == [], f"重放同一份 yaml 却报出改动: {changed}"
     assert H.MAPPED_KEYS  # 保留: 上面为空是因为值相同, 不是因为没映射
+
+
+# ---------------------------------------------------------------------------
+# 摩擦对称性哨兵 (|fc0| vs |fc1|)
+# ---------------------------------------------------------------------------
+def _plain(s: str) -> str:
+    """富文本 -> 纯文本。
+
+    断言必须针对**渲染后**的文字, 否则给数字加个 `<b>` 就会把
+    `"1 个关节" in head` 变成假 —— 测的成了 HTML 源码, 不是操作员看到的东西。
+    """
+    s = re.sub(r"<[^>]+>", "", s)
+    for a, b in (("&nbsp;", " "), ("&gt;", ">"), ("&lt;", "<"), ("&amp;", "&")):
+        s = s.replace(a, b)
+    return s
+
+
+def _set_fc(tmp_path, yaml_dict, joint_idx, fc0, fc1):
+    """改一份 yaml 里某个关节的 fc0/fc1, 写出并解析。"""
+    d = copy.deepcopy(yaml_dict)
+    dp = d["robot_group"]["robot"][0]["joint"][joint_idx]["dynamics_parameters"]
+    dp["fc0"], dp["fc1"] = fc0, fc1
+    return H.parse_hyy_config(_write(tmp_path, d))
+
+
+def test_healthy_arm_is_clean(cfg):
+    """**最重要的一条**: 已知正常的 SE1 臂必须一个都不报。
+
+    阈值定错的代价不对称 —— 漏报只是少一层保护, 误报会让操作员学会无视红字,
+    那比不报警更糟。
+    """
+    assert H.suspicious_joints(cfg) == []
+
+
+def test_healthy_anchor_max_ratio_is_1_42(cfg):
+    """把阈值的**数据锚点**钉住: 健康臂最不对称的是 J2, 比值 1.42。
+
+    锚点动了 (换了台臂 / fixture 被改) 就该重新审阈值, 而不是让用例静默跟着漂。
+    """
+    rows = H.friction_asymmetry(cfg)
+    assert [x.joint for x in rows] == list(range(1, 8))
+    worst = max(rows, key=lambda x: x.ratio)
+    assert worst.joint == 2
+    assert worst.ratio == pytest.approx(1.42, abs=0.01)
+    assert H.FC_ASYM_RATIO == 2.0, "阈值改动须同步本锚点与 README"
+
+
+def test_asymmetry_math(cfg):
+    j2 = H.friction_asymmetry(cfg)[1]
+    assert j2.a == pytest.approx(2.2810, abs=1e-4)
+    assert j2.b == pytest.approx(1.6099, abs=1e-4)
+    assert j2.delta == pytest.approx(0.6712, abs=1e-4)
+    assert j2.ratio == pytest.approx(1.4169, abs=1e-3)
+    assert j2.suspicious is False
+
+
+def test_ratio_over_two_is_flagged(tmp_path, yaml_dict):
+    c = _set_fc(tmp_path, yaml_dict, 2, fc0=2.0, fc1=-0.8)      # ratio 2.5
+    bad = H.suspicious_joints(c)
+    assert [x.joint for x in bad] == [3]
+    assert bad[0].ratio == pytest.approx(2.5)
+
+
+def test_boundary_exactly_two_is_not_flagged(tmp_path, yaml_dict):
+    """判据是**严格大于** —— 恰好 2.0 不报。边界不钉死, 阈值就没意义。"""
+    c = _set_fc(tmp_path, yaml_dict, 0, fc0=1.0, fc1=-2.0)
+    assert H.suspicious_joints(c) == []
+
+
+def test_just_over_boundary_is_flagged(tmp_path, yaml_dict):
+    c = _set_fc(tmp_path, yaml_dict, 0, fc0=1.0, fc1=-2.01)
+    assert [x.joint for x in H.suspicious_joints(c)] == [1]
+
+
+def test_tiny_values_with_big_ratio_are_not_flagged(tmp_path, yaml_dict):
+    """**绝对差值下限的作用**: 0.001 vs −0.004 比值 4.0, 但差值只有 0.003 Nm。
+
+    纯比值判据会在摩擦趋近 0 的关节上疯狂误报 —— 这是必须有下限的原因。
+    """
+    c = _set_fc(tmp_path, yaml_dict, 4, fc0=0.001, fc1=-0.004)
+    x = H.friction_asymmetry(c)[4]
+    assert x.ratio == 4.0, "比值确实超标"
+    assert x.suspicious is False, "但差值无物理量级 ⇒ 不报"
+
+
+def test_delta_floor_gates_the_decision(tmp_path, yaml_dict):
+    """比值同样超标 (4.0 / 3.0) 时, 全看差值够不够量级。
+
+    ⚠ 刻意**不**测 "差值恰好 0.05" 那个刀锋: 0.06−0.01 在 IEEE754 下是
+    0.049999999999999996, 比 0.05 略小 —— 测它会变成测浮点舍入而不是测判据。
+    真要卡死 >= / > 的语义, 见 `test_boundary_exactly_two_is_not_flagged`
+    (那一处用的是精确可表示的 2.0)。
+    """
+    over = _set_fc(tmp_path, yaml_dict, 0, fc0=0.20, fc1=-0.05)   # ratio 4.0, Δ 0.15
+    assert [x.joint for x in H.suspicious_joints(over)] == [1]
+
+    under = _set_fc(tmp_path, yaml_dict, 0, fc0=0.06, fc1=-0.02)  # ratio 3.0, Δ 0.04
+    assert H.suspicious_joints(under) == []
+
+
+def test_one_sided_friction_is_flagged(tmp_path, yaml_dict):
+    """一侧恰好为 0 ⇒ 比值 ∞ —— 单侧有摩擦本身就是强信号, 必须报。"""
+    c = _set_fc(tmp_path, yaml_dict, 5, fc0=0.5, fc1=0.0)
+    x = H.friction_asymmetry(c)[5]
+    assert x.ratio == float("inf")
+    assert x.suspicious is True
+    assert [y.joint for y in H.suspicious_joints(c)] == [6]
+
+
+def test_both_zero_is_not_flagged(tmp_path, yaml_dict):
+    """两侧都是 0: 比值 ∞ 但差值 0 —— 不该报 (下限把它挡住了)。"""
+    c = _set_fc(tmp_path, yaml_dict, 6, fc0=0.0, fc1=0.0)
+    assert H.friction_asymmetry(c)[6].ratio == float("inf")
+    assert H.suspicious_joints(c) == []
+
+
+def test_message_names_the_joints(tmp_path, yaml_dict):
+    c = _set_fc(tmp_path, yaml_dict, 2, fc0=3.0, fc1=-0.5)
+    head, detail = H.asymmetry_message(H.suspicious_joints(c))
+    hp, dp = _plain(head), _plain(detail)
+    assert "1 个关节" in hp
+    assert f"{H.FC_ASYM_RATIO:g}" in hp and f"{H.FC_ASYM_MIN_DELTA:g}" in hp
+    assert "J3" in dp
+    assert "3.000" in dp and "0.500" in dp
+    assert "2.500" in dp, "差值也要给出来"
+
+
+def test_message_needs_no_hardware(cfg):
+    """正常臂也要能生成空列表的文案 (调用方不必先判空)。"""
+    head, detail = H.asymmetry_message([])
+    assert "0 个关节" in _plain(head)
+    assert detail == ""
+
+
+def test_message_is_richtext_not_markdown(tmp_path, yaml_dict):
+    """**回归**: 弹窗是 `QMessageBox`, 它不认 Markdown —— `**` 会原样打在脸上。
+
+    这个缺陷只靠断言子串是抓不到的 (文字内容全都在), 是**离屏渲染**时才肉眼看见的。
+    所以这里钉死两条互锁的约束:
+
+      - 不得出现 `**` (Markdown 会原样显示);
+      - 不得出现 `\\n` (文本一旦含 HTML 标签, Qt 切富文本模式, `\\n` 就不再换行)。
+
+    第二条最容易漏: 单独把 `**` 换成 `<b>` 而留着 `\\n`, 版面会从"分行"塌成"一坨"。
+    """
+    c = _set_fc(tmp_path, yaml_dict, 2, fc0=2.0, fc1=-0.8)
+    head, detail = H.asymmetry_message(H.suspicious_joints(c))
+    for s in (head, detail):
+        assert "**" not in s, f"Markdown 星号会原样显示: {s}"
+        assert "\n" not in s, f"富文本模式 \\n 不换行, 须用 <br>: {s}"
+    assert "<b>" in head and "<br>" in head
+    assert "<b>" in detail and "<br>" in detail

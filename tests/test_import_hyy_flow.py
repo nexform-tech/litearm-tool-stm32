@@ -397,3 +397,118 @@ def test_hyy_confirm_says_whether_it_will_flash(monkeypatch):
     assert "固化" in t_on and "不会固化" not in t_on, t_on
     t_off = run(False)
     assert "不会固化" in t_off and "RAM" in t_off, t_off
+
+
+# ---------------------------------------------------------------------------
+# 摩擦不对称哨兵 (|fc0| vs |fc1|) —— 机械健康告警
+# ---------------------------------------------------------------------------
+def _plain(s: str) -> str:
+    """富文本 -> 纯文本 (断言针对渲染后的文字, 不是 HTML 源码)。"""
+    import re
+    s = re.sub(r"<[^>]+>", "", s)
+    for a, b in (("&nbsp;", " "), ("&gt;", ">"), ("&lt;", "<"), ("&amp;", "&")):
+        s = s.replace(a, b)
+    return s
+
+
+def _asym_yaml(tmp_path, joint=2, fc0=2.0, fc1=-0.8):
+    """把 fixture 的某个关节改成不对称 (比值 2.5 > 2.0)。"""
+    d = yaml.safe_load(FIXTURE.read_text("utf-8"))
+    dp = d["robot_group"]["robot"][0]["joint"][joint]["dynamics_parameters"]
+    dp["fc0"], dp["fc1"] = fc0, fc1
+    p = tmp_path / "asym.yaml"
+    p.write_text(yaml.safe_dump(d, allow_unicode=True), "utf-8")
+    return str(p)
+
+
+def test_healthy_config_never_prompts(monkeypatch):
+    """**正常臂不该被打扰** —— 误报会让操作员学会无视红字, 比不报警更糟。"""
+    pg, _ = _page(snap=load_snap(), arm=FakeArm(n=7))
+    monkeypatch.setattr(PP.QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (str(FIXTURE), "")))
+    monkeypatch.setattr(pg, "_do_import_hyy", lambda *a, **k: None)
+
+    def boom(items):
+        raise AssertionError(f"正常配置不该弹不对称告警, 却收到 {items}")
+
+    monkeypatch.setattr(pg, "_confirm_friction_asymmetry", boom)
+    pg._on_import_hyy()          # 不抛即通过
+
+
+def test_asymmetry_cancel_aborts_before_import(monkeypatch, tmp_path):
+    """操作员选「取消」⇒ 不进 diff、不下发。"""
+    pg, _ = _page(snap=load_snap(), arm=FakeArm(n=7))
+    monkeypatch.setattr(PP.QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (_asym_yaml(tmp_path), "")))
+    called = []
+    monkeypatch.setattr(pg, "_do_import_hyy", lambda *a, **k: called.append(a))
+    monkeypatch.setattr(pg, "_confirm_friction_asymmetry", lambda items: False)
+    pg._on_import_hyy()
+    assert called == [], "取消后不得继续导入"
+    assert "取消" in pg.status.text()
+
+
+def test_asymmetry_continue_proceeds_with_note(monkeypatch, tmp_path):
+    """操作员坚持导入 ⇒ 正常继续, 且告警写进 notes (不在点掉弹窗后消失)。"""
+    pg, _ = _page(snap=load_snap(), arm=FakeArm(n=7))
+    monkeypatch.setattr(PP.QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (_asym_yaml(tmp_path), "")))
+    called = []
+    monkeypatch.setattr(pg, "_do_import_hyy", lambda *a, **k: called.append(a))
+    monkeypatch.setattr(pg, "_confirm_friction_asymmetry", lambda items: True)
+    pg._on_import_hyy()
+    assert len(called) == 1, "确认后应当继续"
+    notes = called[0][3]
+    assert any("不对称" in n for n in notes), notes
+
+
+def test_asymmetry_popup_defaults_to_cancel(monkeypatch, tmp_path):
+    """弹窗的**默认按钮与 Esc 都必须是「取消」**。
+
+    一个回车就能过掉的弹窗等于没有 —— 这个控件的全部价值就是让人停下来看一眼。
+    """
+    pg, _ = _page(snap=load_snap())
+    cfg = HY.parse_hyy_config(_asym_yaml(tmp_path))
+    items = HY.suspicious_joints(cfg)
+    assert len(items) == 1
+
+    cap = {}
+
+    def fake_exec(self):
+        cap["default"] = self.defaultButton().text()
+        cap["escape"] = self.escapeButton().text()
+        cap["text"] = self.text()
+        cap["info"] = self.informativeText()
+        cap["buttons"] = [b.text() for b in self.buttons()]
+        cap["icon"] = self.icon()
+        return 0
+
+    monkeypatch.setattr(PP.QMessageBox, "exec_", fake_exec)
+    monkeypatch.setattr(PP.QMessageBox, "clickedButton",
+                        lambda self: self.defaultButton())
+
+    assert pg._confirm_friction_asymmetry(items) is False
+    assert cap["default"].startswith("取消"), cap
+    assert cap["escape"].startswith("取消"), cap
+    assert cap["icon"] == PP.QMessageBox.Critical, "必须是红色严重级图标"
+    assert any("仍要导入" in b for b in cap["buttons"])
+
+    info, text = _plain(cap["info"]), _plain(cap["text"])
+    assert "1 个关节" in text
+    assert "J3" in info and "|fc0|" in info and "|fc1|" in info
+    # 弹窗是 QMessageBox, 不认 Markdown —— 星号会原样打在脸上 (离屏渲染实测)
+    for s in (cap["info"], cap["text"]):
+        assert "**" not in s, f"Markdown 星号会原样显示: {s}"
+    assert "不会修好机械问题" in info, "要给出「导入≠修好机械」这句"
+    assert "轴承" in info and "预紧" in info, "要列出可能原因"
+
+
+def test_asymmetry_popup_returns_true_on_go(monkeypatch, tmp_path):
+    """反向用例: 点「继续」必须返回 True —— 否则上面那条无法区分。"""
+    pg, _ = _page(snap=load_snap())
+    cfg = HY.parse_hyy_config(_asym_yaml(tmp_path))
+    monkeypatch.setattr(PP.QMessageBox, "exec_", lambda self: 0)
+    monkeypatch.setattr(PP.QMessageBox, "clickedButton",
+                        lambda self: next(b for b in self.buttons()
+                                          if "仍要导入" in b.text()))
+    assert pg._confirm_friction_asymmetry(HY.suspicious_joints(cfg)) is True

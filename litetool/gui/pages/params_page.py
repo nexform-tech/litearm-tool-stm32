@@ -488,11 +488,65 @@ class ParamsPage(QWidget):
                                  "以下项不合法, 已拒绝导入:\n  " + "\n  ".join(errs[:12]))
             return
         unmapped = HY.unmapped_report(cfg)
+
+        # 机械健康哨兵 —— `|fc0|` 与 `|fc1|` 是同一关节正/反两向的库仑摩擦, 健康臂
+        # 应大致对称。相差悬殊通常指向机械问题, 或辨识时被外力干扰。
+        # **不阻断**: 参数本身合法, 拦住写入也修不好机械, 反而会逼出绕过手段;
+        # 但默认按钮设为「取消」, 不让它被条件反射点掉。
+        asym = HY.suspicious_joints(cfg)
+        if asym:
+            if not self._confirm_friction_asymmetry(asym):
+                self.status.setText("导入已取消 —— 摩擦不对称告警")
+                self._log("[WARN] 调参[导入HYY] 操作员因摩擦不对称**取消**导入: "
+                          + ", ".join(f"J{x.joint}" for x in asym))
+                return
+            notes = list(notes) + [
+                "⚠ 摩擦严重不对称 (操作员已确认继续): "
+                + " · ".join(f"J{x.joint} {x.ratio:.2f}×" for x in asym)]
+
         with open(path, "r", encoding="utf-8") as f:
             src_text = f.read()
         self._log(f"[INFO] 调参[导入HYY] {os.path.basename(path)} "
                   f"sha={cfg.sha256_16} v{cfg.version} — 未映射 {len(unmapped)} 项")
         self._do_import_hyy(path, snap, model, notes, unmapped)
+
+    def _confirm_friction_asymmetry(self, items) -> bool:
+        """大红弹窗: 摩擦不对称 ⇒ 机械可能已损坏。**返回 True 表示操作员坚持继续**。
+
+        默认按钮是「取消」且绑了 Esc —— 这个弹窗的全部价值在于让人**停下来看一眼**,
+        一个回车就能过掉的弹窗等于没有。
+        """
+        head, detail = HY.asymmetry_message(items)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Critical)
+        box.setWindowTitle("⚠ 机械臂硬件可能异常")
+        box.setText(head)
+        # 全是富文本: `detail` 由 asymmetry_message 产出 (已含 <br>/<b>), 故此处的
+        # 换行也必须用 <br> —— 见该函数 docstring 里的说明 (纯文本模式 vs 富文本模式)。
+        box.setInformativeText(
+            f"{detail}<br><br>"
+            "同一关节正、反两向的摩擦力本应大致对称。相差超过一倍, 通常意味着"
+            "机械上已经出了问题:"
+            "<br>&nbsp;&nbsp;&nbsp;&nbsp;· 轴承发卡 / 减速器磨损 / 异物"
+            "<br>&nbsp;&nbsp;&nbsp;&nbsp;· 预紧异常"
+            "<br>&nbsp;&nbsp;&nbsp;&nbsp;· 或辨识时该关节被外力干扰 "
+            "—— 那种情况下本次参数本身也不可信"
+            "<br><br><b>⚠ 导入参数不会修好机械问题。</b>"
+            "<br>建议先人工检查这些关节 (手动转动感受阻力、听异响、测温升), 再决定是否继续。"
+            "<br><br>继续导入不会造成额外损害; 取消则可先去排查。")
+        btn_go = box.addButton("我已知晓，仍要导入", QMessageBox.AcceptRole)
+        btn_cancel = box.addButton("取消 (先去排查)", QMessageBox.RejectRole)
+        box.setDefaultButton(btn_cancel)
+        box.setEscapeButton(btn_cancel)
+        # 把「继续」做得不像是随手可点的那一个
+        box.setStyleSheet("QPushButton{min-width:170px;padding:6px 10px;}"
+                          "QLabel{font-size:13px;}")
+        box.exec_()
+        go = box.clickedButton() is btn_go
+        self._log("[WARN] 调参[导入HYY] 摩擦不对称 "
+                  + ("—— 操作员选择**继续**" if go else "—— 操作员选择取消")
+                  + ": " + ", ".join(f"J{x.joint}({x.ratio:.2f}×)" for x in items))
+        return go
 
     def _do_import_hyy(self, path, snap, model, notes, unmapped):
         """diff 预览 -> 预检 -> 下发。"""

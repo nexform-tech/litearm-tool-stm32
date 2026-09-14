@@ -24,7 +24,7 @@
 # =============================================================================
 joints:
   - name: J1          # DM6248P; q_min/q_max = URDF 硬限位内缩 1°
-    kp: 360.0         # 关节 MIT 刚度 Nm/rad
+    kp: 400.0         # 关节 MIT 刚度 Nm/rad
     kd: 5.0           # 阻尼 Nm·s/rad
     tau_max: 78.0     # 力矩钳幅 Nm
     q_min: -2.809547  # 软限位下界 rad
@@ -32,9 +32,9 @@ joints:
     friction: 0.0     # v1 库仑摩擦 Nm (v2 用时保持 0)
     ki: 40.0          # 积分增益
     i_max: 20.0       # 积分钳幅 Nm
-    wall_stiff: 0.0   # 限位虚拟墙刚度 Nm/rad (默认关)
-    wall_damp: 0.0
-    wall_tau_max: 0.0
+    wall_stiff: 200.0   # 限位虚拟墙刚度 Nm/rad (默认关)
+    wall_damp: 2.0
+    wall_tau_max: 19.5
     gravity_scale: 1.0   # gs 重力项缩放
     inertia_scale: 1.0   # is 惯量项缩放
     friction_v: 0.7516675846   # (v2) 粘滞摩擦 Nm·s/rad
@@ -45,7 +45,7 @@ joints:
     zg_damping: 0.0   # [段②] 零重力附加速度阻尼 Nm·s/rad
     kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
   - name: J2
-    kp: 420.0
+    kp: 400.0
     kd: 5.0
     tau_max: 78.0
     q_min: -1.727547
@@ -53,10 +53,10 @@ joints:
     friction: 0.0
     ki: 40.0
     i_max: 20.0
-    wall_stiff: 0.0
-    wall_damp: 0.0
-    wall_tau_max: 0.0
-    gravity_scale: 0.93
+    wall_stiff: 200.0
+    wall_damp: 2.0
+    wall_tau_max: 19.5
+    gravity_scale: 1.0
     inertia_scale: 1.0
     friction_v: 0.6422411449
     friction_fc0: 2.2810411248
@@ -66,18 +66,18 @@ joints:
     zg_damping: 0.0   # [段②] 零重力附加速度阻尼 Nm·s/rad
     kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
   - name: J3
-    kp: 220.0
-    kd: 5.0
+    kp: 300.0
+    kd: 4.0
     tau_max: 21.0
     q_min: -2.809547
     q_max: 2.809547
     friction: 0.0
     ki: 25.0
     i_max: 6.0
-    wall_stiff: 0.0
-    wall_damp: 0.0
-    wall_tau_max: 0.0
-    gravity_scale: 0.88
+    wall_stiff: 150.0
+    wall_damp: 2.0
+    wall_tau_max: 5.25
+    gravity_scale: 1.0
     inertia_scale: 1.0
     friction_v: 0.198322635
     friction_fc0: 0.3937211882
@@ -87,7 +87,7 @@ joints:
     zg_damping: 0.0   # [段②] 零重力附加速度阻尼 Nm·s/rad
     kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
   - name: J4          # 非对称限位 (上限近 0)
-    kp: 220.0
+    kp: 300.0
     kd: 5.0
     tau_max: 21.0
     q_min: -3.071547
@@ -95,12 +95,12 @@ joints:
     friction: 0.0
     ki: 25.0
     i_max: 6.0
-    wall_stiff: 0.0
-    wall_damp: 0.0
-    wall_tau_max: 0.0
-    gravity_scale: 0.87
+    wall_stiff: 150.0
+    wall_damp: 2.0
+    wall_tau_max: 5.25
+    gravity_scale: 1.0
     inertia_scale: 1.0
-    friction_v: 0.256907392
+    friction_v: 0.2568607392
     friction_fc0: 0.5860973702
     friction_fc1: -0.4929894835
     zg_kp: 50.0          # [段②] 零重力虚拟弹簧刚度 Nm/rad
@@ -116,9 +116,9 @@ joints:
     friction: 0.0
     ki: 10.0
     i_max: 4.0
-    wall_stiff: 0.0
-    wall_damp: 0.0
-    wall_tau_max: 0.0
+    wall_stiff: 100.0
+    wall_damp: 2.0
+    wall_tau_max: 1.0
     gravity_scale: 1.0
     inertia_scale: 1.0
     friction_v: 0.0291239433
@@ -137,9 +137,9 @@ joints:
     friction: 0.0
     ki: 10.0
     i_max: 3.0
-    wall_stiff: 0.0
-    wall_damp: 0.0
-    wall_tau_max: 0.0
+    wall_stiff: 60.0
+    wall_damp: 3.0
+    wall_tau_max: 1.0
     gravity_scale: 1.0
     inertia_scale: 1.0
     friction_v: 0.0843532073
@@ -158,9 +158,9 @@ joints:
     friction: 0.0
     ki: 10.0
     i_max: 3.0
-    wall_stiff: 0.0
-    wall_damp: 0.0
-    wall_tau_max: 0.0
+    wall_stiff: 20.0
+    wall_damp: 1.0
+    wall_tau_max: 1.0
     gravity_scale: 1.0
     inertia_scale: 1.0
     friction_v: 0.0420698459
@@ -172,7 +172,7 @@ joints:
     kd_extra: 0.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
 global:
   fric_db: 0.02        # 摩擦 tanh 死区带宽 rad [1e-4,0.5]
-  wall_margin: 0.0524  # 限位墙提前角 rad [0,0.5]
+  wall_margin: 0.02  # 限位墙提前角 rad [0,0.5]
   friction_slew: 60.0  # 摩擦变化率限 Nm/s [0,500]
   payload_mass: 0.0    # 末端负载质量 kg [0,20]
   payload_com: [0.0, 0.0, 0.0]   # 负载质心偏移 m [-1,1]×3

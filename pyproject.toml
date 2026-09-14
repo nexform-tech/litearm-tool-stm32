@@ -4,11 +4,20 @@ version = "0.1.0"
 description = "LiteArm STM32 上位机工具 (PyQt5 GUI over USB CDC)"
 requires-python = ">=3.9"
 dependencies = [
+    # 交互层：直连固件的薄协议 SDK（未发布到 PyPI，需 `pip install -e ../pylitearm-stm32`）
+    # [2026-09-14] 必须 >=1.7.0: `arm.model` (动力学模型在线导入) 是 1.7.0 新增的。
+    # 装到 1.6.0 环境时 `arm.model` 抛 AttributeError, 而 params_io._call 会把它吞成
+    # "超时/无应答" —— 症状与真故障无法区分。
+    "pylitearm-stm32>=1.7.0",
     "pyserial>=3.5",
     "PyQt5>=5.15",
     "pyqtgraph>=0.13",
+    "numpy>=1.21",
     "PyYAML>=6.0",
 ]
+
+[project.scripts]
+litearm-tool = "litetool.app:main"
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

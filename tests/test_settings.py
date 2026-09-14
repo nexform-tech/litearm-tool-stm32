@@ -1,5 +1,4 @@
 """settings.py 测试 —— 配置合并/容错。"""
-import pytest
 
 from litetool import settings
 

@@ -131,7 +131,7 @@ class TuningGuidePage(QWidget):
     # ---- 详解块构建 ----
     def _joint_block(self, key: str) -> QWidget:
         p = C.JOINT_BY_KEY[key]
-        extra = f"范围 {p.range_text()} · 写口 {Params_page_write(p)}"
+        extra = f"范围 {p.range_text()} · 写口 {_params_write_desc(p)}"
         return self._mk_block(key, p.label, p.role, p.hint, p.detail, extra)
 
     def _mk_block(self, key, title, role, hint, detail, extra="") -> QWidget:
@@ -201,7 +201,7 @@ class TuningGuidePage(QWidget):
         return False
 
 
-def Params_page_write(p):
+def _params_write_desc(p):
     """简短写口描述 (与 params_page._write_desc 同文案, 避免 import 循环)。"""
     if p.kind == "ctrl":
         return "0x22 (kp/kd/tau_max 成组)"

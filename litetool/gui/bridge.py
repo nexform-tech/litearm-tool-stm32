@@ -1,10 +1,13 @@
 """GuiBridge —— 跨线程 Qt 信号桥。
 
-读线程 / 命令工作线程 → emit → 主线程 slot（AutoConnection 自动转 QueuedConnection）。
+SDK 所有者线程 / 后台任务 → emit → 主线程 slot（AutoConnection 自动转 QueuedConnection）。
+`sig_task` 把回调一并携带过去，于是**任何**后台任务的结果都在 GUI 线程上被处理，
+页面不必自己关心线程边界。
 """
 from PyQt5.QtCore import QObject, pyqtSignal
 
 
 class GuiBridge(QObject):
-    sig_log = pyqtSignal(str)             # 一行日志（主线程 append 到日志面板）
-    sig_done = pyqtSignal(int, str, object)  # (token, 命令名, 结果) —— 命令工作线程完成后触发
+    sig_log = pyqtSignal(str)                 # 一行日志
+    sig_task = pyqtSignal(object, object)     # (TaskResult, 回调|None)
+    sig_online = pyqtSignal(bool, str)        # (在线?, 说明)

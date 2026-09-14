@@ -3,19 +3,20 @@
 纯 Python 无 Qt, 内容以固件 litearm-stm32 master 源码为准 (控制律/摩擦/前馈合成):
   - User/litearm/control/law.c            (law_friction / law_friction_v2 / 积分 / 墙)
   - User/litearm/control/control_loop.c    (ff_mask 前馈合成段, gs/is 乘项)
-  - User/litearm/litearm.h                (FF_* 位, 模型质量 ×1.8635 口径)
+  - User/litearm/litearm.h                (FF_* 位)
   - User/litearm/params/defaults.c        (出厂默认 / gs 基线)
 GUI 页签只负责渲染本模块拼好的 HTML (QTextBrowser)。
 """
 from litetool import param_catalog as C
 
-GS_BASELINE = "[1, 0.93, 0.88, 0.87, 1, 1, 1]"
+#: 出厂 gs 基线 —— 与 param_catalog 共用一份 (2026-09-12 换辨识模型后全 1.0)
+GS_BASELINE = C.GS_BASELINE
 
 # ---- (a) 动力学/控制律公式 (纯文本, unicode 即可) ----
 FORMULA_TEXT = """τ_joint = PD_j + gs_j·G_j(q) + is_j·[M(q)·q̈ + C(q,q̇)·q̇]_j + τ_fric_j + τ_int_j + τ_wall_j(默认关) + τ_quant_j + τ_velref_j
 
 PD_j      = kp_j·(q_d − q) + kd_j·(q̇_d − q̇)      （电机 MIT 内执行, kp≤500, kd≤5）
-G/M/C     = 固件内置 URDF(CAD×1.8635) 模型; gs/is = 逐关节缩放旋钮
+G/M/C     = 固件内置辨识模型 (litearm_id.urdf: MDH 几何 + 辨识惯量); gs/is = 逐关节缩放旋钮
 τ_fric v2 = fv_j·q̇_d + fc0_j·max(tanh(q̇_d/ε),0) + fc1_j·max(−tanh(q̇_d/ε),0)   （friction_model=1, 速度方向, slew 限速）
 v1(回退)  = friction_j·tanh(e/fric_db)      （friction_model=0, 误差方向）
 τ_int     = ki_j·∫(q_d−q)dt, 钳 ±i_max
@@ -27,7 +28,7 @@ SYMBOL_MAP = [
     ("kp_j / kd_j", "表中 kp/kd 列 (该关节 MIT 刚度/阻尼; PD 在电机内执行)"),
     ("gs_j", "表中 gs (gravity_scale) 列 —— 逐关节重力旋钮, 实测基线 " + GS_BASELINE),
     ("is_j", "表中 is (inertia_scale) 列; FF_CORIOLIS 位决定是否含 C(q,q̇)·q̇"),
-    ("G_j(q) / M(q) / C(q,q̇)", "固件内置 URDF(CAD 质量 ×1.8635) 动力学, 编译期常量, GUI 不直接改"),
+    ("G_j(q) / M(q) / C(q,q̇)", "固件内置辨识动力学 (litearm_id.urdf), 编译期常量, GUI 不直接改"),
     ("q_d / q̇_d", "期望位置/期望速度 = 轨迹规划输出 (非测量值); 故 v2 摩擦不吃编码器噪声"),
     ("q / q̇", "编码器测量位置/速度"),
     ("fv_j / fc0_j / fc1_j", "表中 friction_v / friction_fc0 / friction_fc1 列 (v2, 符号 fv≥0,fc0≥0,fc1≤0)"),

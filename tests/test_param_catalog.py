@@ -128,12 +128,18 @@ def test_bits_to_mask_ignores_unknown_high_bits():
     assert C.bits_to_mask([]) == 0
 
 
+
+def _preset_j1_kp():
+    """J1.kp 取 master 预设真值 (勿硬编码: 固件换源会变, 见 tests/test_preset_sync.py)。"""
+    raw = yaml.safe_load((REPO / "presets" / "current_master_defaults.yaml").read_text("utf-8"))
+    return raw["joints"][0]["kp"]
+
 # ---------------- schema normalize ----------------
 def test_normalize_example_valid():
     s = _load_example()
     assert len(s["joints"]) == 7
     assert set(s["joints"][0]) == set(p.key for p in C.JOINT_PARAMS)
-    assert s["joints"][0]["kp"] == pytest.approx(360.0)
+    assert s["joints"][0]["kp"] == pytest.approx(_preset_j1_kp())
     assert s["global"]["ff_mask"] == 447
     assert s["global"]["friction_model"] == 1
 
@@ -147,7 +153,8 @@ def test_normalize_rejects_bad_structure():
         C.normalize_snapshot({"joints": [{} for _ in range(7)],
                               "global": good["global"]})
     with pytest.raises(ValueError):          # 缺 global.ff_mask
-        g = dict(good["global"]); del g["ff_mask"]
+        g = dict(good["global"])
+        del g["ff_mask"]
         C.normalize_snapshot({"joints": good["joints"], "global": g})
 
 
@@ -185,7 +192,7 @@ def test_normalize_rejects_name_mismatch():
 def test_snapshot_flat_covers_all_leaves():
     s = _load_example()
     flat = C.snapshot_flat(s)
-    assert flat["J1.kp"] == pytest.approx(360.0)
+    assert flat["J1.kp"] == pytest.approx(_preset_j1_kp())
     # 关节 7×20=140; 全局叶 = 非数组 15 (14 标量 + friction_model)
     #            + payload_com[3] + gravity[3] = 21, +ff_mask = 22
     assert len(flat) == 7 * len(C.JOINT_PARAMS) + 22

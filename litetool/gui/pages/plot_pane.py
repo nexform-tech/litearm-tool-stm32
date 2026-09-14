@@ -1,36 +1,48 @@
-"""曲线页 —— pyqtgraph 三联动子图（q/dq/tau），30s 滚动窗口。"""
+"""曲线组件 —— pyqtgraph 三段联动子图（q / dq / tau），滚动窗口。
+
+数据源是 `litetool.plot_model.PlotModel`（100Hz 全量入缓冲，本组件按 30Hz 重绘
+不抽稀）。被「总览」页复用；曲线页不再单独存在 —— 它与状态表本就吃同一份流。
+"""
+from __future__ import annotations
+
+from typing import List
+
 import numpy as np
+import pyqtgraph as pg
 from PyQt5.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QPushButton,
                              QVBoxLayout, QWidget)
-import pyqtgraph as pg
 
 COLORS = ["#e8c547", "#e06c75", "#61afef", "#98c379", "#c678dd",
           "#56b6c2", "#d19a66"]
-FIELD_TITLES = ["关节位置 q (rad)", "关节速度 dq (rad/s)", "关节力矩 tau (Nm)"]
+#: 轴标签要**短** —— 竖排文字比图高时会压到相邻子图的刻度上
+FIELD_TITLES = ["q (rad)", "dq (rad/s)", "tau (Nm)"]
 
 
-class PlotPage(QWidget):
+class PlotPane(QWidget):
     def __init__(self, window_s: float = 30.0, parent=None):
         super().__init__(parent)
         self._window = window_s
         self._n = 0
-        self._enabled: list[bool] = []
-        self._joint_boxes: list[QCheckBox] = []
+        self._enabled: List[bool] = []
+        self._joint_boxes: List[QCheckBox] = []
         self.frozen = False
 
+        self.curves: dict = {}                    # (field, joint) -> PlotDataItem
+        self._legends: dict = {}                  # id(plot) -> LegendItem
         self.gw = pg.GraphicsLayoutWidget()
         self.plots = []
         for r in range(3):
             pi = self.gw.addPlot(row=r, col=0)
             pi.showGrid(x=True, y=True, alpha=0.2)
             pi.setLabel("left", FIELD_TITLES[r])
-            pi.addLegend(offset=(10, 10))
+            # 关掉自动 SI 前缀：否则 0.2 Nm 会被标成 "200 m"，小数值图上误导性极强
+            pi.getAxis("left").enableAutoSIPrefix(False)
+            pi.getAxis("left").setWidth(56)     # 给刻度+标签留位，否则标签被截断
             pi.setXRange(-self._window, 0, padding=0)
+            self._add_legend(pi)
             self.plots.append(pi)
-        # 三图联动 x 轴
-        for pi in self.plots[1:]:
+        for pi in self.plots[1:]:                 # 三图联动 x 轴
             pi.setXLink(self.plots[0])
-        self.curves = {}          # (field, joint) -> PlotDataItem
 
         top = QHBoxLayout()
         top.addWidget(QLabel("关节:"))
@@ -46,26 +58,37 @@ class PlotPage(QWidget):
         top.addWidget(self.clear_btn)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(6, 6, 6, 6)
+        lay.setContentsMargins(4, 4, 4, 4)
         lay.addLayout(top)
         lay.addWidget(self.gw)
+
+    _LEGEND_KW = dict(brush=(40, 44, 52, 200), pen=pg.mkPen("#5a6673"),
+                      labelTextColor="#c8d2dc")
+
+    def _add_legend(self, pi):
+        """图例统一成暗底 —— 默认的半透明白底在深色画布上很跳。
+
+        没曲线时先藏起来：空图例会在黑画布上留一个空框子。
+        """
+        lg = pi.addLegend(offset=(10, 10), **self._LEGEND_KW)
+        lg.setVisible(bool(self.curves))
+        self._legends[id(pi)] = lg
 
     def _on_freeze(self, on: bool):
         self.frozen = on
         self.freeze_btn.setText("▶ 继续" if on else "❚❚ 冻结")
 
     def clear_all(self):
+        self.curves.clear()               # 先清空，_add_legend 才知道该不该显示
         for pi in self.plots:
-            pi.clear()
-            pi.addLegend(offset=(10, 10))
-        self.curves.clear()
+            pi.clear()                    # clear() 会把图例一起删掉
+            self._add_legend(pi)
 
     def set_joints(self, n: int):
         if n == self._n:
             return
         self._n = n
         self.clear_all()
-        # 重建关节勾选
         while self.box_row.count():
             item = self.box_row.takeAt(0)
             if item.widget():
@@ -74,7 +97,7 @@ class PlotPage(QWidget):
         self._enabled = []
         for j in range(n):
             cb = QCheckBox(f"J{j + 1}")
-            default = j < 3 if n > 3 else True   # 默认高亮前 3 关节，避免过密
+            default = j < 3 if n > 3 else True    # 默认高亮前 3 关节，避免过密
             cb.setChecked(default)
             cb.toggled.connect(lambda on, jj=j: self._set_enabled(jj, on))
             self.box_row.addWidget(cb)
@@ -91,12 +114,12 @@ class PlotPage(QWidget):
         times, q, dq, tau = model.snapshot()
         if not times:
             return
-        # 时间原点对齐"现在"(最新样本), 使窗口固定显示最近 window 秒
+        # 时间原点对齐"现在"(最新样本)，使窗口固定显示最近 window 秒
         x = np.asarray(times, dtype=float) - times[-1]
         for field, series in enumerate((q, dq, tau)):
-            mat = np.asarray(series, dtype=float)     # (样本, 关节)
+            mat = np.asarray(series, dtype=float)      # (样本, 关节)
             pi = self.plots[field]
-            n_show = min(self._n, mat.shape[1])       # 重连窗口内样本关节数可能小于 UI 值
+            n_show = min(self._n, mat.shape[1])        # 重连后窗口内关节数可能小于 UI 值
             for j in range(n_show):
                 key = (field, j)
                 curve = self.curves.get(key)
@@ -107,9 +130,11 @@ class PlotPage(QWidget):
                     continue
                 y = mat[:, j]
                 if curve is None:
-                    curve = pi.plot(x, y, pen=pg.mkPen(color, width=1.5),
-                                    name=f"J{j + 1}")
+                    curve = pi.plot(x, y, pen=pg.mkPen(color, width=1.5), name=f"J{j + 1}")
                     self.curves[key] = curve
                 else:
                     curve.setData(x, y)
                     curve.setVisible(True)
+        for lg in self._legends.values():         # 有曲线了就把图例亮出来
+            if not lg.isVisible():
+                lg.setVisible(True)

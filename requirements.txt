@@ -1,4 +1,10 @@
+# 交互层（本工具的核心依赖）—— 直连固件的薄协议 SDK。
+# 未发布到 PyPI，从源码按可编辑方式装：
+#   pip install -e ../pylitearm-stm32
 pyserial>=3.5
+
+# GUI
 PyQt5>=5.15
 pyqtgraph>=0.13
+numpy>=1.21
 PyYAML>=6.0

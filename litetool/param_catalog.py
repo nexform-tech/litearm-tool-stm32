@@ -42,6 +42,10 @@ FF_BITS = [
 ]
 
 
+#: 出厂 gs 基线 (固件 defaults.c, 2026-09-12 换辨识模型后 = 全 1.0)。
+#: 单一定义, 指南/文案共用; `tests/test_tuning_guide.py` 与固件真源逐项比对。
+GS_BASELINE = "[1, 1, 1, 1, 1, 1, 1]"
+
 # [调参指南] 每个 ff_mask 位的详解 (与 FF_BITS 同序, 悬停/指南逐项用)
 FF_BIT_DETAIL = [
     "主开关: 动力学前馈总开关。须置位 G/inertia 子位才生效。想整组关掉全部前馈(只剩 PD 电机内反馈)就清这一位; 其余位不动时把它关掉是回退到纯 PD 的最快路径。",
@@ -94,6 +98,7 @@ class JointParam:
     decimals: int
     kind: str
     item: int = 0     # kind=='vec' 时的 0x26 item 号 (1..11)
+    safety: bool = False  # [2026-09-14] 安全类字段: 变化必须独立高亮 + 强制说明, 不适用比率阈值
     role: str = ""    # [调参指南] 作用一句话 (tooltip 用)
     hint: str = ""    # [调参指南] 改参提示 (tooltip 用)
     detail: str = ""  # [调参指南] 详解 2-4 句 (tooltip 与指南页同源)
@@ -113,6 +118,7 @@ class GlobalParam:
     item: int         # 0x28/0x2C item
     subs: tuple = (0,)   # 分量下标; (0,1,2) = 数组
     model: bool = False  # 0/1 二值 (friction_model)
+    safety: bool = False  # [2026-09-14] 安全类字段 (见 JointParam.safety)
     role: str = ""
     hint: str = ""
     detail: str = ""
@@ -221,9 +227,10 @@ _JP_META = {
                      "设太小墙形同虚设, 设过大接近 tau_max 也受其兜底。"),
     "gravity_scale": ("逐关节重力补偿缩放 gs",
                       "重力项输出旋钮: 到位下垂/保持软→该轴 gs↑ (重力偏小)。"
-                      "出厂基线 [1,0.93,0.88,0.87,1,1,1]。",
+                      "出厂基线 " + GS_BASELINE + "。",
                       "含义: 重力前馈 gs_j·G_j(q) 的逐关节缩放 (输出端乘法旋钮)。无量纲 [0,20]。"
-                      "出厂基线 [1,0.93,0.88,0.87,1,1,1] (J2/J3/J4 略小于 1 是 CAD 质心残差)。"
+                      "出厂基线 " + GS_BASELINE + " (2026-09-12 随模型换源重定: 辨识惯量模型下必须归 1.0, "
+                      "旧的 CAD 口径补偿值已废弃)。"
                       "到位下垂/保持软→相关轴 gs↑; 抬过头/往上顶→gs↓。常见误用: 全局改 g"
                       "ravity 向量代替逐关节 gs (应先用 gs 旋钮), 或只加大臂 gs 不管小臂。"),
     "inertia_scale": ("逐关节惯量缩放 is",
@@ -272,9 +279,18 @@ _JP_META = {
                  "J7 惯量极小(≈0.0002 kg·m²), kd_extra/J 远快于控制周期, 延迟阻尼会反向激发"
                  "(上游实测全轴加 3 时 J7 冲到 −3.33 rad/s 被速度包络中止)。"),
 }
+#: [2026-09-14] 安全类字段 —— 它们**同时是控制包络**: `tau_max` 是力矩幅值的唯一兜底
+#: (`control_loop.c` 的 clampf), `q_min/q_max` 是软限位。yaml 的 `torque_max`
+#: (20,20,28,28,10,10,10) 与固件默认 (78,78,21,21,10,10,10) 相差极大 (J1/J2 砍到 1/4),
+#: 而 `[0.1,120]` 的范围校验**不会响**、比率型阈值也覆盖不到 (|20-78|/78 ≈ 0.74)
+#: ⇒ 只能靠显式标记让 UI 独立高亮。
+SAFETY_JOINT_KEYS = frozenset({"tau_max", "q_min", "q_max"})
+SAFETY_GLOBAL_KEYS = frozenset({"gravity"})
+
 for _i, _p in enumerate(JOINT_PARAMS):
     _r, _h, _d = _JP_META[_p.key]
-    JOINT_PARAMS[_i] = replace(_p, role=_r, hint=_h, detail=_d)
+    JOINT_PARAMS[_i] = replace(_p, role=_r, hint=_h, detail=_d,
+                               safety=(_p.key in SAFETY_JOINT_KEYS))
 
 JOINT_BY_KEY = {p.key: p for p in JOINT_PARAMS}
 JOINT_KEY_ORDER = [p.key for p in JOINT_PARAMS]
@@ -404,10 +420,32 @@ _GP_META = {
 }
 for _i, _p in enumerate(GLOBAL_PARAMS):
     _r, _h, _d = _GP_META[_p.key]
-    GLOBAL_PARAMS[_i] = replace(_p, role=_r, hint=_h, detail=_d)
+    GLOBAL_PARAMS[_i] = replace(_p, role=_r, hint=_h, detail=_d,
+                                safety=(_p.key in SAFETY_GLOBAL_KEYS))
+
+IS_SAFETY_KEY = {p.key: p.safety for p in JOINT_PARAMS}
+IS_SAFETY_KEY.update({p.key: p.safety for p in GLOBAL_PARAMS})
 
 GLOBAL_BY_KEY = {p.key: p for p in GLOBAL_PARAMS}
 GLOBAL_KEY_ORDER = [p.key for p in GLOBAL_PARAMS]
+
+# ---------------------------------------------------------------------------
+# [2026-09-14] 动力学模型段 —— 固件 `0x30/0x32/0x33/0x34/0x35/0x37/0x38` 的镜像。
+#
+# ⚠ 与上面两段的关键差别: 模型参数是**辨识基系数**, 单个无物理意义 (m 全是归一化占位值
+#   1.0、I 含负值、M 非正定)。故:
+#     - **不做物理范围钳制** (物理钳制会把正确模型判成非法), 只做有限性 + |v| <= 1e6;
+#     - 由 `litetool/model_io.py` 走**独立通道**读写, 不进 `snapshot_flat` 的常规叶
+#       (缺 `model` 键时**不产出**任何叶, 保证既有预设/模板文件仍可导入)。
+# ---------------------------------------------------------------------------
+MODEL_BODY_KEYS = ("m", "cmx", "cmy", "cmz", "ixx", "ixy", "ixz", "iyy", "iyz", "izz")
+MODEL_BODY_LABELS = ("质量(辨识基)", "质心x(辨识基)", "质心y(辨识基)", "质心z(辨识基)",
+                     "惯量ixx", "惯量ixy", "惯量ixz", "惯量iyy", "惯量iyz", "惯量izz")
+MODEL_BODY_DECIMALS = 8          # 辨识基参数需要高精度显示 (6 位会看到两行"看起来一样")
+MODEL_NBODY = 9                  # 与固件 DYN_MODEL_NBODY / SDK MODEL_NBODY 同值
+MODEL_JM_N = 7
+MODEL_ABS_MAX = 1e6              # 与固件写口同口径
+MODEL_MASK_WRITTEN = (sum(1 << i for i in range(1, 8))) | (1 << 9)   # 0x2FE
 
 # ff_mask: 0x27 写 / 0x2C item 9 读 (u32, 经 f32 读回; 值 ≤0x1FF 时两种编码可无损还原)
 FF_MASK_SCALAR_ITEM = 9
@@ -583,7 +621,15 @@ def snapshot_flat(snap: dict) -> dict:
 
 
 def leaf_decimals(label: str) -> int:
-    """按打平标签取显示小数位 (供 diff 预览/状态行)。"""
+    """按打平标签取显示小数位 (供 diff 预览/状态行)。
+
+    ⚠ 标签前缀是**有语义的**:
+      `J{n}.` -> 关节项; `global.` -> 全局项; `B{n}.` / `jm.` -> 模型项 (高精度)。
+    **模型项不得用 `J` 开头** —— `J1.mass` 会去查 `JOINT_BY_KEY["mass"]` 直接 KeyError
+    崩掉 diff 对话框; 而落回默认的 `return 4` 又会让 `0.0141869443` 显示成 `0.0142`。
+    """
+    if label.startswith("B") or label.startswith("jm."):
+        return MODEL_BODY_DECIMALS
     if label.startswith("J"):
         key = label.split(".", 1)[1]
         return JOINT_BY_KEY[key].decimals

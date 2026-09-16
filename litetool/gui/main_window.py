@@ -23,6 +23,7 @@ from litetool.gui.pages.capture_page import CapturePage
 from litetool.gui.pages.cart_page import CartPage
 from litetool.gui.pages.diag_page import DiagPage
 from litetool.gui.pages.guide_page import TuningGuidePage
+from litetool.gui.pages.installation_page import InstallationPage
 from litetool.gui.pages.joint_page import JointPage
 from litetool.gui.pages.machine_page import MachinePage
 from litetool.gui.pages.overview_page import OverviewPage
@@ -136,6 +137,9 @@ class MainWindow(QMainWindow):
         self._add_page("guide", "调参指南", "公式 / 症状速查 / 逐参数详解",
                        TuningGuidePage())
         self._add_page("diag", "诊断", "KIN_BENCH / 启动原因 / 链路计数", DiagPage())
+        self._add_page("install", "安装方向",
+                       "gravity 向量 (0x28 item6) —— 正装/侧装/倒装",
+                       InstallationPage())
         self.nav.select("overview")
 
         body = QWidget()
@@ -185,7 +189,9 @@ class MainWindow(QMainWindow):
 
     _GROUPS = {"监视": ("overview", "capture"),
                "操作": ("machine", "joint", "cart", "zerog"),
-               "参数": ("params", "guide", "diag")}
+               # ⚠ 新页 key 必须登记在这里: `_group_for` 用的是无默认值的 next(),
+               # 漏登记会在 __init__ 期间抛 StopIteration -> 崩启动。
+               "参数": ("params", "install", "guide", "diag")}
 
     def _group_for(self, key: str):
         title = next(t for t, keys in self._GROUPS.items() if key in keys)
@@ -222,6 +228,8 @@ class MainWindow(QMainWindow):
         self.pages["params"].set_submit(self._submit)
         self.pages["params"].show_guide.connect(self._on_guide)
         self.pages["capture"].set_submit(self._submit)
+        self.pages["install"].set_log(self._log)
+        self.pages["install"].set_submit(self._submit)
         self.nav.navigated.connect(self._on_page_changed)
 
     def _on_nav(self, key: str):
@@ -407,8 +415,10 @@ class MainWindow(QMainWindow):
         self.pages["overview"].update_from(st)
         self.pages["machine"].update_from(st)
         self.pages["machine"].set_metrics(drops, fps, self.worker.last_reset_reason)
-        # 离线时也喂一次 None：让参数页丢掉 enable 态的旧快照
+        # 离线时也喂一次 None：让参数页/安装方向页丢掉 enable 态的旧快照
+        # （安装方向页的"须先失能"硬拦依赖它 —— 旧快照会拿过期的 enabled 放行）
         self.pages["params"].update_from(st)
+        self.pages["install"].update_from(st)
         if st is not None:
             self.pages["cart"].set_seed_q(st.q)
             self.pages["joint"].fill_from(st)
@@ -451,6 +461,7 @@ class MainWindow(QMainWindow):
             if hasattr(page, "set_busy"):
                 page.set_busy(busy)
         self.pages["params"].set_busy(busy)
+        self.pages["install"].set_busy(busy)
 
     def _tick_plot(self):
         self.pages["overview"].refresh_plot(self.worker.model)

@@ -16,7 +16,7 @@ from litetool import settings as settings_mod                 # noqa: E402
 from tests.fake_arm import make_state                         # noqa: E402
 
 PAGE_KEYS = ("overview", "capture", "machine", "joint", "cart",
-             "zerog", "params", "guide", "diag")
+             "zerog", "params", "install", "guide", "diag")
 
 
 def _win():
@@ -35,7 +35,7 @@ def test_mainwindow_constructs_and_ticks_offscreen():
     w.close()
 
 
-def test_nav_has_three_groups_and_nine_pages():
+def test_nav_has_three_groups_and_all_pages_registered():
     w = _win()
     assert w.nav.topLevelItemCount() == 3, "监视/操作/参数 三个分组"
     assert w.stack.count() == len(PAGE_KEYS)

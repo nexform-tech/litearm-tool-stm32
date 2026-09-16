@@ -12,7 +12,7 @@ from typing import Optional
 import pylitearm_stm32 as pa
 from pylitearm_stm32 import _protocol as _P
 
-DEFAULT_FW = "Litearm1.5.2-7J"
+DEFAULT_FW = "Litearm1.5.3-7J"
 
 
 def make_state(n: int = 7, seq: int = 0, mode: int = 1, flags: int = 0x200,

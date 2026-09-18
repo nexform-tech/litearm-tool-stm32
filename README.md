@@ -45,7 +45,7 @@ GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 
 
 ## 覆盖：SDK 公开面 → UI 入口
 
-`litearm-core` v1.6.0 的公开方法逐条对应（`tests/test_sdk_hook.py` 会盯住这张表的
+`litearm-core` v2.0.0 的公开方法逐条对应（`tests/test_sdk_hook.py` 会盯住这张表的
 SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到）。
 
 | SDK | UI 入口 |
@@ -96,10 +96,10 @@ SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到�
    按钮灰态只是 UX，任何能到达处理函数的路径（代码 emit / 某页漏禁一个控件 / 快捷键）
    都必须在这里被挡住。
 2. **Δq 确认框**：`movej` / `move_js` / `move_mit` / `move_mit_all` 的目标与当前差
-   超过 `confirm_threshold`（默认 0.5 rad）时逐关节列出后确认；`movep` 另有位姿幅度
+   超过 `confirm_threshold`（默认 0.5 rad）时逐关节列出后确认；`move_p` 另有位姿幅度
    确认（位置 0.05 m / 姿态 0.30 rad）。
    **拿不到基线时一律拒绝**，不是免检：状态帧还没到 / 没读过 TCP 时，输入框往往还是
-   默认值，正是最容易手滑的时刻。`movep` 在无 TCP 基线时会**自动先读一次**再判幅度。
+   默认值，正是最容易手滑的时刻。`move_p` 在无 TCP 基线时会**自动先读一次**再判幅度。
 3. **常驻急停**：顶栏红色按钮，走 `SdkWorker.emergency_now()` —— GUI 线程**直接写帧**，
    不排队、不等 ACK。在途的 `movej` 可能把所有者线程占住十几秒，急停必须绕开队列。
    该通道**只写不读**，故不会被在途命令挡住，也不会与所有者线程抢帧。

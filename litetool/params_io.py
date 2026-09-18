@@ -1,4 +1,4 @@
-"""参数读写 —— 在 `pylitearm_stm32.Arm` 之上的一层薄封装。
+"""参数读写 —— 在 `litearm_core.Arm` 之上的一层薄封装。
 
 为什么需要这一层：参数页要的形状是「逐写口下发，每个写口回一个 `(ok, code)`」，
 这样才能把失败**精确标到表格的某一格**；而 SDK 是「失败即抛异常」。
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import pylitearm_stm32 as pa
+import litearm_core as pa
 import yaml
 
 from litetool import param_catalog as C

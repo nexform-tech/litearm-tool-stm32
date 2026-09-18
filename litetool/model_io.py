@@ -1,4 +1,4 @@
-"""动力学模型读写 —— 在 `pylitearm_stm32.Arm.model` 之上的一层薄封装。
+"""动力学模型读写 —— 在 `litearm_core.Arm.model` 之上的一层薄封装。
 
 为什么需要这一层 (与 `params_io` 同因): 模型页要的形状是「逐写口下发, 每个写口回一个
 `(ok, code)`」, 这样才能把失败**精确标到某一项**; 而 SDK 是「失败即抛异常」。
@@ -19,7 +19,7 @@ from __future__ import annotations
 import struct
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import pylitearm_stm32 as pa
+import litearm_core as pa
 
 from litetool import param_catalog as C
 from litetool.hyy_config import MODEL_BODY_KEYS, MODEL_ABS_MAX
@@ -175,7 +175,7 @@ def send_model(arm, model: Dict[str, Any], mask: int = MASK_WRITTEN) -> Dict[str
 
 
 def revert_model(arm) -> Result:
-    """只回退模型 (0x37)。**不动 flash** —— 见 `pylitearm_stm32.model.ModelParams.revert`。"""
+    """只回退模型 (0x37)。**不动 flash** —— 见 `litearm_core.model.ModelParams.revert`。"""
     return _call(lambda: arm.model.revert())
 
 

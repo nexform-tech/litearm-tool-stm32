@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-import pylitearm_stm32 as pa
-from pylitearm_stm32 import _protocol as _P
+import litearm_core as pa
+from litearm_core import _protocol as _P
 
 from litetool.sdk_worker import SdkWorker, StateHookMissing
 from tests.fake_arm import FakeArm, wait_for, worker_arm_factory

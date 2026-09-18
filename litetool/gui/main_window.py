@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
         self._ptimer.timeout.connect(self._tick_plot)
         self._ptimer.start(PLOT_MS)
 
-        self._log("[INFO] LiteArm Tool STM32 —— 交互层经 pylitearm_stm32；"
+        self._log("[INFO] LiteArm Tool STM32 —— 交互层经 litearm_core；"
                   "硬防护权威仍在固件")
 
     # ================= 界面 =================

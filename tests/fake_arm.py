@@ -1,4 +1,4 @@
-"""鸭子类型的 `pylitearm_stm32.Arm` 替身 —— 离线跑 SdkWorker / 参数 I/O 的测试。
+"""鸭子类型的 `litearm_core.Arm` 替身 —— 离线跑 SdkWorker / 参数 I/O 的测试。
 
 形状刻意与真 SDK 一致，**包括那个私有状态钩子缝隙** (`_a._on_status`)：
 `tests/test_sdk_hook.py` 另有一条测试守着真 SDK 上这个缝隙仍在，故此替身不会
@@ -9,8 +9,8 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-import pylitearm_stm32 as pa
-from pylitearm_stm32 import _protocol as _P
+import litearm_core as pa
+from litearm_core import _protocol as _P
 
 DEFAULT_FW = "Litearm1.5.3-7J"
 
@@ -516,7 +516,7 @@ class _FakeDiag:
         self._arm = arm
 
     def kin_bench(self, timeout: float = 8.0):
-        from pylitearm_stm32 import parse_kin_bench
+        from litearm_core import parse_kin_bench
         self._arm.calls.append(("kin_bench", None))
         self._arm._maybe_raise()
         return parse_kin_bench("LOOP14000 \nLINK crc=0 rfd=1 txf=0 ovr=2 loop_k=13\n")

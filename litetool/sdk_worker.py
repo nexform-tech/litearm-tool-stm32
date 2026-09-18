@@ -1,8 +1,8 @@
-"""SdkWorker —— **唯一**持有 `pylitearm_stm32.Arm` 的线程，串口的唯一读者。
+"""SdkWorker —— **唯一**持有 `litearm_core.Arm` 的线程，串口的唯一读者。
 
 为什么要独占
 ------------
-`pylitearm_stm32` 的 `Arm` 是按**单消费者**设计的：`_Ack.expect` / `pump` /
+`litearm_core` 的 `Arm` 是按**单消费者**设计的：`_Ack.expect` / `pump` /
 `_read_status` / `get_status_now` 都直接从同一条串口抢帧。若 GUI 一边轮询状态、
 一边下命令（两条读线程），状态轮询会把命令的 ACK 吃掉 —— 表现为随机的
 "无应答(超时)"。所以本模块把**全部** SDK 调用收进一个线程：
@@ -30,8 +30,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
-import pylitearm_stm32 as pa
-from pylitearm_stm32 import _protocol as _P
+import litearm_core as pa
+from litearm_core import _protocol as _P
 
 from litetool.plot_model import PlotModel
 
@@ -70,7 +70,7 @@ def _attach_state_hook(arm, on_state: Callable[[Any], None]) -> None:
     ack = getattr(arm, "_a", None)
     if ack is None or not callable(getattr(ack, "_on_status", None)):
         raise StateHookMissing(
-            "pylitearm_stm32.Arm 上找不到 _a._on_status 状态钩子缝隙 —— "
+            "litearm_core.Arm 上找不到 _a._on_status 状态钩子缝隙 —— "
             "SDK 内部结构变了。本工具依赖它把运动期间的 100Hz 状态也画到曲线上；"
             "请更新 litetool/sdk_worker.py::_attach_state_hook 以适配新版 SDK。")
     orig = ack._on_status

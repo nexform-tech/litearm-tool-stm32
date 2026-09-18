@@ -139,7 +139,7 @@ def test_movep_reaches_sdk(win, monkeypatch):
     monkeypatch.setattr("litetool.gui.main_window.QMessageBox.warning",
                         lambda *a, **k: QMessageBox.Ok)
     w._on_movep([0.30, 0.0, 0.35, 3.1416, 0.0, 0.0], 0.2)
-    assert pump(app, lambda: calls_of(arm, "movep"))
+    assert pump(app, lambda: calls_of(arm, "move_p"))
 
 
 # ---------------------------------------------------------------- 零重力 / 采集 / 诊断

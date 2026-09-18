@@ -61,7 +61,7 @@ def test_emergency_command_constant_present():
     # SDK 的公开面 —— 工具逐条都有 UI 入口，见 README 的覆盖表
     "connect", "close", "enable", "disable", "emergency_stop", "reset",
     "clear_faults", "set_motion_mode", "park", "zero_g", "zero_g_start",
-    "zero_g_stop", "last_reset_reason", "set_speed", "movej", "movep",
+    "zero_g_stop", "last_reset_reason", "set_speed", "movej", "move_p",
     "get_tcp", "ik", "home", "move_js", "send_mit", "send_mit_all",
     "get_state", "get_status_now", "set_ff_mask", "ff_preset", "set_ff_vec",
     "set_ff_scalar", "get_ff_vec", "get_ff_scalar", "get_ff_mask",

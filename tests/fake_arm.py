@@ -355,8 +355,8 @@ class FakeArm:
         self._maybe_raise()
         return self.get_state(refresh=True)
 
-    def movep(self, pose, speed=1.0):
-        self.calls.append(("movep", (list(pose), speed)))
+    def move_p(self, pose, speed=1.0):
+        self.calls.append(("move_p", (list(pose), speed)))
         self._maybe_raise()
         return self.get_state(refresh=True)
 

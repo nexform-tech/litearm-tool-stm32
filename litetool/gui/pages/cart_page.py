@@ -1,6 +1,6 @@
-"""笛卡尔页 —— 末端位姿：get_tcp / ik / movep。
+"""笛卡尔页 —— 末端位姿：get_tcp / ik / move_p。
 
-对应 SDK：`get_tcp` `ik`（固件后台 IK，seed 恒为模型 7 轴）`movep`（固件 IK + S 曲线）。
+对应 SDK：`get_tcp` `ik`（固件后台 IK，seed 恒为模型 7 轴）`move_p`（固件 IK + S 曲线）。
 """
 from __future__ import annotations
 

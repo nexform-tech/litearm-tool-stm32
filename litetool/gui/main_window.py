@@ -129,7 +129,7 @@ class MainWindow(QMainWindow):
                        MachinePage())
         self._add_page("joint", "关节", "movej / move_js / move_mit",
                        JointPage(self._settings))
-        self._add_page("cart", "笛卡尔", "get_tcp / ik / movep",
+        self._add_page("cart", "笛卡尔", "get_tcp / ik / move_p",
                        CartPage(self._settings))
         self._add_page("zerog", "零重力", "拖动示教（保活由 SDK 维持）", ZeroGPage())
         self._add_page("params", "参数表", "关节/前馈参数读写与批量导入导出",
@@ -652,7 +652,7 @@ class MainWindow(QMainWindow):
                     QMessageBox.Cancel) != QMessageBox.Ok:
                 return
         self._submit(f"movep sp={speed:.2f}",
-                     lambda arm: arm.movep(pose, speed), self._after_move)
+                     lambda arm: arm.move_p(pose, speed), self._after_move)
 
     # ================= 零重力 =================
     def _on_zero_g(self, on: bool):

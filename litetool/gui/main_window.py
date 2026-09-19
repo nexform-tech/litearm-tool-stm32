@@ -535,7 +535,10 @@ class MainWindow(QMainWindow):
                 self.pages["machine"].set_status_text(
                     f"seq={res.value.seq} mode={res.value.mode_name} "
                     f"n={res.value.n}")
-        self._submit("读状态", lambda arm: arm.get_status_now(), done)
+        # ⚠ 2.0 起 `get_status_now`/`get_tcp`/`kin_bench` 返回 `Msg` 信封 ——
+        # `TaskResult.value` 记的是 fn 的**原样**返回值, 故解信封必须在 fn 里做,
+        # 否则 `done` 拿到的会是信封 (下面 `.seq` 会 AttributeError)。
+        self._submit("读状态", lambda arm: arm.get_status_now().value, done)
 
     # ================= 关节运动 =================
     def _delta_ok(self, op: str, cur, targets) -> bool:
@@ -602,7 +605,7 @@ class MainWindow(QMainWindow):
     def _on_get_tcp(self):
         def done(res):
             self.pages["cart"].show_tcp(res.value if res.ok else None)
-        self._submit("读 TCP", lambda arm: arm.get_tcp(), done)
+        self._submit("读 TCP", lambda arm: arm.get_tcp().value, done)
 
     def _on_ik(self, pose, seed):
         # SDK 的 IK 种子恒为**模型 7 轴**（与关节数解耦）。台架 1J 上实测角只有 N 个，
@@ -628,7 +631,7 @@ class MainWindow(QMainWindow):
             # 没有基线就判不了幅度。与其放行，不如顺手读一次 TCP 再回来判 ——
             # 比让用户自己想起去点 [读取当前末端位姿] 更稳。
             self._log("[INFO] 尚无当前位姿基线，先读一次 TCP 再判幅度")
-            self._submit("读 TCP（movep 前置）", lambda arm: arm.get_tcp(),
+            self._submit("读 TCP（movep 前置）", lambda arm: arm.get_tcp().value,
                          lambda res: self._movep_after_tcp(res, pose, speed))
             return
         self._movep_confirm_and_send(pose, speed, cur)
@@ -678,7 +681,7 @@ class MainWindow(QMainWindow):
                 self._log("[OK] KIN_BENCH 完成")
             else:
                 self.pages["diag"].set_bench_error(str(res.error))
-        self._submit("KIN_BENCH", lambda arm: arm.diag.kin_bench(), done)
+        self._submit("KIN_BENCH", lambda arm: arm.diag.kin_bench().value, done)
 
     # ================= 关闭 =================
     def closeEvent(self, ev):  # noqa: N802 - Qt 命名

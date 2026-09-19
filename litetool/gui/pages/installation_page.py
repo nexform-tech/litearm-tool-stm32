@@ -531,7 +531,9 @@ class InstallationPage(QWidget):
 def _worker_read(arm):
     vals = []
     for sub in (0, 1, 2):
-        v = arm.get_ff_scalar(GRAVITY_ITEM, sub)
+        # ⚠ 2.0 起返回 `Msg` 信封, 取原值走 `.value` (信封本身恒非 None, 故下面那句
+        # "取不到帧 -> None" 的判据必须落在 `.value` 上)。
+        v = arm.get_ff_scalar(GRAVITY_ITEM, sub).value
         vals.append(None if v is None else float(v))
     return {"gravity": vals}
 
@@ -557,7 +559,7 @@ def _make_apply_worker(g: Sequence[float]):
                 out["fails"].append((sub, code))
         back = []
         for sub in (0, 1, 2):
-            v = arm.get_ff_scalar(GRAVITY_ITEM, sub)
+            v = arm.get_ff_scalar(GRAVITY_ITEM, sub).value
             back.append(None if v is None else float(v))
         out["back"] = back
         if q is not None:

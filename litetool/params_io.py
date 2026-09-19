@@ -117,7 +117,9 @@ def read_snapshot(arm) -> Dict[str, Any]:
                                     for _ in range(C.NUM_JOINTS)]
     for j in range(n):
         try:
-            jp = arm.params.get_joint_param(j)
+            # ⚠ 读一帧的 getter 自 litearm-core 2.0 起返回 `Msg(value, hz, timestamp)`
+            # 信封, 取原值一律走 `.value` (下同; 信封里另两个字段本模块不消费)。
+            jp = arm.params.get_joint_param(j).value
         except Exception as e:  # noqa: BLE001
             raise OSError(f"J{j + 1} 读回失败 (get_joint_param): {e}") from e
         joints[j].update(kp=jp.kp, kd=jp.kd, tau_max=jp.tau_max,
@@ -127,7 +129,7 @@ def read_snapshot(arm) -> Dict[str, Any]:
             continue
         try:
             # 向量是模型级（固件恒 7 槽），台架也读得到；只取本机有的那几列
-            vals = arm.get_ff_vec(p.item)
+            vals = arm.get_ff_vec(p.item).value
         except Exception as e:  # noqa: BLE001
             raise OSError(f"{p.key} 读回失败 (get_ff_vec item {p.item}): {e}") from e
         for j in range(min(len(vals), n)):
@@ -137,9 +139,9 @@ def read_snapshot(arm) -> Dict[str, Any]:
     for gp in C.GLOBAL_PARAMS:
         try:
             if gp.is_array:
-                glob[gp.key] = [arm.get_ff_scalar(gp.item, sub) for sub in gp.subs]
+                glob[gp.key] = [arm.get_ff_scalar(gp.item, sub).value for sub in gp.subs]
             else:
-                v = arm.get_ff_scalar(gp.item, gp.subs[0])
+                v = arm.get_ff_scalar(gp.item, gp.subs[0]).value
                 glob[gp.key] = int(round(v)) if gp.model else float(v)
         except Exception as e:  # noqa: BLE001
             raise OSError(f"{gp.key} 读回失败 (get_ff_scalar): {e}") from e

@@ -3,6 +3,14 @@
 形状刻意与真 SDK 一致，**包括那个私有状态钩子缝隙** (`_a._on_status`)：
 `tests/test_sdk_hook.py` 另有一条测试守着真 SDK 上这个缝隙仍在，故此替身不会
 "替 SDK 保证"一个已经不存在的东西。
+
+⚠ **[2026-09-19] 返回信封**：litearm-core 2.0 起 11 个"读一帧"型 getter 返回
+`Msg(value, hz, timestamp)`（`get_state` / `get_status_now` / `get_tcp` /
+`get_ff_vec` / `get_ff_scalar` / `params.get_joint_param` / `model.get_body` /
+`model.get_jm` / `model.status` / `model.get_gravity` / `diag.kin_bench`），
+本替身逐条跟着包 `_msg()`；两个**派生** getter（`get_ff_mask` -> int、
+`all_joint_params` -> list）与 `move_*`/`home`（动作结果）**保持裸值**。
+替身漏包会让"工具忘了 `.value`"这类错在离线全绿、真机必炸 —— 形状必须逐条对齐。
 """
 from __future__ import annotations
 
@@ -13,6 +21,17 @@ import litearm_core as pa
 from litearm_core import _protocol as _P
 
 DEFAULT_FW = "Litearm1.5.3-7J"
+
+
+def _msg(value) -> pa.Msg:
+    """替身的**返回信封** —— 与 SDK 2.0 的 11 个"读一帧"型 getter 同形状。
+
+    ⚠ 替身只保**形状**, 不保 `hz`/`timestamp` 的语义: 那两个字段是"该类帧在本会话
+    里的**实际到达**统计" (`Arm._ack.recv_stats`), 替身没有链路可统计, 一律填 `0.0`
+    (SDK 自己定义的"样本不足"哨兵, 不是真值)。本工具当前**一个字段都不消费**它,
+    故这个替身在此处**不能**替 SDK 作证 —— 将来若有人把 hz 画到界面上, 别信这里的 0.0。
+    """
+    return pa.Msg(value=value, hz=0.0, timestamp=0.0)
 
 
 def make_state(n: int = 7, seq: int = 0, mode: int = 1, flags: int = 0x200,
@@ -65,11 +84,13 @@ class _FakeParams:
         idx = self._check_idx(idx)
         self._record("get_joint_param", idx)
         self._arm._maybe_raise()
-        return pa.JointParam(idx, self.kp[idx], self.kd[idx], self.tau_max[idx],
-                             self.q_min[idx], self.q_max[idx])
+        return _msg(pa.JointParam(idx, self.kp[idx], self.kd[idx], self.tau_max[idx],
+                                  self.q_min[idx], self.q_max[idx]))
 
     def all_joint_params(self):
-        return [self.get_joint_param(i) for i in range(self._arm.n)]
+        """⚠ 真 SDK 上这个是**派生** getter, 刻意保持裸 `list[JointParam]` (N 帧的聚合,
+        一个 hz 描述不了) —— 替身必须照样保持裸值, 否则替身会**替 SDK 撒谎**。"""
+        return [self.get_joint_param(i).value for i in range(self._arm.n)]
 
     def set_joint_param(self, idx, kp, kd, tau_max):
         idx = self._check_idx(idx)
@@ -152,13 +173,13 @@ class _FakeModel:
             raise pa.UnsupportedByFirmwareError("固件无此命令", cmd=0x34, code=0x00)
         if not 0 <= int(idx) < self.NBODY:
             raise pa.InvalidCommandError(f"刚体索引越界: {idx}")
-        return list(self.body[int(idx)])
+        return _msg(list(self.body[int(idx)]))
 
     def get_jm(self):
         self._arm.calls.append(("model.get_jm", None))
         if not self.supported:
             raise pa.UnsupportedByFirmwareError("固件无此命令", cmd=0x35, code=0x00)
-        return list(self.jm)
+        return _msg(list(self.jm))
 
     # ---- 0x30 / 0x33 ----
     def set_body(self, idx: int, vals):
@@ -221,7 +242,7 @@ class _FakeModel:
         st.override = 1 if self.override else 0
         st.staged_mask = self._staged_mask()
         st.dirty = 1 if self.dirty else 0
-        return st
+        return _msg(st)
 
     def get_gravity(self, q):
         self._arm.calls.append(("model.get_gravity", list(q)))
@@ -231,7 +252,7 @@ class _FakeModel:
         msum = sum(b[0] for b in self.body[1:])
         g = [msum * 9.81 * 0.001 * (i + 1) for i in range(7)]
         g[0] = msum * 9.81 * q[1] * 0.1
-        return g
+        return _msg(g)
 
 
 class FakeArm:
@@ -299,7 +320,7 @@ class FakeArm:
         if self.silent:
             if self.frame_period:
                 time.sleep(self.frame_period)
-            return None
+            return _msg(None)             # 真 SDK 同款: "取不到帧" = `Msg.value is None`
         if self.frame_period:
             time.sleep(self.frame_period)
         if self.repeat_same and self._a.state is not None:
@@ -309,12 +330,13 @@ class FakeArm:
             st = make_state(self.n, self._seq)
             self._a.state = st
         self._a._on_status(b"")           # 真实 SDK 里由 _read_status 调用
-        return st
+        return _msg(st)
 
     def bump_seq(self, gap: int):
         self._seq = (self._seq + gap) % 65536
 
     def get_status_now(self, timeout: float = 0.5):
+        """与真 SDK 同款: 返回 `Msg` (取不到就抛 —— 替身用 `Msg.value is None` 表达)。"""
         return self.get_state(refresh=True)
 
     # ---- 命令 ----
@@ -353,17 +375,19 @@ class FakeArm:
     def movej(self, q, speed=1.0):
         self.calls.append(("movej", (list(q), speed)))
         self._maybe_raise()
-        return self.get_state(refresh=True)
+        # ⚠ `move_*`/`home` 是**动作结果**, 真 SDK **不**包信封 (返回裸 `RobotState`)
+        # —— 替身照抄这条, 别顺手把它们也包起来。
+        return self.get_state(refresh=True).value
 
     def move_p(self, pose, speed=1.0):
         self.calls.append(("move_p", (list(pose), speed)))
         self._maybe_raise()
-        return self.get_state(refresh=True)
+        return self.get_state(refresh=True).value
 
     def home(self, *, timeout=None):
         self.calls.append(("home", timeout))
         self._maybe_raise()
-        return self.get_state(refresh=True)
+        return self.get_state(refresh=True).value
 
     def move_js(self, q, dq=None, tau_ff=None):
         self.calls.append(("move_js", (list(q), dq, tau_ff)))
@@ -388,7 +412,7 @@ class FakeArm:
     def get_tcp(self, timeout: float = 0.6):
         self.calls.append(("get_tcp", None))
         self._maybe_raise()
-        return (0.30, 0.0, 0.35, 3.1416, 0.0, 0.0)
+        return _msg((0.30, 0.0, 0.35, 3.1416, 0.0, 0.0))
 
     def ik(self, pose, q_seed=None, timeout: float = 3.0):
         self.calls.append(("ik", (list(pose), q_seed)))
@@ -405,15 +429,16 @@ class FakeArm:
     def get_ff_vec(self, item: int, timeout: float = 1.0):
         self.calls.append(("get_ff_vec", item))
         self._maybe_raise()
-        return list(self.ff_vec[item])
+        return _msg(list(self.ff_vec[item]))
 
     def get_ff_scalar(self, item: int, sub: int = 0, timeout: float = 1.0):
         self.calls.append(("get_ff_scalar", (item, sub)))
         self._maybe_raise()
-        return self.ff_scalar[(item, sub)]
+        return _msg(self.ff_scalar[(item, sub)])
 
     def get_ff_mask(self, timeout: float = 1.0):
-        return int(self.get_ff_scalar(9, 0))
+        """⚠ 真 SDK 上这是**派生** getter, 刻意保持裸 `int` —— 替身照样保持。"""
+        return int(self.get_ff_scalar(9, 0).value)
 
     def set_ff_vec(self, item: int, values):
         self.calls.append(("set_ff_vec", (item, list(values))))
@@ -519,7 +544,8 @@ class _FakeDiag:
         from litearm_core import parse_kin_bench
         self._arm.calls.append(("kin_bench", None))
         self._arm._maybe_raise()
-        return parse_kin_bench("LOOP14000 \nLINK crc=0 rfd=1 txf=0 ovr=2 loop_k=13\n")
+        return _msg(parse_kin_bench(
+            "LOOP14000 \nLINK crc=0 rfd=1 txf=0 ovr=2 loop_k=13\n"))
 
 
 def wait_for(pred, timeout: float = 3.0, interval: float = 0.005) -> bool:

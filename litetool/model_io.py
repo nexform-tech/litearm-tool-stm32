@@ -99,20 +99,23 @@ def read_model(arm) -> Dict[str, Any]:
     body: List[List[float]] = []
     for i in range(NBODY):
         try:
-            v = arm.model.get_body(i)
+            # ⚠ 读一帧的 getter 自 litearm-core 2.0 起返回 `Msg(value, hz, timestamp)`
+            # 信封 (`Msg` **不可迭代** —— 忘记 `.value` 会直接 TypeError), 取原值一律
+            # 走 `.value` (下同; 信封里另两个字段本模块不消费)。
+            v = arm.model.get_body(i).value
         except Exception as e:                  # noqa: BLE001
             raise OSError(f"模型 body{i} 读回失败: {e}") from e
         if len(v) != BODY_PARAMS:
             raise OSError(f"模型 body{i} 长度 {len(v)} != {BODY_PARAMS}")
         body.append([float(x) for x in v])
     try:
-        jm = [float(x) for x in arm.model.get_jm()]
+        jm = [float(x) for x in arm.model.get_jm().value]
     except Exception as e:                      # noqa: BLE001
         raise OSError(f"模型 jm 读回失败: {e}") from e
     if len(jm) != JM_N:
         raise OSError(f"模型 jm 长度 {len(jm)} != {JM_N}")
     try:
-        st = arm.model.status()
+        st = arm.model.status().value
     except Exception as e:                      # noqa: BLE001
         raise OSError(f"模型状态读回失败: {e}") from e
     return {"body": body, "jm": jm, "status": st}
@@ -181,7 +184,7 @@ def revert_model(arm) -> Result:
 
 def get_gravity(arm, q) -> List[float]:
     """给定 q 求 G(q) (0x39) —— 静态重力核查用。"""
-    return [float(x) for x in arm.model.get_gravity(list(q))]
+    return [float(x) for x in arm.model.get_gravity(list(q)).value]
 
 
 # --------------------------------------------------------------------------

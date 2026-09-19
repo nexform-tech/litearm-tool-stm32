@@ -308,7 +308,12 @@ class SdkWorker:
                 silent_since = None
                 continue
             try:
-                st = self._arm.get_state(refresh=True, timeout=self._idle_timeout)
+                # ⚠ 2.0 起 `get_state` 返回 `Msg(value, hz, timestamp)` 信封,
+                # 而**"取不到帧"这件事仍然只体现在 `.value is None`** (信封本身恒非 None)
+                # —— 下面那段静默判定离线 (silent_since) 的判据必须继续看 `.value`,
+                # 忘记 `.value` 会让"链路静默"永远判不出来。
+                st = self._arm.get_state(refresh=True,
+                                         timeout=self._idle_timeout).value
             except pa.CommandRejectedError as e:
                 # 固件对读状态回 ERR（罕见）：不判离线，记一次继续
                 self._log(f"[WARN] 状态读取被固件拒绝: {e}")

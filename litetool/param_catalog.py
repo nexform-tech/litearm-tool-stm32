@@ -157,10 +157,9 @@ JOINT_PARAMS: list[JointParam] = [
     JointParam("friction_v",   "friction_v 粘滞(v2)", "Nm·s/rad", 0.0, 20.0, 4, "vec", 9),
     JointParam("friction_fc0", "friction_fc0 正库仑(v2)", "Nm", 0.0, 50.0, 4, "vec", 10),
     JointParam("friction_fc1", "friction_fc1 负库仑(v2)", "Nm", -50.0, 0.0, 4, "vec", 11),
-    # ---- [段③/段②] ----
-    JointParam("zg_kp",        "zg_kp 零重力弹簧刚度", "Nm/rad",   0.0, 500.0, 1, "vec", 12),
-    JointParam("zg_kd",        "zg_kd 零重力速度阻尼", "Nm·s/rad", 0.0, 5.0,   3, "vec", 13),
-    JointParam("zg_damping",   "zg_damping 零重力附加阻尼", "Nm·s/rad", 0.0, 50.0, 3, "vec", 14),
+    # ---- [段③] ----
+    # [v10 2026-10-30] 0x26 item12/13/14 (zg_kp/zg_kd/zg_damping) 已随零重力去弹簧机删除;
+    # 编号留空不复用 (固件对它们回 ERR 0x02)。
     JointParam("kd_extra",     "kd_extra τ域软件阻尼", "Nm·s/rad", 0.0, 50.0,  3, "vec", 15),
 ]
 
@@ -253,24 +252,8 @@ _JP_META = {
                      "含义: v2 库仑负半支 (速度<0 侧) 幅值, 存为负值 (≤0, 符号契约)。"
                      "单位 Nm, 范围 [-50,0]。与 fc0 合成非对称静摩擦 (SE1 辨识负向常略大)。"
                      "常见误用: 填成正数会被固件整组拒绝/回钳 0。"),
-    # ---- [段③/段②] ----
-    "zg_kp": ("零重力虚拟弹簧刚度 (松手保持)",
-              "仅在【零重力模式】生效: 松手后把位置拉回 q_hold 的刚度。大→松手更不漂, 过大→手感发僵。",
-              "含义: 零重力拖动时的虚拟弹簧刚度 τ=zg_kp·(q_hold−q)。单位 Nm/rad, 范围 [0,500], "
-              "出厂 [60,55,50,50,20,20,20]。拖动中(任一轴 |q̇|>zg_vel_thr)时 q_hold 跟随当前位置、"
-              "弹力≈0=纯零重力手感; 松手后 q_hold 冻结、弹簧把位置保持住。改大→松手更不漂但拖动手感发僵; "
-              "改太小→松手后因重力残差缓慢漂移。"),
-    "zg_kd": ("零重力 MIT 速度阻尼",
-              "零重力模式送到电机的 kd。固件会把它抬到「净阻尼为正」的下限以上(≤5), 填更小无效。",
-              "含义: 零重力模式下发 MIT 帧时的速度阻尼 kd。单位 Nm·s/rad, 范围 [0,5], "
-              "出厂 [0.05×5, 0, 0]。⚠ 固件强制执行 kd ≥ |fv|·drag_gain + drag_kd_margin "
-              "(否则摩擦补偿的 fv·q̇ 项会造成负阻尼自激), 且 ≤5 (达妙 MIT kd 上限)。"
-              "腕部(J6/J7)出厂 0, 会被固件抬到下限。"),
-    "zg_damping": ("零重力附加速度阻尼",
-                   "零重力律里额外减去的阻尼项 −damping·q̇。出厂全 0(不用)。",
-                   "含义: 零重力控制律 τ = G + drag 摩擦 − damping·q̇ + 弹簧 + 墙 中的 damping。"
-                   "单位 Nm·s/rad, 范围 [0,50], 出厂全 0。与 zg_kd 的区别: zg_kd 是发给电机的 MIT kd "
-                   "(电机内 kHz 电流环执行), damping 是在固件里直接算进 τ。通常保持 0, 靠 zg_kd 就够。"),
+    # ---- [段③] ----
+    # [v10] zg_kp / zg_kd / zg_damping 已删除 (零重力为无状态律, kd 由固件按 fv 推导)。
     "kd_extra": ("τ 域软件微分阻尼 (治 movej 起步振铃)",
                  "运动模式专用: τ += kd_extra·(q̇_d−q̇)。出厂 [6,6,6,6,0,0,0] —— 腕部必须 0。",
                  "含义: 加在【力矩】字段上的额外微分阻尼, 用于治 movej 起步振铃。单位 Nm·s/rad, "
@@ -317,10 +300,8 @@ GLOBAL_PARAMS: list[GlobalParam] = [
     GlobalParam("drag_gain",      "拖动摩擦增益",        "",        0.0,    5.0,   3, 10),
     GlobalParam("drag_db",        "拖动 tanh 带宽",      "rad/s",   1e-3,   0.5,   4, 11),
     GlobalParam("drag_kd_margin", "拖动 kd 下限余量",    "Nm·s/rad", 0.0,   5.0,   3, 12),
-    GlobalParam("zg_vel_thr",     "拖动速度阈值",        "rad/s",   0.01,   5.0,   3, 13),
-    GlobalParam("zg_engage_sec",  "零重力进入托举时长",  "s",       0.0,    5.0,   3, 14),
-    GlobalParam("zg_engage_kp",   "托举期 kp",           "Nm/rad",  0.0,   500.0,  1, 15),
-    GlobalParam("zg_engage_kd",   "托举期 kd",           "Nm·s/rad", 0.0,  5.0,   3, 16),
+    # [v10 2026-10-30] item 13..16 (zg_vel_thr/zg_engage_sec/kp/kd) 已随零重力去弹簧机删除;
+    # 编号留空不复用 (固件读写均回 ERR 0x02)。
     GlobalParam("wall_fw_kd",     "墙区叠加固件 kd",     "Nm·s/rad", 0.0,  5.0,   3, 17),
     # ---- [段③ §6.2] ----
     GlobalParam("hold_kp_gain",   "到位增刚倍数",        "",        0.0,    5.0,   3, 18),
@@ -383,26 +364,7 @@ _GP_META = {
                        "单位 Nm·s/rad, 范围 [0,5], 出厂 0.25。保证「净阻尼 = kd − gain·fv > 0」—— "
                        "摩擦补偿的 fv·q̇ 是正反馈(负阻尼), 净阻尼必须为正否则自激。调小→松手后易漂; "
                        "调大→拖动更费力。"),
-    "zg_vel_thr": ("拖动判定速度阈值 (全臂)",
-                   "任一轴 |q̇| 超此值即认为「正在被拖动」→ q_hold 跟随。须高于重力欠补偿的自然漂移速度。",
-                   "含义: 判定「用户正在拖动」的全臂速度阈值 (取各轴 |q̇| 最大值)。单位 rad/s, "
-                   "范围 [0.01,5], 出厂 0.25。超过 → q_hold 跟随当前位置, 弹簧力≈0 (纯零重力手感); "
-                   "低于 → q_hold 冻结, 弹簧把位置保持住。⚠ 若设太小, 重力残差造成的自然漂移(通常 "
-                   "0.05~0.1 rad/s)也会触发跟随 → 弹簧失效、松手会漂。"),
-    "zg_engage_sec": ("零重力进入托举时长",
-                      "进入零重力后先用低刚度托住这么多秒, 再切到纯零重力。防进入瞬间下坠。",
-                      "含义: 进入零重力时「engage」阶段的时长。单位 s, 范围 [0,5], 出厂 0.35。"
-                      "此阶段以 zg_engage_kp/zg_engage_kd 托住当前位置、τ=G+墙, 结束后 q_hold 锚定 "
-                      "当前位姿并转入正常零重力律。调太短→进入瞬间可能下坠; 调太长→进入后要等更久才灵活。"),
-    "zg_engage_kp": ("零重力托举期 kp",
-                     "engage 阶段的位置刚度。出厂 300。",
-                     "含义: 零重力 engage(进入托举)阶段送到电机的 MIT kp。单位 Nm/rad, 范围 [0,500], "
-                     "出厂 300。用于在切换到 kp=0 的纯零重力之前把臂稳住。调大→进入更稳但更死; "
-                     "调小→进入瞬间可能下沉。"),
-    "zg_engage_kd": ("零重力托举期 kd",
-                     "engage 阶段的速度阻尼。出厂 4.2。",
-                     "含义: 零重力 engage 阶段送到电机的 MIT kd。单位 Nm·s/rad, 范围 [0,5], 出厂 4.2。"
-                     "与 zg_engage_kp 配合, 抑制进入瞬间的摆动。"),
+    # [v10] zg_vel_thr / zg_engage_sec/kp/kd 已删除 (零重力无相位、无速度门)。
     "wall_fw_kd": ("墙区叠加固件速度阻尼",
                    "进入限位墙区时给电机 kd 额外叠加的量(封顶 5)。治手-工具-墙耦合振荡。",
                    "含义: 关节进入限位墙区时, 给 MIT kd 叠加的量 (叠加后封顶 5)。单位 Nm·s/rad, "
@@ -506,9 +468,8 @@ def check_joint_limits_relation(joint: dict) -> str | None:
 #                 "ff_mask": int }}
 SCALAR_KEYS = {"fric_db", "wall_margin", "friction_slew", "payload_mass",
                "fric_v2_eps",
-               # [段② 零重力] + [段③ §6.2]
-               "drag_gain", "drag_db", "drag_kd_margin", "zg_vel_thr",
-               "zg_engage_sec", "zg_engage_kp", "zg_engage_kd",
+               # [段② 零重力] + [段③ §6.2]; [v10] zg_vel_thr/zg_engage_* 已删除
+               "drag_gain", "drag_db", "drag_kd_margin",
                "wall_fw_kd", "hold_kp_gain"}
 ARRAY_KEYS = {"payload_com", "gravity"}
 

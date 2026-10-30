@@ -184,7 +184,7 @@ def test_reject_bench_baseline(cfg, baseline):
     """台架 1J 的基线在 J2..J7 是 None ⇒ **拒绝导入**, 且报出第一个空字段。
 
     为什么不能"填满就行": yaml 只提供 4 项 (q_min/q_max/tau_max/摩擦), 而 `kp`/`kd`/
-    `ki`/`i_max`/`wall_*`/`gs`/`is`/`kd_extra`/`zg_*` **没有 yaml 来源** —— 台架上它们
+    `ki`/`i_max`/`wall_*`/`gs`/`is`/`kd_extra` **没有 yaml 来源** —— 台架上它们
     本来就是 None, 无从补齐。硬填会造出一份"看起来完整"的假快照并把它下发。
     """
     bench = copy.deepcopy(baseline)

@@ -35,15 +35,14 @@ _GLOBAL_FIELDS = {
     "wall_margin": "wall_margin", "fric_db": "fric_db", "friction_slew": "friction_slew",
     "payload_mass": "payload_mass", "fric_v2_eps": "fric_v2_eps",
     "drag_gain": "drag_gain", "drag_db": "drag_db", "drag_kd_margin": "drag_kd_margin",
-    "zg_vel_thr": "zg_vel_thr", "zg_engage_sec": "zg_engage_sec",
-    "zg_engage_kp": "zg_engage_kp", "zg_engage_kd": "zg_engage_kd",
+    # [v10] zg_vel_thr / zg_engage_sec/kp/kd 已删除 (零重力无状态律)
     "wall_fw_kd": "wall_fw_kd", "hold_kp_gain": "hold_kp_gain",
 }
 
 #: 全局逐关节数组 (preset 关节键 -> dyn 块数组名)
+#: [v10] zg_kp / zg_kd / zg_damping 已删除。
 _GLOBAL_ARRAYS = {
     "gravity_scale": "gravity_scale", "inertia_scale": "inertia_scale",
-    "zg_kp": "zg_kp", "zg_kd": "zg_kd", "zg_damping": "zg_damping",
 }
 
 _NUM = r"[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?"

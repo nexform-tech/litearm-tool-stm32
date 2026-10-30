@@ -108,7 +108,9 @@ def test_send_global_sends_ff_mask_exactly_once():
     masks = [c for c in arm.calls if c[0] == "set_ff_mask"]
     scalars = [c for c in arm.calls if c[0] == "set_ff_scalar"]
     assert len(masks) == 1
-    assert len(scalars) == 21          # 20 个循环叶 + friction_model
+    # 16 个循环叶 + friction_model = 17
+    # [v10] 删掉 zg_vel_thr/zg_engage_sec/kp/kd 后 21 -> 17
+    assert len(scalars) == 17
     assert all(leaf_ok.values()) and model_ok and mask_ok
 
 

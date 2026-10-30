@@ -22,9 +22,6 @@ joints:
   friction_v: 0.7516675846
   friction_fc0: 1.2365977725
   friction_fc1: -1.2027613259
-  zg_kp: 60.0          # [段②] 零重力虚拟弹簧刚度 Nm/rad
-  zg_kd: 0.05          # [段②] 零重力 MIT 速度阻尼 (固件会抬到下限)
-  zg_damping: 0.0          # [段②] 零重力附加速度阻尼 Nm·s/rad
   kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
 - name: J2
   kp: 400.0
@@ -43,9 +40,6 @@ joints:
   friction_v: 0.6422411449
   friction_fc0: 2.2810411248
   friction_fc1: -1.6098626827
-  zg_kp: 55.0          # [段②] 零重力虚拟弹簧刚度 Nm/rad
-  zg_kd: 0.05          # [段②] 零重力 MIT 速度阻尼 (固件会抬到下限)
-  zg_damping: 0.0          # [段②] 零重力附加速度阻尼 Nm·s/rad
   kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
 - name: J3
   kp: 300.0
@@ -64,9 +58,6 @@ joints:
   friction_v: 0.198322635
   friction_fc0: 0.3937211882
   friction_fc1: -0.4179275663
-  zg_kp: 50.0          # [段②] 零重力虚拟弹簧刚度 Nm/rad
-  zg_kd: 0.05          # [段②] 零重力 MIT 速度阻尼 (固件会抬到下限)
-  zg_damping: 0.0          # [段②] 零重力附加速度阻尼 Nm·s/rad
   kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
 - name: J4
   kp: 300.0
@@ -85,9 +76,6 @@ joints:
   friction_v: 0.2568607392
   friction_fc0: 0.5860973702
   friction_fc1: -0.4929894835
-  zg_kp: 50.0          # [段②] 零重力虚拟弹簧刚度 Nm/rad
-  zg_kd: 0.05          # [段②] 零重力 MIT 速度阻尼 (固件会抬到下限)
-  zg_damping: 0.0          # [段②] 零重力附加速度阻尼 Nm·s/rad
   kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
 - name: J5
   kp: 50.0
@@ -106,9 +94,6 @@ joints:
   friction_v: 0.0291239433
   friction_fc0: 0.0939571985
   friction_fc1: -0.0984806607
-  zg_kp: 20.0          # [段②] 零重力虚拟弹簧刚度 Nm/rad
-  zg_kd: 0.05          # [段②] 零重力 MIT 速度阻尼 (固件会抬到下限)
-  zg_damping: 0.0          # [段②] 零重力附加速度阻尼 Nm·s/rad
   kd_extra: 0.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
 - name: J6
   kp: 50.0
@@ -127,9 +112,6 @@ joints:
   friction_v: 0.0843532073
   friction_fc0: 0.1179036092
   friction_fc1: -0.0867767902
-  zg_kp: 20.0          # [段②] 零重力虚拟弹簧刚度 Nm/rad
-  zg_kd: 0.0          # [段②] 零重力 MIT 速度阻尼 (固件会抬到下限)
-  zg_damping: 0.0          # [段②] 零重力附加速度阻尼 Nm·s/rad
   kd_extra: 0.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
 - name: J7
   kp: 50.0
@@ -148,9 +130,6 @@ joints:
   friction_v: 0.0420698459
   friction_fc0: 0.0771025486
   friction_fc1: -0.0788818003
-  zg_kp: 20.0          # [段②] 零重力虚拟弹簧刚度 Nm/rad
-  zg_kd: 0.0          # [段②] 零重力 MIT 速度阻尼 (固件会抬到下限)
-  zg_damping: 0.0          # [段②] 零重力附加速度阻尼 Nm·s/rad
   kd_extra: 0.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
 global:
   wall_margin: 0.02
@@ -160,10 +139,6 @@ global:
   drag_gain: 1.0
   drag_db: 0.15
   drag_kd_margin: 0.25
-  zg_vel_thr: 0.25
-  zg_engage_sec: 0.35
-  zg_engage_kp: 300.0
-  zg_engage_kd: 4.2
   wall_fw_kd: 0.8
   # ---- [段③ §6.2] ----
   hold_kp_gain: 2.0

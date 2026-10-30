@@ -22,11 +22,12 @@ REPO = Path(__file__).resolve().parents[1]
 JOINT_KEYS = ["kp", "kd", "tau_max", "q_min", "q_max", "friction", "ki", "i_max",
               "wall_stiff", "wall_damp", "wall_tau_max", "gravity_scale", "inertia_scale",
               "friction_v", "friction_fc0", "friction_fc1",
-              "zg_kp", "zg_kd", "zg_damping", "kd_extra"]
+              # [v10] zg_kp/zg_kd/zg_damping 已删除
+              "kd_extra"]
 #: 全局必须一致的键 (ff_mask 除外: se1 预设故意只开 master+friction)
 GLOBAL_KEYS = ["wall_margin", "fric_db", "friction_slew", "payload_mass", "fric_v2_eps",
-               "drag_gain", "drag_db", "drag_kd_margin", "zg_vel_thr", "zg_engage_sec",
-               "zg_engage_kp", "zg_engage_kd", "wall_fw_kd", "hold_kp_gain",
+               # [v10] zg_vel_thr/zg_engage_* 已删除
+               "drag_gain", "drag_db", "drag_kd_margin", "wall_fw_kd", "hold_kp_gain",
                "gravity", "payload_com", "friction_model"]
 
 

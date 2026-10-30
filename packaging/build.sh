@@ -10,7 +10,7 @@
 # ⚠ 三条硬约束 (2026-09-16 实测踩过, 别改):
 #
 #  1. **必须在干净 venv 里打, 且 SDK 必须非可编辑安装。**
-#     开发机的 litearm-core 平时是 `pip install -e`, 装的是一个自定义 finder;
+#     开发机的 litearm-python 平时是 `pip install -e`, 装的是一个自定义 finder;
 #     PyInstaller 的模块图常常跟不进去 -> 打出来的包运行期 ModuleNotFoundError。
 #     这里显式用 venv + `pip install <源码路径>` 避开。
 #
@@ -26,7 +26,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${OUT:-$ROOT/packaging/out}"
 BUILD_VENV="${BUILD_VENV:-/tmp/litearm-tool-build-venv}"
 PYTHON="${PYTHON:-python3}"
-SDK_SRC="${PYLITEARM_STM32:-$ROOT/../litearm-core}"
+SDK_SRC="${PYLITEARM_STM32:-$ROOT/../litearm-python}"
 PKG_NAME="litearm-tool-stm32"
 VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$ROOT/pyproject.toml" | head -1)"
 ARCH="$(uname -m)"
@@ -61,7 +61,7 @@ say "2/6 装 SDK (非可编辑) + 运行期依赖 + PyInstaller"
                            "PyYAML>=6.0" "pyserial>=3.5" pyinstaller
 "$VPY" - <<'PY'
 import sys
-import PyQt5.QtCore as c, pyqtgraph, numpy, yaml, serial, litearm_core as s
+import PyQt5.QtCore as c, pyqtgraph, numpy, yaml, serial, litearm as s
 print(f"  Python {sys.version.split()[0]} | PyQt5 {c.QT_VERSION_STR} | "
       f"pyqtgraph {pyqtgraph.__version__} | numpy {numpy.__version__} | "
       f"SDK {getattr(s, '__version__', '?')}")

@@ -1,4 +1,4 @@
-"""`params_io` —— 在 litearm_core 之上的参数读写形状层。
+"""`params_io` —— 在 litearm 之上的参数读写形状层。
 
 页面要的是「逐写口一个 (ok, code)」；SDK 是「失败即抛异常」。这一层就是那道缝，
 所以既要验**成功路径**的数值正确，也要验**失败路径**的 code 没有被吃掉 ——
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-import litearm_core as pa
+import litearm as pa
 
 from litetool import param_catalog as C
 from litetool import params_io as PIO

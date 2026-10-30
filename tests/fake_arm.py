@@ -1,10 +1,10 @@
-"""鸭子类型的 `litearm_core.Arm` 替身 —— 离线跑 SdkWorker / 参数 I/O 的测试。
+"""鸭子类型的 `litearm.Arm` 替身 —— 离线跑 SdkWorker / 参数 I/O 的测试。
 
 形状刻意与真 SDK 一致，**包括那个私有状态钩子缝隙** (`_a._on_status`)：
 `tests/test_sdk_hook.py` 另有一条测试守着真 SDK 上这个缝隙仍在，故此替身不会
 "替 SDK 保证"一个已经不存在的东西。
 
-⚠ **[2026-09-19] 返回信封**：litearm-core 2.0 起 11 个"读一帧"型 getter 返回
+⚠ **[2026-09-19] 返回信封**：litearm 2.0 起（原 litearm-core） 11 个"读一帧"型 getter 返回
 `Msg(value, hz, timestamp)`（`get_state` / `get_status_now` / `get_tcp` /
 `get_ff_vec` / `get_ff_scalar` / `params.get_joint_param` / `model.get_body` /
 `model.get_jm` / `model.status` / `model.get_gravity` / `diag.kin_bench`），
@@ -17,8 +17,8 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-import litearm_core as pa
-from litearm_core import _protocol as _P
+import litearm as pa
+from litearm import _protocol as _P
 
 DEFAULT_FW = "Litearm1.5.3-7J"
 
@@ -541,7 +541,7 @@ class _FakeDiag:
         self._arm = arm
 
     def kin_bench(self, timeout: float = 8.0):
-        from litearm_core import parse_kin_bench
+        from litearm import parse_kin_bench
         self._arm.calls.append(("kin_bench", None))
         self._arm._maybe_raise()
         return _msg(parse_kin_bench(

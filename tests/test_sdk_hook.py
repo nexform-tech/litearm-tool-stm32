@@ -14,13 +14,13 @@ import inspect
 
 import pytest
 
-import litearm_core as pa
-from litearm_core.arm import Arm, _Ack
+import litearm as pa
+from litearm.arm import Arm, _Ack
 
 
 def test_ack_still_has_on_status_hook_seam():
     assert callable(getattr(_Ack, "_on_status", None)), (
-        "litearm_core 的 _Ack._on_status 不见了 —— "
+        "litearm 的 _Ack._on_status 不见了 —— "
         "请更新 litetool/sdk_worker.py::_attach_state_hook")
 
 
@@ -77,18 +77,18 @@ def test_public_api_surface_intact(name):
                                   "get_joint_param", "all_joint_params",
                                   "reset_factory"])
 def test_joint_params_api_intact(name):
-    from litearm_core.params import JointParams
+    from litearm.params import JointParams
     assert hasattr(JointParams, name)
 
 
 @pytest.mark.parametrize("name", ["start", "stop", "reader", "capture", "dump"])
 def test_log_api_intact(name):
-    from litearm_core.log import ArmLog
+    from litearm.log import ArmLog
     assert hasattr(ArmLog, name)
 
 
 def test_diag_api_intact():
-    from litearm_core.diagnostics import Diagnostics
+    from litearm.diagnostics import Diagnostics
     assert hasattr(Diagnostics, "kin_bench")
 
 

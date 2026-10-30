@@ -10,10 +10,10 @@
 **onedir 而非 onefile**: GUI 应用用 onefile 每次启动都要把 ~200MB 解压到 /tmp
 (首启数秒), 且 `/tmp` 挂 `noexec` 的机器**直接跑不起来**。onedir 解包即用。
 
-**必须用"非可编辑安装"的 litearm_core 来打**: 本仓的 SDK 依赖平时是
-`pip install -e ../litearm-core`。editable 装法装的是一个 `__editable__*.pth` /
+**必须用"非可编辑安装"的 litearm 来打**: 本仓的 SDK 依赖平时是
+`pip install -e ../litearm-python`。editable 装法装的是一个 `__editable__*.pth` /
 自定义 finder, **PyInstaller 的模块图常常跟不进去** —— 打出来的包会在运行期
-`ModuleNotFoundError: litearm_core`。`build.sh` 用一个干净 venv 装非可编辑版,
+`ModuleNotFoundError: litearm`。`build.sh` 用一个干净 venv 装非可编辑版,
 从根上避开这件事 (顺带避开 conda 环境里那个会挡住 PyInstaller 的过时 `pathlib`)。
 
 **排除 PyQt5 的用不到的模块**: `PyQt5-Qt5` 轮子里大头是 QtWebEngine 等,

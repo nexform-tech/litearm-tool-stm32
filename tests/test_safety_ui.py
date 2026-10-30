@@ -16,7 +16,7 @@ pytest.importorskip("numpy")
 
 from PyQt5.QtWidgets import QApplication, QMessageBox     # noqa: E402
 
-import litearm_core as pa                              # noqa: E402
+import litearm as pa                              # noqa: E402
 
 from litetool import settings as settings_mod             # noqa: E402
 from litetool.gui import main_window as MW                # noqa: E402
@@ -338,7 +338,7 @@ def test_emergency_uses_bypass_even_with_queued_tasks(win):
     win._emergency()
 
     # 帧发出去了（旁路）
-    from litearm_core import _protocol as P
+    from litearm import _protocol as P
     assert (P.CMD_EMERGENCY_STOP, b"", False) in arm.frames
     # 零重力会话收了
     assert not arm.zero_g_active

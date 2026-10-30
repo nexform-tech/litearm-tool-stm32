@@ -1,4 +1,4 @@
-"""动力学模型读写 —— 在 `litearm_core.Arm.model` 之上的一层薄封装。
+"""动力学模型读写 —— 在 `litearm.Arm.model` 之上的一层薄封装。
 
 为什么需要这一层 (与 `params_io` 同因): 模型页要的形状是「逐写口下发, 每个写口回一个
 `(ok, code)`」, 这样才能把失败**精确标到某一项**; 而 SDK 是「失败即抛异常」。
@@ -19,7 +19,7 @@ from __future__ import annotations
 import struct
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import litearm_core as pa
+import litearm as pa
 
 from litetool import param_catalog as C
 from litetool.hyy_config import MODEL_BODY_KEYS, MODEL_ABS_MAX
@@ -99,7 +99,7 @@ def read_model(arm) -> Dict[str, Any]:
     body: List[List[float]] = []
     for i in range(NBODY):
         try:
-            # ⚠ 读一帧的 getter 自 litearm-core 2.0 起返回 `Msg(value, hz, timestamp)`
+            # ⚠ 读一帧的 getter 自 litearm（原 litearm-core）2.0 起返回 `Msg(value, hz, timestamp)`
             # 信封 (`Msg` **不可迭代** —— 忘记 `.value` 会直接 TypeError), 取原值一律
             # 走 `.value` (下同; 信封里另两个字段本模块不消费)。
             v = arm.model.get_body(i).value
@@ -178,7 +178,7 @@ def send_model(arm, model: Dict[str, Any], mask: int = MASK_WRITTEN) -> Dict[str
 
 
 def revert_model(arm) -> Result:
-    """只回退模型 (0x37)。**不动 flash** —— 见 `litearm_core.model.ModelParams.revert`。"""
+    """只回退模型 (0x37)。**不动 flash** —— 见 `litearm.model.ModelParams.revert`。"""
     return _call(lambda: arm.model.revert())
 
 

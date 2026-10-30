@@ -77,7 +77,7 @@ class DiagPage(QWidget):
             self.vals[key].setText(str(val))
 
     def set_bench(self, res):
-        """res: `litearm_core.KinBenchResult`。"""
+        """res: `litearm.KinBenchResult`。"""
         self.raw.setPlainText(res.raw)
         for key, val in (("crc_errors", res.crc_errors),
                          ("reply_dropped", res.reply_dropped),

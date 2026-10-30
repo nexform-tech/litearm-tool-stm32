@@ -379,7 +379,7 @@ class ParamsPage(QWidget):
 
     def _refresh_state(self):
         if self._submit is None:
-            self.status.setText("未连接 — 连接后可用（参数读写经 litearm_core）")
+            self.status.setText("未连接 — 连接后可用（参数读写经 litearm）")
             self._set_ops_enabled(False)
             return
         if not self._online:

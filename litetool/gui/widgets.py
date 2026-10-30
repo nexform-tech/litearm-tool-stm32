@@ -1,6 +1,6 @@
 """共用小部件 —— 日志面板 / 常驻状态条 / 横幅 / 左侧分组导航。
 
-这些件被多个页面复用，故与页面解耦：只吃 `litearm_core.RobotState`，
+这些件被多个页面复用，故与页面解耦：只吃 `litearm.RobotState`，
 不依赖 `SdkWorker` 或 MainWindow。
 """
 from __future__ import annotations
@@ -69,7 +69,7 @@ class StatusStrip(QWidget):
         self.arm_lbl = mono_label(50)
         row.addWidget(self.arm_lbl)
 
-        from litearm_core import _protocol as _P
+        from litearm import _protocol as _P
         for bit in range(6):
             chip = QLabel(_P.FLAG_NAMES.get(bit, f"bit{bit}"))
             chip.setFixedWidth(88)

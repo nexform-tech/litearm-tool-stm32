@@ -1,6 +1,6 @@
 # 交互层（本工具的核心依赖）—— 直连固件的薄协议 SDK。
 # 未发布到 PyPI，从源码按可编辑方式装：
-#   pip install -e ../litearm-core
+#   pip install -e ../litearm-python
 pyserial>=3.5
 
 # GUI

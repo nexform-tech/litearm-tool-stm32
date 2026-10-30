@@ -33,7 +33,7 @@ class PlotModel:
             self._recent.clear()
 
     def push(self, st):
-        """st: `litearm_core.RobotState`。"""
+        """st: `litearm.RobotState`。"""
         now = self._clock()
         with self._lock:
             if self._t0 is None:

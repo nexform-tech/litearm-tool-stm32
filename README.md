@@ -2,19 +2,19 @@
 
 LiteArm 运控固件（`litearm-stm32`，STM32H723）的桌面上位机工具。
 
-**交互层一律经 [`litearm-core`](https://) 完成** —— 本工具不再自带协议实现，只做
+**交互层一律经 [`litearm-python`](https://) 完成** —— 本工具不再自带协议实现，只做
 界面、意图层安全与调参台账。传输走板载复合 USB 的 CDC 口（gs_usb + CDC VCP，
 VID:PID `1d50:606f` → `/dev/ttyACM0`）。
 
 ## 架构
 
 ```text
-GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 ──▶ litearm_core.Arm ──▶ USB CDC
+GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 ──▶ litearm.Arm ──▶ USB CDC
      ▲                                        │
      └────── 20Hz 读 worker.state  ◀──────────┘   100Hz 状态钩子 → 曲线环形缓冲
 ```
 
-**串口只有一个所有者。** `litearm_core.Arm` 是按单消费者设计的：`_Ack.expect` /
+**串口只有一个所有者。** `litearm.Arm` 是按单消费者设计的：`_Ack.expect` /
 `pump` / `_read_status` 都直接从同一条串口抢帧。若 GUI 一边轮询状态、一边下命令
 （两条读线程），状态轮询会把命令的 ACK 吃掉 —— 表现为**随机**的"无应答(超时)"。
 
@@ -45,7 +45,7 @@ GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 
 
 ## 覆盖：SDK 公开面 → UI 入口
 
-`litearm-core` v2.0.0 的公开方法逐条对应（`tests/test_sdk_hook.py` 会盯住这张表的
+`litearm-python` v2.0.0 的公开方法逐条对应（`tests/test_sdk_hook.py` 会盯住这张表的
 SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到）。
 
 | SDK | UI 入口 |
@@ -118,7 +118,7 @@ SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到�
 ## 使用
 
 ```bash
-pip install -e ../litearm-core     # 交互层依赖
+pip install -e ../litearm-python     # 交互层依赖
 pip install -r requirements.txt
 python3 main.py                       # 普通用户即可（串口在 dialout 组则无需 root）
 ```
@@ -258,7 +258,7 @@ python3 -m pytest          # 全部离线用例 (无需硬件)
 ## 固件版本兼容性
 
 - **状态帧双布局自适应**：≤1.4.0 = `4+21N`；1.5.0+ = `6+21N`（尾部 joint_fault
-  u16 断轴位图，flags bit9=enabled）。由 `litearm_core._protocol` 按帧长识别。
+  u16 断轴位图，flags bit9=enabled）。由 `litearm._protocol` 按帧长识别。
 - **SDK 连接时卡版本门**：< 1.5.0 直接拒连（`FirmwareMismatchError`）。
 - **1.5.0 语义变化**（M3/M8/L4）：急停锁存**仅 [复位 reset] 可退出**；未使能时发运动
   命令回 `ERR 0x03`；enable 锁存类拒绝回 `ERR 0x06`（须先复位，重试无效）；

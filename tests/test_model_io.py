@@ -107,7 +107,7 @@ def test_send_model_only_writes_body1_to_7_and_jm(fake_arm, model):
 
 def test_send_model_aborts_without_commit_on_frame_failure(fake_arm, model):
     """任一帧失败 ⇒ **立即中止且不 commit** (staging 里的半套不影响生效模型)。"""
-    import litearm_core as pa
+    import litearm as pa
     fake_arm.disable()
     orig = fake_arm.model.set_body
 

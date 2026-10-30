@@ -1,4 +1,4 @@
-"""参数读写 —— 在 `litearm_core.Arm` 之上的一层薄封装。
+"""参数读写 —— 在 `litearm.Arm` 之上的一层薄封装。
 
 为什么需要这一层：参数页要的形状是「逐写口下发，每个写口回一个 `(ok, code)`」，
 这样才能把失败**精确标到表格的某一格**；而 SDK 是「失败即抛异常」。
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import litearm_core as pa
+import litearm as pa
 import yaml
 
 from litetool import param_catalog as C
@@ -117,7 +117,7 @@ def read_snapshot(arm) -> Dict[str, Any]:
                                     for _ in range(C.NUM_JOINTS)]
     for j in range(n):
         try:
-            # ⚠ 读一帧的 getter 自 litearm-core 2.0 起返回 `Msg(value, hz, timestamp)`
+            # ⚠ 读一帧的 getter 自 litearm（原 litearm-core）2.0 起返回 `Msg(value, hz, timestamp)`
             # 信封, 取原值一律走 `.value` (下同; 信封里另两个字段本模块不消费)。
             jp = arm.params.get_joint_param(j).value
         except Exception as e:  # noqa: BLE001

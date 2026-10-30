@@ -1,7 +1,9 @@
 # litearm-tool-stm32 重设计：改为 pylitearm-stm32 之上的纯 GUI 层
 
 > ⚠ **历史文档（2026-09-13）**：文中 `pylitearm-stm32` / `pylitearm_stm32` 是**当时的名字**，
-> 该仓库已改名为 `litearm-core`。
+> 该仓库先后改名为 `litearm-core`，**`litearm-core` 现已废弃**。
+> 现行交互层 = `litearm-python`（import 名 `litearm`）；本工具已于 2026-10-30 完成迁移
+> （见提交 `refactor(tool): 交互层迁到 litearm-python`）。
 
 - **日期**：2026-09-13
 - **目标**：①排版重设计；②功能**全覆盖** `pylitearm-stm32` v1.6.0 的公开面；③交互一律经该 SDK。

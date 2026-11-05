@@ -1,180 +1,157 @@
+English | [简体中文](README.zh-CN.md)
+
+LiteArm Tool STM32 is a desktop host application for the LiteArm motion-control firmware (`litearm-stm32`, STM32H723). It monitors motor state, plots live curves, and sends control and motion commands over the onboard USB CDC port.
+
 # LiteArm Tool STM32
 
-LiteArm 运控固件（`litearm-stm32`，STM32H723）的桌面上位机工具。参照 `/home/llx/dm-tool`
-的交互风格，走 **USB CDC 命令口**（非 SocketCAN——电机 CAN 域被固件独占），提供电机状态
-监控、实时曲线、基础控制与运动指令下发。
+The tool follows the interaction style of `/home/llx/dm-tool` and uses the **USB CDC command port**, not SocketCAN, because the firmware owns the motor CAN domain.
 
-- 传输：板载复合 USB（gs_usb + CDC VCP），VID:PID `1d50:606f` → `/dev/ttyACM0`
-- 协议：`SOF(0xA5) | CMD | LEN | PAYLOAD | CRC16-CCITT-FALSE`，协议实现移植自
-  `litearm-stm32/tools/arm_audit.py`（最新 G8 状态帧布局，经固件审查）
+- Transport: onboard composite USB (gs_usb + CDC VCP), VID:PID `1d50:606f` → `/dev/ttyACM0`
+- Protocol: `SOF(0xA5) | CMD | LEN | PAYLOAD | CRC16-CCITT-FALSE`. The implementation is ported from `litearm-stm32/tools/arm_audit.py` (latest G8 status frame layout, reviewed by firmware).
 
-## 安全模型（重要）
+## Safety model (important)
 
-**一切硬防护的权威在固件**：斜率限制、软限位、NaN/非法值拒绝、看门狗 fail-soft、
-急停兜底均由 STM32 承担，不依赖上位机在线与否。本工具**不**复刻这些防护。
+**The firmware is the authority for all hard protection.** Slew limits, soft limits, NaN and invalid-value rejection, watchdog fail-soft, and the emergency-stop fallback live in the STM32 and do not depend on the host tool being online. This tool does **not** duplicate them.
 
-工具只承担固件防不了的**操作意图**层：
+The tool covers only the operator-intent layer that firmware cannot enforce:
 
-1. **运动页默认锁定**，需勾选"已确认机械臂周围无障碍、急停可及"才解锁；
-   断线 / 急停 / FAULT / EMERGENCY 自动重新锁定。
-2. **Δq 确认框**：`move_j` / `move_mit` 目标与当前位置差 > `confirm_threshold`
-   （默认 0.5 rad）时逐关节列出后确认才发送——防手滑输错数量级。
-3. **常驻急停**：顶栏红色按钮一键直达，走 `emergency_now()` 旁路通道，
-   不会被"在途等待 ACK 的命令"排队阻塞。
-4. `reset` 弹确认框；`enable` 在 FAULT/急停锁存时被禁用。
-5. `move_mit` 仅支持**单帧**下发，不提供 100Hz 连续流控制。
-6. **参数页（调参）**：数值先在 GUI 按固件钳幅校验（越界红标拒发），ff_mask 改动、
-   批量导入应用、`param_save` 固化 均弹确认；下发生效为即时 RAM 修改。
+1. **Motion pages are locked by default.** Unlock requires ticking "the arm is clear and the emergency stop is reachable". Disconnect, emergency stop, FAULT, and EMERGENCY re-lock automatically.
+2. **Δq confirmation.** For `move_j` / `move_mit`, when the target differs from the current position by more than `confirm_threshold` (default 0.5 rad), every joint delta is listed and confirmed before sending. This prevents order-of-magnitude typos.
+3. **Always-available emergency stop.** The red button in the top bar uses the `emergency_now()` bypass, so queued commands waiting for an ACK cannot delay it.
+4. `reset` asks for confirmation. `enable` is disabled while FAULT or emergency-stop latch is active.
+5. `move_mit` supports **single-frame** dispatch only. The tool provides no 100 Hz continuous stream control.
+6. **Parameter page.** Values are clamped and range-checked in the GUI before sending (out-of-range cells turn red and are not sent). ff_mask changes, batch import and apply, and `param_save` all ask for confirmation. Writes take effect in RAM immediately.
 
-## 参数调参页（"参数"页签）
+## Parameter tuning page
 
-运行时参数写口在固件 master 已支持；**读回 0x2B/0x2C 需固件 `27961a1+`**
-（参数读回命令，并行实施已合入 master；`RSP_FF_VEC` 30B / `RSP_FF_SCALAR` 7B 的
-payload 内冗余回填 RSP id，协议解码已按真机布局适配）。
+Firmware master supports the runtime parameter write path. **Readback on 0x2B/0x2C requires firmware `27961a1+`** (parameter readback commands, merged into master; the 30-byte `RSP_FF_VEC` and 7-byte `RSP_FF_SCALAR` payloads redundantly carry the RSP id, and the decoder matches the real device layout).
 
-| 区 | 写口 | 读口 | 说明 |
+| Area | Write | Read | Notes |
 | --- | --- | --- | --- |
-| 关节控制/限位 | `0x22` kp/kd/tau_max、`0x23` q_min/q_max | `0x24`→`0x49` (idx+5×f32) | 逐关节 |
-| 逐关节向量 | `0x26` item 1..11（friction/ki/i_max/wall 系/gs/is/friction_v2） | `0x2B`→`0x4B` (7×f32) | 一次一整组 |
-| 全局标量 | `0x28` item 1..8 | `0x2C`→`0x4C` | 含 payload_mass/gravity/friction_model |
-| ff_mask | `0x27` u32 | `0x2C` item 9（f32 数值载回, ≤0x1FF 精确） | 复选框 |
-| 固化 | `0x25` param_save（须 disable 态） | — | 二次确认 |
+| Joint control / limits | `0x22` kp/kd/tau_max, `0x23` q_min/q_max | `0x24`→`0x49` (idx + 5×f32) | Per joint |
+| Per-joint vectors | `0x26` item 1..11 (friction/ki/i_max/wall/gs/is/friction_v2) | `0x2B`→`0x4B` (7×f32) | One group at a time |
+| Global scalars | `0x28` item 1..8 | `0x2C`→`0x4C` | Includes payload_mass/gravity/friction_model |
+| ff_mask | `0x27` u32 | `0x2C` item 9 (f32 value, exact up to 0x1FF) | Checkbox group |
+| Persist | `0x25` param_save (requires disabled state) | — | Second confirmation |
 
-用法：
+Usage:
 
-1. 连接后切到 **参数** 页 → [刷新当前]：`0x24×7` + `0x2B item1-11` + `0x2C item1-9`
-   一次读回并落表（表里 kp/kd/tau 与固件台账一致，如
-   kp=[360,420,220,220,50,50,50]、ff_mask=0x1BF、friction_model=1）。
-2. 双击表格单元格改值：黄=已改未下发，红=越界/下发失败；[下发选中行]（kp/kd/tau_max
-   与 q_min/q_max 成组整发）或 [下发全部]，每个写口等 ACK，失败格标红并打日志。
-3. 全局标量用下侧 spin/编辑框；ff_mask 用复选框组，[下发全局] 发送（改动会先确认）。
-4. 批量：`presets/`（`current_master_defaults` 出厂 0x1BF / `se1_friction` 只开
-   master+摩擦位）或 [导入 YAML/JSON…]（模板 `templates/params_example.yaml` 含
-   单位/范围注释）→ **diff 预览对话框**逐格显示旧→新 → [应用] 顺序全 ACK →
-   可勾选"下发后固化 Flash"（会再弹二次确认；须先在控制页 [失能]）。
-   [导出当前]：读回全量写 YAML，与导入同构 —— 同文件再导入 diff 应为空（闭环）。
-5. 状态行显示最近操作结果/ACK/ERR；断线自动禁用并提示，重连后恢复。
+1. Connect, open the **Parameters** tab, and click [Refresh current]. The tool reads `0x24×7` + `0x2B item 1-11` + `0x2C item 1-9` in one pass. The table then matches the firmware ledger, for example kp=[360,420,220,220,50,50,50], ff_mask=0x1BF, friction_model=1.
+2. Double-click a cell to edit. Yellow means changed but not sent; red means out of range or failed. Use [Send selected rows] (kp/kd/tau_max and q_min/q_max are sent as pairs) or [Send all]. Every write waits for an ACK; failures are marked red and logged.
+3. Global scalars use the spin boxes below the table; ff_mask uses the checkbox group. [Send global] sends them (changes are confirmed first).
+4. Batch: use `presets/` (`current_master_defaults` factory 0x1BF, `se1_friction` enables only master and friction bits) or [Import YAML/JSON…] (`templates/params_example.yaml` documents units and ranges). A **diff preview** shows every old→new cell, then [Apply] sends all writes in order. "Persist to flash after sending" asks for a second confirmation and requires a disabled arm. [Export current] reads everything back to YAML in the same shape as import, so re-importing the same file produces an empty diff.
+5. The status line shows the last result, ACK, or ERR. Disconnect disables the page; reconnection restores it.
 
-安全闸（防手滑盲发，固件仍兜底）：
-- **必须先 [刷新当前] 成功**才允许 [下发选中行/下发全部/下发全局] 与编辑 ——
-  否则全局控件默认值（如重力=0）可能被盲发导致使能中掉重力补偿。
-- 臂 **enable 态**下下发（0x22/0x23/0x26/0x28/0x27）弹"实时改控制律"二次确认；
-- 限位写（0x23）前逐关节校验当前 q 在新 [q_min,q_max] 内，越界拒绝并提示
-  （防即刻 POS_VIOL/FAULT）；
-- ff_mask 改动、param_save 固化、批量应用 均二次确认；读回应答做 item/sub 关联校验
-  （陈旧应答丢弃重发，超时判失败）。
+Safety gates (the firmware still provides the backstop):
 
-范围镜像表在 `litetool/param_catalog.py`（纯 Python，无 Qt，供测试/yaml/UI 共用），
-数值以固件 `params.c` 与 `flash_store.c apply_loaded` 为准。参数页另配 **"调参指南"**
-页签（动力学/控制律公式+符号↔界面映射、读前须知、"症状→建议参数"速查、可收起/展开的
-逐参数详解——与各参数悬停 tooltip 同源，选中行点 [❓ 调参指南] 直达对应详解）。
-下表为速查：
+- **[Refresh current] must succeed** before [Send selected rows], [Send all], [Send global], or editing. Otherwise default global values (such as gravity=0) could be sent blindly while the arm is enabled and drop gravity compensation.
+- While the arm is **enabled**, writes on 0x22/0x23/0x26/0x28/0x27 ask for "live control-law change" confirmation.
+- Before limit writes (0x23), the tool checks each joint's current q against the new [q_min, q_max] and refuses out-of-range values, preventing an immediate POS_VIOL/FAULT.
+- ff_mask changes, param_save, and batch apply all ask for confirmation. Readback replies are correlated by item/sub; stale replies are dropped and retried, and a timeout is reported as a failure.
 
-- 逐关节：kp[0,500] kd[0,5] tau_max[0.1,120] q_min/q_max[-15,15](须 min<max)
+The range mirror table is in `litetool/param_catalog.py` (pure Python, no Qt, shared by tests, YAML, and the UI). Values follow firmware `params.c` and `flash_store.c apply_loaded`. The parameter page includes a **Tuning guide** tab with dynamics and control-law formulas, symbol-to-UI mapping, a read-before-you-start section, a symptom-to-parameter table, and collapsible per-parameter explanations. The explanations share their source with the hover tooltips; selecting a row and clicking [Tuning guide] jumps to the matching entry.
+
+Quick reference:
+
+- Per joint: kp[0,500] kd[0,5] tau_max[0.1,120] q_min/q_max[-15,15] (min<max)
   friction[0,50] ki[0,1000] i_max[0,100] wall_stiff[0,2000] wall_damp[0,50]
   wall_tau_max[0,50] gs/is[0,20] friction_v[0,20] fc0[0,50] fc1[-50,0]
-- 全局：fric_db[1e-4,0.5] wall_margin[0,0.5] friction_slew[0,500]
+- Global: fric_db[1e-4,0.5] wall_margin[0,0.5] friction_slew[0,500]
   payload_mass[0,20] payload_com[-1,1]×3 gravity[-50,50]×3
-  friction_model{0=v1 误差方向, 1=v2 SE1 速度方向} fric_v2_eps[1e-3,0.5]
-- ff_mask 位：MASTER=0x01 G=0x02 INERTIA=0x04 CORIOLIS=0x08 FRICTION=0x10
+  friction_model{0=v1 error direction, 1=v2 SE1 velocity direction} fric_v2_eps[1e-3,0.5]
+- ff_mask bits: MASTER=0x01 G=0x02 INERTIA=0x04 CORIOLIS=0x08 FRICTION=0x10
   INTEGRAL=0x20 WALL=0x40 QUANT=0x80 VELREF=0x100
 
-## 使用
+## Usage
 
 ```bash
 pip install -r requirements.txt
-python3 main.py            # 普通用户即可（串口在 dialout 组则无需 root）
+python3 main.py            # A normal user account is enough if it is in the dialout group
 ```
 
-启动后：顶栏选串口 → 连接 → 顶栏自动显示固件版本（如 `Litearm1.4.0-7J`）。
-监控页随固件 100Hz 主动上报自动刷新；7 关节整臂 / 1 关节台架按状态帧长自动识别。
+`litearm-python` 2.1.0 or newer is required and is not on PyPI. See [Setup](docs/setup.md) for the exact install command.
 
-配置见 [config.yaml](config.yaml)（仅交互层参数，不含限位）。
+After launch, choose the serial port in the top bar and connect. The top bar shows the firmware version (for example `Litearm1.4.0-7J`). The monitor page refreshes from the firmware's 100 Hz status stream. A 7-joint arm and a 1-joint bench are detected from the status frame length.
 
-## 代码组织
+Configuration lives in [config.yaml](config.yaml). It contains interaction settings only, not limits.
 
-```
-main.py                 入口
+## Code organization
+
+```text
+main.py                 Entry point
 litetool/
-  protocol.py           帧编解码/CRC/G8 状态帧/ACK/ERR/TCP/调参命令（纯函数）
-  param_catalog.py      调参参数目录镜像表 + schema/diff/ff_mask + role/hint/detail（纯 Python）
-  tuning_guide.py       调参指南内容（公式/符号映射/读前须知/症状速查, 纯 Python）
-  checks.py             Δq 意图层确认（唯一"安全"模块）
-  client.py             状态缓存 + 命令 ACK 配对 + 急停旁路通道 + 调参读写
-  transport.py          find_ports + SerialLink 后台读线程
-  settings.py           config.yaml 合并（容错）
+  protocol.py           Frame codec/CRC/G8 status frame/ACK/ERR/TCP/tuning commands (pure functions)
+  param_catalog.py      Tuning parameter catalog mirror + schema/diff/ff_mask + role/hint/detail (pure Python)
+  tuning_guide.py       Tuning guide content (formulas, symbol mapping, prerequisites, symptom table; pure Python)
+  checks.py             Δq intent-layer confirmation (the only "safety" module)
+  client.py             State cache + command ACK pairing + emergency bypass + tuning reads/writes
+  transport.py          find_ports + SerialLink background reader thread
+  settings.py           config.yaml merge (tolerant)
   gui/
-    session.py          Qt-free 会话控制器（读线程→client→PlotModel）
-    bridge.py           跨线程 Qt 信号桥
-    plot_model.py       状态环形缓冲（线程安全）
-    monitor_page.py     监控页    plot_page.py  曲线页
-    control_page.py     控制页    motion_page.py 运动页
-    params_page.py      参数调参页（逐关节表/紧凑全局/批量导入导出/固化成 Flash）
-    tuning_guide_page.py 调参指南页（公式+症状速查 + 可展开逐参数详解, tooltip 同源）
-    main_window.py      主窗口组装 + 命令总线 + 急停/锁定/Δq 流程
-templates/params_example.yaml   导入模板（含单位/范围注释）
-presets/                        出厂 / SE1 摩擦 预设
-tests/                  离线测试（无硬件可跑）
+    session.py          Qt-free session controller (reader → client → PlotModel)
+    bridge.py           Cross-thread Qt signal bridge
+    plot_model.py       Thread-safe state ring buffer
+    monitor_page.py     Monitor page   plot_page.py    Plot page
+    control_page.py     Control page   motion_page.py  Motion page
+    params_page.py      Parameter page (per-joint table, compact globals, batch import/export, flash persist)
+    tuning_guide_page.py Tuning guide page (formulas, symptom table, expandable per-parameter details)
+    main_window.py      Main window assembly + command bus + emergency/lock/Δq flows
+templates/params_example.yaml   Import template with unit and range comments
+presets/                        Factory and SE1 friction presets
+tests/                          Offline tests (run without hardware)
 ```
 
-线程模型：串口读线程（收帧→状态缓存→环形缓冲全量入）｜ 命令工作线程（每次一条，
-`_tx_lock` 保证串行；参数页逐写口等 ACK，忙态经 `busy_changed` 与主命令互斥）｜
-GUI 主线程（20Hz 采样刷新表格/状态灯，30Hz 重绘曲线）。
+Thread model: a serial reader thread (frames → state cache → full-rate ring buffer), a command worker thread (one command at a time, serialized by `_tx_lock`; the parameter page waits for each ACK and is mutually exclusive with the main command path through `busy_changed`), and the GUI main thread (20 Hz table and status refresh, 30 Hz plot redraw).
 
-## 测试
+## Tests
 
 ```bash
-python3 -m pytest          # 94 用例：协议(含调参读口编解码)/checks/客户端(FakeLink)/
-                           #         传输/配置/曲线模型/参数目录(schema/范围/diff)/GUI 冒烟
+python3 -m pytest          # 119 cases: protocol (including tuning read codecs), checks,
+                           # client (FakeLink), transport, settings, plot model,
+                           # parameter catalog (schema/range/diff), GUI smoke
 ```
 
-## 真机验收清单（需 STM32 + 电机/CAN 在线）
+## On-hardware acceptance checklist
 
-> 首次/改动后按顺序执行；任何一步与预期不符即停下排查，不跳过。
+Run this in order on the first setup or after a change. If any step differs from the expected result, stop and investigate. Do not skip steps.
 
-1. **只读连接**（不使能，安全）：
-   - [ ] 顶栏选串口 → 连接 → 状态点变绿"● 在线"，顶栏出现固件版本
-   - [ ] 监控页模式=INIT，帧率 ≈ 100Hz，seq 递增无跳变（丢帧≈0）
-   - [ ] 表格每关节显示 q/dq/tau/温度/err；拔串口 → 变红"● 离线"，命令按钮全禁用
-2. **曲线**：
-   - [ ] 曲线页随状态滚动；勾选 J1~J7 通道切换；"冻结"暂停、"清屏"重绘
-3. **基础控制**（会加磁锁位，臂需受支撑）：
-   - [ ] 使能 enable → ACK；mode 经 move 验证可进入 MOVE_J
-   - [ ] 失能 disable / 清故障 / 速度倍率滑块生效
-   - [ ] 急停 → mode=EMERGENCY + FAULT 灯亮；enable 被拒；**复位 reset** → 回到 INIT、灯全灭
-4. **运动下发**（低速起步，sp=0.1）：
-   - [ ] 运动页锁定横幅显示；勾选确认解锁
-   - [ ] move_j 目标=当前位置+0.1 rad → 下发到位，幅度小
-   - [ ] move_j 目标与当前差 >0.5 rad → 弹 Δq 确认框；取消则不下发
-   - [ ] 下发途中按急停 → 立即锁定 + mode=EMERGENCY；复位后解锁可再动
-5. **异常路径**：
-   - [ ] 命令执行中快速连点其它按钮 → 提示"忙"，不并发下发
-   - [ ] 手动给 move_j 输入 NaN/极大值 → 日志显示固件 ERR 0x02 拒绝，臂不动
+1. **Read-only connection** (disabled, safe):
+   - [ ] Choose the port in the top bar → connect → status turns green "● Online" and the firmware version appears
+   - [ ] Monitor page mode=INIT, frame rate ≈ 100 Hz, seq increases without gaps (frame loss ≈ 0)
+   - [ ] The table shows q/dq/tau/temperature/err per joint. Unplug the cable → red "● Offline" and all command buttons are disabled
+2. **Plots**:
+   - [ ] The plot page scrolls with state. Toggle J1..J7 channels. "Freeze" pauses and "Clear" redraws
+3. **Basic control** (engages the magnetic brake; support the arm):
+   - [ ] enable → ACK; mode enters MOVE_J after a move
+   - [ ] disable / clear fault / speed multiplier slider take effect
+   - [ ] Emergency stop → mode=EMERGENCY and the FAULT lamp lights; enable is rejected; **reset** returns to INIT and all lamps turn off
+4. **Motion dispatch** (start at low speed, sp=0.1):
+   - [ ] The motion page shows the lock banner; tick the confirmation to unlock
+   - [ ] move_j target = current position + 0.1 rad → small movement to target
+   - [ ] move_j target differs by more than 0.5 rad → Δq confirmation appears; cancelling sends nothing
+   - [ ] Press emergency stop during a move → immediate lock + mode=EMERGENCY; reset and unlock to move again
+5. **Failure paths**:
+   - [ ] Click other buttons rapidly during a command → "busy" message, no concurrent dispatch
+   - [ ] Enter NaN or a huge value for move_j → log shows firmware ERR 0x02 rejection and the arm does not move
 
-## 固件版本兼容性（1.4.x / 1.5.0）
+## Firmware compatibility (1.4.x / 1.5.0)
 
-- **状态帧双布局自适应**：≤1.4.0 = `4+21N`；1.5.0(M7) = `6+21N`（尾部 joint_fault
-  u16 断轴位图，flags bit9=enabled）。解码器按帧长自动识别。
-- 旧固件下降级表现："臂"使能指示恒为失能（无 bit9）、无"断轴"标记、seq 为 8 位
-  回绕（丢帧统计在 1.5.0 下才精确——1.5.0 起 seq 为真 u16 且仅发送成功才计数）。
-- **1.5.0 语义变化**（M3/M8/L4）：
-  - 急停/EMERGENCY 锁存**仅 [复位 reset] 可退出**，[失能] 不再解除锁存；
-  - 未使能时发运动命令回 `ERR 0x03`（不再假 ACK），日志显示"被固件拒绝：未就绪/未使能"；
-  - enable 锁存类拒绝回 `ERR 0x06`（须先复位，重试无效），与可重试的 0x03 区分——
-    GUI enable 重试逻辑只对 0x03 重试；
-  - 监控页状态列新增"断轴"（红）：固件 G7 单轴锁存位图直接可见，不再靠 err 推断。
+- **Automatic dual status-frame layout.** ≤1.4.0 is `4+21N`; 1.5.0 (M7) is `6+21N` (trailing joint_fault u16 axis bitmap, flags bit9=enabled). The decoder detects the layout from frame length.
+- Degraded behavior on older firmware: the arm-enabled indicator is always off (no bit9), no axis-break marker, and seq wraps at 8 bits. Frame-loss statistics are only exact on 1.5.0, where seq is a real u16 and increments only on successful sends.
+- **1.5.0 semantic changes** (M3/M8/L4):
+  - Emergency-stop/EMERGENCY latch exits **only through [reset]**. [Disable] no longer clears it.
+  - Motion commands while disabled return `ERR 0x03` (not a fake ACK); the log shows "rejected by firmware: not ready/not enabled".
+  - Enable-latch rejections return `ERR 0x06` (reset first; retrying does not help), distinguished from the retryable 0x03. The GUI enable retry logic retries only 0x03.
+  - The monitor page adds an "axis break" (red) status column, driven directly by the firmware G7 per-axis latch bitmap instead of inferring it from err.
 
-## 固件 1.5.1 变化（2026-09-08）
+## Firmware 1.5.1 changes (2026-09-08)
 
-- 控制频率 400→300Hz（经典 CAN 1M 总线负载 ~72%→~54%）；失能待机探针降频 100Hz
-  （待机负载 ~72%→~18%）。上位机无感：状态流仍 100Hz，看门狗/陈旧判定等时间语义不变。
-- **速度语义（L5 调速器）**：控制页滑块 = 全局封顶（governor），实际速度 =
-  min(move_j 命令 sp, 滑块值)；HOME 不再静默改写全局速度；move_j/move_p 的
-  `sp>1.0` 被固件显式拒绝 `ERR 0x02`（单位陷阱：sp 是 0..1 小数，传 30 不再是全速）。
-- KIN_BENCH 应答含 LINK 诊断行（crc/ovf/rfdrop/txfail 四个链路计数器）。
+- Control rate 400→300 Hz (classic CAN at 1 Mbit/s: bus load ~72%→~54%); the disabled standby probe drops to 100 Hz (standby load ~72%→~18%). The host tool does not notice: the state stream stays at 100 Hz and watchdog/staleness timing is unchanged.
+- **Speed semantics (L5 governor).** The control-page slider is a global ceiling; the effective speed is `min(move_j sp, slider)`. HOME no longer silently rewrites the global speed. The firmware explicitly rejects `sp>1.0` on move_j/move_p with `ERR 0x02` (unit trap: sp is a 0..1 fraction, so passing 30 is not full speed).
+- KIN_BENCH replies include a LINK diagnostic line with four link counters: crc/ovf/rfdrop/txfail.
 
-## 已知边界
+## Known limits
 
-- 状态丢帧只在**接收侧**累积（seq 差分），固件 100Hz 主动推，无 ACK 状态流。
-- 曲线数据 100Hz 全量入环形缓冲（最近 30s），绘图 30Hz 重绘不抽稀。
-- 第一版无自动重连（离线后手动重新连接）。
+- Frame loss accumulates only on the **receive** side (seq differencing). The firmware pushes at 100 Hz and there is no ACK state stream.
+- Plot data at 100 Hz goes into a ring buffer (last 30 s); plotting redraws at 30 Hz without decimation.
+- The first version has no automatic reconnect. Reconnect manually after going offline.

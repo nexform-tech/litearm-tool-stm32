@@ -108,9 +108,8 @@ def test_send_global_sends_ff_mask_exactly_once():
     masks = [c for c in arm.calls if c[0] == "set_ff_mask"]
     scalars = [c for c in arm.calls if c[0] == "set_ff_scalar"]
     assert len(masks) == 1
-    # 16 个循环叶 + friction_model = 17
-    # [v10] 删掉 zg_vel_thr/zg_engage_sec/kp/kd 后 21 -> 17
-    assert len(scalars) == 17
+    # 20 个循环叶 (含 zg_vel_thr/zg_engage_*) + friction_model = 21
+    assert len(scalars) == 21
     assert all(leaf_ok.values()) and model_ok and mask_ok
 
 
@@ -172,3 +171,49 @@ def test_n_readable_clamps_to_arm_and_table_width():
     assert PIO.n_readable(FakeArm(n=7)) == C.NUM_JOINTS
     assert PIO.n_readable(FakeArm(n=1)) == 1
     assert PIO.n_readable(FakeArm(n=0)) == 0
+
+
+# ------------------------------------------------- 板子能力 (supported) 探测
+def test_read_snapshot_reports_only_board_supported_items():
+    """「板子里有什么就显示什么」的核心判据: 能力来自**板子的回答**, 不是本地目录。
+
+    模拟一台没有部分零重力项的固件 (删掉 12/14 与标量 13/15):
+      · supported 里如实少这几项;
+      · 对应参数在快照里为 None / 缺键 (页面据此隐藏);
+      · 其余项照常读回, 不因个别项缺失而整页失败。
+    """
+    arm = FakeArm()
+    del arm.ff_vec[12]
+    del arm.ff_vec[14]
+    del arm.ff_scalar[(13, 0)]
+    del arm.ff_scalar[(15, 0)]
+
+    snap = PIO.read_snapshot(arm)
+
+    assert 12 not in snap["supported"]["vec"]
+    assert 14 not in snap["supported"]["vec"]
+    assert 13 in snap["supported"]["vec"]
+    assert snap["joints"][0]["zg_kp"] is None
+    assert snap["joints"][0]["zg_kd"] == arm.ff_vec[13][0]
+    assert "zg_vel_thr" not in snap["global"]
+    assert "zg_engage_kp" not in snap["global"]
+    # 相邻的支持项仍然可读
+    assert snap["global"]["zg_engage_sec"] == pytest.approx(arm.ff_scalar[(14, 0)])
+    assert snap["global"]["ff_mask"] == 0x1BF
+
+
+def test_probe_does_not_hide_firmware_rejection_as_unsupported():
+    """非 0x00/0x02 的 ERR 是**真故障** —— 绝不能静默当成"板子没有这项"。"""
+    arm = FakeArm()
+    arm.reject(pa._protocol.CMD_GET_FF_VEC, 0x03, "未就绪")
+    with pytest.raises(OSError):
+        PIO._probe_vec(arm)
+
+
+def test_probe_raises_when_readback_is_not_implemented():
+    """老固件对 0x2B 回 ERR{0x2B,0x00} = 无此命令: 整页报错, 不是空表。"""
+    arm = FakeArm()
+    for item in list(arm.ff_vec):
+        del arm.ff_vec[item]
+    with pytest.raises(OSError, match="不支持参数读回"):
+        PIO._probe_vec(arm)

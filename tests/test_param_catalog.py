@@ -25,7 +25,7 @@ def test_joint_catalog_order_and_kind():
         "kp", "kd", "tau_max", "q_min", "q_max",
         "friction", "ki", "i_max", "wall_stiff", "wall_damp", "wall_tau_max",
         "gravity_scale", "inertia_scale", "friction_v", "friction_fc0", "friction_fc1",
-        # [v10] zg_kp/zg_kd/zg_damping 已删除
+        "zg_kp", "zg_kd", "zg_damping",
         "kd_extra"]
     kinds = {p.kind for p in C.JOINT_PARAMS}
     assert kinds == {"ctrl", "limits", "vec"}
@@ -41,7 +41,8 @@ def test_joint_ranges_match_firmware_clamp():
         "wall_tau_max": (0.0, 50.0), "gravity_scale": (0.0, 20.0),
         "inertia_scale": (0.0, 20.0), "friction_v": (0.0, 20.0),
         "friction_fc0": (0.0, 50.0), "friction_fc1": (-50.0, 0.0),
-        # [段③]; [v10] zg_kp/zg_kd/zg_damping 已删除
+        # [段②/③] 零重力三项 (固件仍在用; 是否支持由板子探测决定)
+        "zg_kp": (0.0, 500.0), "zg_kd": (0.0, 5.0), "zg_damping": (0.0, 50.0),
         "kd_extra": (0.0, 50.0),
     }
     assert {p.key: (p.lo, p.hi) for p in C.JOINT_PARAMS} == spec
@@ -54,7 +55,7 @@ def test_vec_item_numbers_match_write_protocol():
                    "wall_damp": 5, "wall_tau_max": 6, "gravity_scale": 7,
                    "inertia_scale": 8, "friction_v": 9, "friction_fc0": 10,
                    "friction_fc1": 11,
-                   # [v10] 12/13/14 已删除 (编号留空, 固件回 ERR)
+                   "zg_kp": 12, "zg_kd": 13, "zg_damping": 14,
                    "kd_extra": 15}
 
 
@@ -63,9 +64,12 @@ def test_global_ranges_match_firmware():
             "friction_slew": (0.0, 500.0), "payload_mass": (0.0, 20.0),
             "payload_com": (-1.0, 1.0), "gravity": (-50.0, 50.0),
             "fric_v2_eps": (1e-3, 0.5),
-            # [段② 零重力]; [v10] zg_vel_thr/zg_engage_* 已删除
+            # [段② 零重力]
             "drag_gain": (0.0, 5.0), "drag_db": (1e-3, 0.5),
-            "drag_kd_margin": (0.0, 5.0), "wall_fw_kd": (0.0, 5.0),
+            "drag_kd_margin": (0.0, 5.0),
+            "zg_vel_thr": (0.01, 5.0), "zg_engage_sec": (0.0, 5.0),
+            "zg_engage_kp": (0.0, 500.0), "zg_engage_kd": (0.0, 5.0),
+            "wall_fw_kd": (0.0, 5.0),
             # [段③ §6.2]
             "hold_kp_gain": (0.0, 5.0)}
     for gp in C.GLOBAL_PARAMS:
@@ -148,13 +152,15 @@ def test_normalize_rejects_bad_structure():
     bad = {"joints": good["joints"][:6], "global": good["global"]}
     with pytest.raises(ValueError):
         C.normalize_snapshot(bad)
-    with pytest.raises(ValueError):          # joints 缺一个字段
-        C.normalize_snapshot({"joints": [{} for _ in range(7)],
+    # 缺字段 / 缺 ff_mask **合法** —— 导出的文件只含本板支持的项, 回导时其余项
+    # 必然缺键 (见 normalize_snapshot 的注释)。缺项 = 不下发, 不是文件损坏。
+    s = C.normalize_snapshot({"joints": [{} for _ in range(7)],
                               "global": good["global"]})
-    with pytest.raises(ValueError):          # 缺 global.ff_mask
-        g = dict(good["global"])
-        del g["ff_mask"]
-        C.normalize_snapshot({"joints": good["joints"], "global": g})
+    assert all(v is None for v in s["joints"][0].values())
+    g = dict(good["global"])
+    del g["ff_mask"]
+    s = C.normalize_snapshot({"joints": good["joints"], "global": g})
+    assert "ff_mask" not in s["global"]
 
 
 def test_normalize_rejects_bad_value():
@@ -192,10 +198,9 @@ def test_snapshot_flat_covers_all_leaves():
     s = _load_example()
     flat = C.snapshot_flat(s)
     assert flat["J1.kp"] == pytest.approx(_preset_j1_kp())
-    # 关节 7×17=119; 全局叶 = 非数组 11 (10 标量 + friction_model)
-    #            + payload_com[3] + gravity[3] = 17, +ff_mask = 18
-    # [v10] 删 zg_kp/zg_kd/zg_damping 与 zg_vel_thr/zg_engage_* 后 22 -> 18
-    assert len(flat) == 7 * len(C.JOINT_PARAMS) + 18
+    # 关节 7×20; 全局叶 = 14 标量 + friction_model + payload_com[3] + gravity[3]
+    #           + ff_mask = 22
+    assert len(flat) == 7 * len(C.JOINT_PARAMS) + 22
     assert "global.gravity[2]" in flat
     assert flat["global.ff_mask"] == 447
 

@@ -63,6 +63,12 @@ class ParamsPage(QWidget):
         self._synced = {}               # {row_key: {joint: float}}
         self._synced_glob = None        # global 基线 (含 ff_mask)
         self._pending_export = None     # 导出流程: 待读回完成后写入的 yaml 路径
+        #: 板子**实测支持**的 item 集合 (来自 read_snapshot 的 supported)。None = 尚未
+        #: 读到 —— 此时全部显示(目录全集), 读到后不支持的项隐藏且不参与下发。
+        self._sup_vec = None
+        self._sup_scalar = None
+        #: 全局参数每个格子的容器 (用于按 supported 隐藏); key -> QWidget
+        self._g_cells = {}
         # ---- [2026-09-14] 动力学模型在线导入 ----
         #: 模型基线**三态**: `_model_supported` = None(未知)/False(老固件)/True(支持);
         #: 只用一个 None 会把"还没读过"与"固件无能力"混为一谈, 导致首次导入被误阻断。
@@ -231,7 +237,9 @@ class ParamsPage(QWidget):
             return cell
 
         for k, gp in enumerate(C.GLOBAL_PARAMS):
-            gg.addWidget(_mk_global_cell(gp), k // NCOL, k % NCOL)
+            cell = _mk_global_cell(gp)
+            self._g_cells[gp.key] = cell
+            gg.addWidget(cell, k // NCOL, k % NCOL)
         self.btn_global = QPushButton("下发全局\n(含 ff_mask)")
         self.btn_global.setMinimumHeight(44)
         self.btn_global.clicked.connect(self._on_apply_global)
@@ -636,6 +644,7 @@ class ParamsPage(QWidget):
                 self.status.setText("刷新失败 — 请检查串口/固件 (读回需固件 27961a1+);"
                                     " 设备参数未确认前禁下发")
             return
+        self._apply_supported(snap.get("supported"))
         self._loading = True
         try:
             for p in C.JOINT_PARAMS:
@@ -695,6 +704,8 @@ class ParamsPage(QWidget):
         self._synced_glob = {k: (list(v) if isinstance(v, list) else v)
                              for k, v in g.items()}
         for gp in C.GLOBAL_PARAMS:
+            if gp.key not in g:
+                continue          # 本板不支持
             v = g[gp.key]
             if gp.key == "friction_model":
                 if self._g_model is not None:
@@ -712,11 +723,40 @@ class ParamsPage(QWidget):
                 w.setValue(float(v))
             for s in (w if isinstance(w, list) else [w]):
                 s.blockSignals(False)
-        bits = C.mask_to_bits(g["ff_mask"])
-        for cb, on in zip(self._ff_cbs, bits):
-            cb.blockSignals(True)
-            cb.setChecked(on)
-            cb.blockSignals(False)
+        if g.get("ff_mask") is not None:
+            bits = C.mask_to_bits(g["ff_mask"])
+            for cb, on in zip(self._ff_cbs, bits):
+                cb.blockSignals(True)
+                cb.setChecked(on)
+                cb.blockSignals(False)
+
+    # ================= 板子能力 (supported) =================
+    def _vec_supported(self, p) -> bool:
+        """板子是否支持这个 0x2B item。None = 还没读到 ⇒ 先按目录全集显示。"""
+        return self._sup_vec is None or p.item in self._sup_vec
+
+    def _scalar_supported(self, gp) -> bool:
+        return self._sup_scalar is None or gp.item in self._sup_scalar
+
+    def _supported_joint_keys(self) -> list:
+        return [p.key for p in C.JOINT_PARAMS
+                if p.kind != "vec" or self._vec_supported(p)]
+
+    def _apply_supported(self, sup) -> None:
+        """按读回的 `supported` 隐藏板子没有的参数行/控件。
+
+        不支持的项**不显示**(按需求"板子里有什么就显示什么"), 并且同时从下发路径里
+        排除 —— 只藏不排会让 [下发全部] 发出一个没有值的项。
+        """
+        if not sup:
+            return
+        self._sup_vec = set(sup.get("vec", []))
+        self._sup_scalar = set(sup.get("scalar", []))
+        for ri, p in enumerate(C.JOINT_PARAMS):
+            if p.kind == "vec":
+                self.table.setRowHidden(ri, not self._vec_supported(p))
+        for key, cell in self._g_cells.items():
+            cell.setVisible(self._scalar_supported(C.GLOBAL_BY_KEY[key]))
 
     def _set_table_val(self, ri, j, val):
         """val=None 表示**本机没有这个关节**（台架 1J 上的 J2..J7）—— 显示 "—" 且封禁编辑。"""
@@ -811,6 +851,8 @@ class ParamsPage(QWidget):
                 mat.append(row)               # 本机没有这个关节
                 continue
             for p in C.JOINT_PARAMS:
+                if p.kind == "vec" and not self._vec_supported(p):
+                    continue          # 板子没有这项: 不显示也不校验
                 v = row[p.key]
                 if v is None:
                     raise ValueError(f"J{j + 1}.{p.key} 为空 — 请先 [刷新当前]")
@@ -881,7 +923,7 @@ class ParamsPage(QWidget):
     def _apply_rows_selected(self, all_rows: bool = False):
         if not self._require_device_sync("下发"):
             return
-        keys = list(JOINT_KEYS) if all_rows else self._selected_row_keys()
+        keys = self._supported_joint_keys() if all_rows else self._selected_row_keys()
         if not keys:
             self.status.setText("未选中行 — 请先点选一行 (或用 [下发全部])")
             return
@@ -905,13 +947,16 @@ class ParamsPage(QWidget):
                 return
         if not self._confirm_enabled_write("逐关节/成组参数下发 (0x22/0x23/0x26)"):
             return
-        ops = self._build_row_ops(group, mat)
+        ops = self._build_row_ops(group, mat, self._sup_vec)
         self._start(f"下发 {len(group)} 行",
                     lambda arm: PIO.run_ops(arm, ops), self._sig_rows_done)
 
     @staticmethod
-    def _build_row_ops(keys: set, mat: list) -> list:
-        """按行生成下发操作; 每项 {cells:[(rk,j,val)...], run(cli)->(ok,code)}"""
+    def _build_row_ops(keys: set, mat: list, sup_vec: set | None = None) -> list:
+        """按行生成下发操作; 每项 {cells:[(rk,j,val)...], run(cli)->(ok,code)}。
+
+        `sup_vec` = 板子支持的 0x2B item 集合; None 表示不筛 (未读到能力/测试直接调用)。
+        """
         ops = []
         active = set(C.JOINT_BY_KEY[k].kind for k in keys)
         present = ParamsPage._present_joints(mat)
@@ -929,6 +974,8 @@ class ParamsPage(QWidget):
                             "run": lambda arm, jj=j, aa=a: PIO.set_joint_limits(arm, jj, *aa)})
         for p in C.JOINT_PARAMS:
             if p.kind != "vec" or p.key not in keys:
+                continue
+            if sup_vec is not None and p.item not in sup_vec:
                 continue
             vals = [mat[j][p.key] for j in present]
             cells = [(p.key, j, mat[j][p.key]) for j in present]
@@ -972,6 +1019,8 @@ class ParamsPage(QWidget):
     def _global_from_ui(self) -> dict:
         g = {}
         for gp in C.GLOBAL_PARAMS:
+            if not self._scalar_supported(gp):
+                continue          # 板子没有这项 —— 不显示, 也不能被"全量下发"带出去
             if gp.key == "friction_model":
                 g[gp.key] = self._g_model.currentIndex()
             elif gp.is_array:
@@ -1013,6 +1062,8 @@ class ParamsPage(QWidget):
             sg = {k: (list(v) if isinstance(v, list) else v)
                   for k, v in self._synced_glob.items()}
         for gp in C.GLOBAL_PARAMS:
+            if gp.key not in g:
+                continue          # 本板不支持
             if gp.key == "friction_model":
                 if fre_model_ok:
                     sg[gp.key] = g[gp.key]
@@ -1020,7 +1071,7 @@ class ParamsPage(QWidget):
             if leaf_ok.get(gp.key):
                 sg[gp.key] = (list(g[gp.key]) if isinstance(g[gp.key], list)
                               else g[gp.key])
-        if mask_ok:
+        if mask_ok and "ff_mask" in g:
             sg["ff_mask"] = g["ff_mask"]
         self._loading = True
         try:
@@ -1106,7 +1157,8 @@ class ParamsPage(QWidget):
         # [2026-09-14 范围收窄] 只发**实际变了的那几项**: 摩擦三元组。
         # 不发 kp/kd/tau_max/限位 (0x22/0x23) —— 它们与设备当前值相同, 重写一遍是纯粹的
         # 额外风险 (基线若陈旧就会把旧值写回设备), 且与"只导辨识产物"的裁决不符。
-        ops = self._build_row_ops({"friction_v", "friction_fc0", "friction_fc1"}, mat)
+        ops = self._build_row_ops({"friction_v", "friction_fc0", "friction_fc1"},
+                                  mat, self._sup_vec)
 
         def worker(arm):
             # ① 摩擦三元组 (0x26 item 9/10/11)
@@ -1163,7 +1215,7 @@ class ParamsPage(QWidget):
             return
         if not self._confirm_enabled_write("批量整套参数下发 (0x22/0x23/0x26/0x28/0x27)"):
             return
-        ops = self._build_row_ops(set(JOINT_KEYS), mat)
+        ops = self._build_row_ops(set(self._supported_joint_keys()), mat, self._sup_vec)
         glob = snap["global"]
 
         def worker(arm):
@@ -1185,7 +1237,8 @@ class ParamsPage(QWidget):
         (正是本项目 Critical-4 花力气防的那个反模式), 而且不会自愈。
         """
         self._baseline = {
-            "joints": [{k: float(v) for k, v in d.items()} for d in mat],
+            "joints": [{k: float(v) for k, v in d.items() if v is not None}
+                       for d in mat],
             "global": {k: (list(v) if isinstance(v, list) else v) for k, v in sg.items()}}
         if model_now is not None:
             self._model_baseline = model_now
@@ -1216,6 +1269,8 @@ class ParamsPage(QWidget):
             sg = {k: (list(v) if isinstance(v, list) else v)
                   for k, v in (old if old is not None else g).items()}
             for gp in C.GLOBAL_PARAMS:
+                if gp.key not in g:
+                    continue      # 本板不支持
                 if gp.key == "friction_model":
                     if fre_model_ok:
                         sg[gp.key] = g[gp.key]
@@ -1223,7 +1278,7 @@ class ParamsPage(QWidget):
                 if leaf_ok.get(gp.key):
                     sg[gp.key] = (list(g[gp.key]) if isinstance(g[gp.key], list)
                                   else g[gp.key])
-            if mask_ok:
+            if mask_ok and "ff_mask" in g:
                 sg["ff_mask"] = g["ff_mask"]
             self._loading = True
             try:

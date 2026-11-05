@@ -429,11 +429,19 @@ class FakeArm:
     def get_ff_vec(self, item: int, timeout: float = 1.0):
         self.calls.append(("get_ff_vec", item))
         self._maybe_raise()
+        if item not in self.ff_vec:
+            # 真固件对不支持的 item 回 ERR{0x2B,0x02}。替身必须**用同一个异常**表达,
+            # 否则探测层分不清"板子没有这项"与"读取出故障"(KeyError 会被当成后者)。
+            raise pa.CommandRejectedError(
+                f"get_ff_vec item {item} 非法", cmd=_P.CMD_GET_FF_VEC, code=0x02)
         return _msg(list(self.ff_vec[item]))
 
     def get_ff_scalar(self, item: int, sub: int = 0, timeout: float = 1.0):
         self.calls.append(("get_ff_scalar", (item, sub)))
         self._maybe_raise()
+        if (item, sub) not in self.ff_scalar:
+            raise pa.CommandRejectedError(
+                f"get_ff_scalar item {item} 非法", cmd=_P.CMD_GET_FF_SCALAR, code=0x02)
         return _msg(self.ff_scalar[(item, sub)])
 
     def get_ff_mask(self, timeout: float = 1.0):

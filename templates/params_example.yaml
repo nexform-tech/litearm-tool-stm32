@@ -40,6 +40,9 @@ joints:
     friction_v: 0.7516675846   # (v2) 粘滞摩擦 Nm·s/rad
     friction_fc0: 1.2365977725 # (v2) 正库仑 Nm
     friction_fc1: -1.2027613259 # (v2) 负库仑 Nm
+    zg_kp: 60.0          # 零重力虚拟弹簧刚度 Nm/rad (松手保持)
+    zg_kd: 0.05           # 零重力 MIT 速度阻尼 Nm·s/rad (固件会抬到下限)
+    zg_damping: 0.0       # 零重力附加阻尼 Nm·s/rad
     kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
   - name: J2
     kp: 400.0
@@ -58,6 +61,9 @@ joints:
     friction_v: 0.6422411449
     friction_fc0: 2.2810411248
     friction_fc1: -1.6098626827
+    zg_kp: 55.0          # 零重力虚拟弹簧刚度 Nm/rad (松手保持)
+    zg_kd: 0.05           # 零重力 MIT 速度阻尼 Nm·s/rad (固件会抬到下限)
+    zg_damping: 0.0       # 零重力附加阻尼 Nm·s/rad
     kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
   - name: J3
     kp: 300.0
@@ -76,6 +82,9 @@ joints:
     friction_v: 0.198322635
     friction_fc0: 0.3937211882
     friction_fc1: -0.4179275663
+    zg_kp: 50.0          # 零重力虚拟弹簧刚度 Nm/rad (松手保持)
+    zg_kd: 0.05           # 零重力 MIT 速度阻尼 Nm·s/rad (固件会抬到下限)
+    zg_damping: 0.0       # 零重力附加阻尼 Nm·s/rad
     kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
   - name: J4          # 非对称限位 (上限近 0)
     kp: 300.0
@@ -94,6 +103,9 @@ joints:
     friction_v: 0.2568607392
     friction_fc0: 0.5860973702
     friction_fc1: -0.4929894835
+    zg_kp: 50.0          # 零重力虚拟弹簧刚度 Nm/rad (松手保持)
+    zg_kd: 0.05           # 零重力 MIT 速度阻尼 Nm·s/rad (固件会抬到下限)
+    zg_damping: 0.0       # 零重力附加阻尼 Nm·s/rad
     kd_extra: 6.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
   - name: J5
     kp: 50.0
@@ -112,6 +124,9 @@ joints:
     friction_v: 0.0291239433
     friction_fc0: 0.0939571985
     friction_fc1: -0.0984806607
+    zg_kp: 20.0          # 零重力虚拟弹簧刚度 Nm/rad (松手保持)
+    zg_kd: 0.05           # 零重力 MIT 速度阻尼 Nm·s/rad (固件会抬到下限)
+    zg_damping: 0.0       # 零重力附加阻尼 Nm·s/rad
     kd_extra: 0.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
   - name: J6
     kp: 50.0
@@ -130,6 +145,9 @@ joints:
     friction_v: 0.0843532073
     friction_fc0: 0.1179036092
     friction_fc1: -0.0867767902
+    zg_kp: 20.0          # 零重力虚拟弹簧刚度 Nm/rad (松手保持)
+    zg_kd: 0.0           # 零重力 MIT 速度阻尼 Nm·s/rad (固件会抬到下限)
+    zg_damping: 0.0       # 零重力附加阻尼 Nm·s/rad
     kd_extra: 0.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
   - name: J7
     kp: 50.0
@@ -148,6 +166,9 @@ joints:
     friction_v: 0.0420698459
     friction_fc0: 0.0771025486
     friction_fc1: -0.0788818003
+    zg_kp: 20.0          # 零重力虚拟弹簧刚度 Nm/rad (松手保持)
+    zg_kd: 0.0           # 零重力 MIT 速度阻尼 Nm·s/rad (固件会抬到下限)
+    zg_damping: 0.0       # 零重力附加阻尼 Nm·s/rad
     kd_extra: 0.0          # [段③] τ 域软件微分阻尼 (腕部必须 0)
 global:
   fric_db: 0.02        # 摩擦 tanh 死区带宽 rad [1e-4,0.5]
@@ -158,10 +179,14 @@ global:
   gravity: [0.0, 0.0, -9.81]     # base 系重力向量 m/s² [-50,50]×3
   friction_model: 1    # 0=v1 误差方向 tanh; 1=v2 SE1 速度方向
   fric_v2_eps: 0.05    # v2 tanh 平滑带宽 rad/s [1e-3,0.5]
-  # ---- [段② 零重力] (v10: 无状态律; zg_kp/zg_kd/zg_damping/zg_vel_thr/zg_engage_* 已删) ----
+  # ---- [段② 零重力] (是否生效以板子探测为准: 固件不支持时 GUI 自动隐藏) ----
   drag_gain: 1.0          # 拖动摩擦整体增益 [0,5]
   drag_db: 0.15           # 拖动库仑 tanh 带宽 rad/s [1e-3,0.5]
   drag_kd_margin: 0.25    # 拖动 kd 下限余量 Nm·s/rad [0,5]
+  zg_vel_thr: 0.25       # 拖动判定速度阈值 rad/s [0.01,5]
+  zg_engage_sec: 0.35    # 进入零重力托举时长 s [0,5]
+  zg_engage_kp: 300.0     # 托举期 kp Nm/rad [0,500]
+  zg_engage_kd: 4.2      # 托举期 kd Nm·s/rad [0,5]
   wall_fw_kd: 0.8         # 墙区叠加固件 kd Nm·s/rad [0,5]
   # ---- [段③ §6.2] ----
   hold_kp_gain: 2.0       # 到位增刚倍数 [0,5]

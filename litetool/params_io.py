@@ -106,11 +106,91 @@ def _all_joint_keys() -> List[str]:
         [p.key for p in C.JOINT_PARAMS if p.kind == "vec"]
 
 
-def read_snapshot(arm) -> Dict[str, Any]:
-    """读回全部参数（逐关节 0x24 + 逐向量 0x2B + 逐标量 0x2C + ff_mask）。
+#: 探测上界 —— 固件当前 vec 1..15 / scalar 1..18。留余量, 固件扩容后不必同步改这里。
+#: 不支持的 item 固件**立即**回 ERR{cmd,0x02} (不是静默丢弃), 所以多探几项只是一串
+#: 快往返, 不会按超时计。
+PROBE_MAX_ITEM = 32
 
-    任何一项读不到即抛 `OSError` —— 半截快照比没有更危险（会被当成基线）。
-    超出本机关节数的列填 `None`（台架 1J 上 J2..J7 如此），页面按"—"显示且不可下发。
+
+def _is_unsupported(e: BaseException) -> bool:
+    """固件回 `ERR{cmd,code}` 里表示"没有这个 item"的两档。
+
+    0x00 = 无此命令 (老固件根本没实现 0x2B/0x2C);
+    0x02 = 数值/参数非法 (本固件对越界 item 的答复)。
+    其余 (`None` = 超时/链路) 是**真故障**, 必须上报, 不能当成"不支持"静默隐藏。
+    """
+    return int(getattr(e, "code", -1)) in (0x00, 0x02)
+
+
+def _probe_vec(arm) -> Dict[int, List[float]]:
+    """逐个 item 试读 0x2B, 返回 {item: 7 值} (只含固件支持的项)。
+
+    先用已知基础项 item 1 做**闸门**: 它在任何实现 0x2B 的固件上都存在。若它都失败
+    (ERR 0x00 或不回应), 直接判"固件不支持参数读回" —— 否则老固件上 32 次超时会把
+    一次 [刷新当前] 拖成半分钟。
+    """
+    try:
+        first = arm.get_ff_vec(1, timeout=0.5).value
+    except pa.CommandRejectedError as e:
+        if _is_unsupported(e):
+            raise OSError("固件不支持参数读回 (0x2B) —— 需更新固件") from e
+        raise OSError(f"get_ff_vec item 1 读回被拒: {e}") from e
+    except Exception as e:  # noqa: BLE001
+        raise OSError(f"参数读回无应答 (get_ff_vec item 1): {e}") from e
+    out: Dict[int, List[float]] = {1: list(first)}
+    for item in range(2, PROBE_MAX_ITEM + 1):
+        try:
+            out[item] = list(arm.get_ff_vec(item, timeout=0.5).value)
+        except pa.CommandRejectedError as e:
+            if _is_unsupported(e):
+                continue
+            raise OSError(f"get_ff_vec item {item} 读回被拒: {e}") from e
+        except Exception as e:  # noqa: BLE001
+            raise OSError(f"get_ff_vec item {item} 读回失败: {e}") from e
+    return out
+
+
+def _probe_scalar(arm) -> Dict[int, float]:
+    """逐个 item 试读 0x2C (sub=0), 返回 {item: 值} (只含固件支持的项)。
+
+    item 9 是 ff_mask 的只读扩展, 由 `get_ff_mask` 单独读, 这里跳过。
+    """
+    try:
+        first = arm.get_ff_scalar(1, 0, timeout=0.5).value
+    except pa.CommandRejectedError as e:
+        if _is_unsupported(e):
+            raise OSError("固件不支持参数读回 (0x2C) —— 需更新固件") from e
+        raise OSError(f"get_ff_scalar item 1 读回被拒: {e}") from e
+    except Exception as e:  # noqa: BLE001
+        raise OSError(f"参数读回无应答 (get_ff_scalar item 1): {e}") from e
+    out: Dict[int, float] = {1: float(first)}
+    for item in range(2, PROBE_MAX_ITEM + 1):
+        if item == C.FF_MASK_SCALAR_ITEM:
+            continue
+        try:
+            out[item] = float(arm.get_ff_scalar(item, 0, timeout=0.5).value)
+        except pa.CommandRejectedError as e:
+            if _is_unsupported(e):
+                continue
+            raise OSError(f"get_ff_scalar item {item} 读回被拒: {e}") from e
+        except Exception as e:  # noqa: BLE001
+            raise OSError(f"get_ff_scalar item {item} 读回失败: {e}") from e
+    return out
+
+
+def read_snapshot(arm) -> Dict[str, Any]:
+    """读回**板子实际支持**的全部参数, 并如实报告能力集合。
+
+    读取顺序: 逐关节 0x24 (恒存在) → 探测 0x2B → 探测 0x2C → ff_mask。
+
+    与旧实现的差别 (2026-10-31): 旧版按本地 `param_catalog` 逐项读, **任何一项读不到
+    就整页失败**, 而且目录里没有的项永远不读 —— 目录一旦与板子固件脱节, 要么看不到
+    板子真有的参数, 要么被一个不存在的项拖垮整页。现在:
+      · 支持与否**由板子回答** (`ERR{cmd,0x02}`/`0x00` = 不支持, 跳过);
+      · 超时/链路错误仍是**真故障**, 照旧抛 `OSError` (不能静默当成"不支持");
+      · 返回值多一个 `supported`: `{"vec": [...], "scalar": [...]}`, 页面据此隐藏行。
+
+    超出本机关节数的列填 `None`（台架 1J 上 J2..J7 如此）, 页面按"—"显示且不可下发。
     """
     n = n_readable(arm)
     joints: List[Dict[str, Any]] = [dict.fromkeys(_all_joint_keys())
@@ -124,32 +204,35 @@ def read_snapshot(arm) -> Dict[str, Any]:
             raise OSError(f"J{j + 1} 读回失败 (get_joint_param): {e}") from e
         joints[j].update(kp=jp.kp, kd=jp.kd, tau_max=jp.tau_max,
                          q_min=jp.q_min, q_max=jp.q_max)
+
+    vec = _probe_vec(arm)
     for p in C.JOINT_PARAMS:
-        if p.kind != "vec":
+        if p.kind != "vec" or p.item not in vec:
             continue
-        try:
-            # 向量是模型级（固件恒 7 槽），台架也读得到；只取本机有的那几列
-            vals = arm.get_ff_vec(p.item).value
-        except Exception as e:  # noqa: BLE001
-            raise OSError(f"{p.key} 读回失败 (get_ff_vec item {p.item}): {e}") from e
+        vals = vec[p.item]
         for j in range(min(len(vals), n)):
             joints[j][p.key] = vals[j]
 
+    scalar = _probe_scalar(arm)
     glob: Dict[str, Any] = {}
     for gp in C.GLOBAL_PARAMS:
-        try:
-            if gp.is_array:
-                glob[gp.key] = [arm.get_ff_scalar(gp.item, sub).value for sub in gp.subs]
-            else:
-                v = arm.get_ff_scalar(gp.item, gp.subs[0]).value
-                glob[gp.key] = int(round(v)) if gp.model else float(v)
-        except Exception as e:  # noqa: BLE001
-            raise OSError(f"{gp.key} 读回失败 (get_ff_scalar): {e}") from e
+        if gp.item not in scalar:
+            continue
+        if gp.is_array:
+            try:
+                glob[gp.key] = [arm.get_ff_scalar(gp.item, sub, timeout=0.5).value
+                                for sub in gp.subs]
+            except Exception as e:  # noqa: BLE001
+                raise OSError(f"{gp.key} 读回失败 (get_ff_scalar): {e}") from e
+        else:
+            v = scalar[gp.item]
+            glob[gp.key] = int(round(v)) if gp.model else float(v)
     try:
-        glob["ff_mask"] = int(arm.get_ff_mask()) & C.FF_ALL_MASK
+        glob["ff_mask"] = int(arm.get_ff_mask(timeout=0.5)) & C.FF_ALL_MASK
     except Exception as e:  # noqa: BLE001
         raise OSError(f"ff_mask 读回失败 (get_ff_mask): {e}") from e
-    return {"joints": joints, "global": glob}
+    return {"joints": joints, "global": glob,
+            "supported": {"vec": sorted(vec), "scalar": sorted(scalar)}}
 
 
 # --------------------------------------------------------------------------
@@ -174,10 +257,15 @@ def run_ops(arm, ops: List[dict]) -> Dict[str, dict]:
 
 
 def send_global(arm, g: dict):
-    """按 0x28/0x27 顺序下发 global；返回 (g, leaf_ok{key:bool}, model_ok, mask_ok)。"""
+    """按 0x28/0x27 顺序下发 global；返回 (g, leaf_ok{key:bool}, model_ok, mask_ok)。
+
+    ⚠ 只发 `g` 里**存在**的键 —— `read_snapshot` 现在只返回板子支持的项; 若这里仍按
+    目录全量取 `g[key]`, 不支持的项不是 KeyError 就是被写成一个默认值 (0), 两种都在
+    替用户改他没见过的参数。
+    """
     leaf_ok: Dict[str, bool] = {}
     for gp in C.GLOBAL_PARAMS:
-        if gp.key == "friction_model":
+        if gp.key == "friction_model" or gp.key not in g:
             continue
         v = g[gp.key]
         if gp.is_array:
@@ -186,9 +274,12 @@ def send_global(arm, g: dict):
         else:
             good = set_ff_scalar(arm, gp.item, gp.subs[0], float(v))[0]
         leaf_ok[gp.key] = good
-    model_ok = set_ff_scalar(arm, C.GLOBAL_BY_KEY["friction_model"].item, 0,
-                             float(g["friction_model"]))[0]
-    mask_ok = set_ff_mask(arm, int(g["ff_mask"]))[0]
+    if "friction_model" in g:
+        model_ok = set_ff_scalar(arm, C.GLOBAL_BY_KEY["friction_model"].item, 0,
+                                 float(g["friction_model"]))[0]
+    else:
+        model_ok = True
+    mask_ok = set_ff_mask(arm, int(g["ff_mask"]))[0] if "ff_mask" in g else True
     return g, leaf_ok, model_ok, mask_ok
 
 
@@ -199,7 +290,11 @@ def dump_snapshot(snap: dict, path: str, model: dict = None) -> None:
     `read_snapshot()` 保持纯参数 (不并模型, 否则老固件下 [刷新当前] 会整页死掉),
     所以存档若不带模型, SOP 的"断电重上电后重读模型比对"就**没有数据源**。
     """
-    doc = {"joints": [{"name": f"J{i + 1}", **jd} for i, jd in enumerate(snap["joints"])],
+    # 只写有值的项: 读回里 `None` = 本板不支持 / 本机没有这个关节, 写成 null 只会
+    # 让回导时多一层"这个键为什么是空的"的噪音 (normalize_snapshot 两种都接受)。
+    doc = {"joints": [{"name": f"J{i + 1}",
+                       **{k: v for k, v in jd.items() if v is not None}}
+                      for i, jd in enumerate(snap["joints"])],
            "global": {k: (list(v) if isinstance(v, list) else v)
                       for k, v in snap["global"].items()}}
     if model is not None:

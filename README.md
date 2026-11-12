@@ -224,16 +224,16 @@ python3 -m pytest          # 全部离线用例 (无需硬件)
 | 区 | 写口 | 读口 | 说明 |
 | --- | --- | --- | --- |
 | 关节控制/限位 | `0x22` kp/kd/tau_max、`0x23` q_min/q_max | `0x24` | 逐关节 |
-| 逐关节向量 | `0x26` item 1..15 | `0x2B` | 一次一整组（7 值） |
-| 全局标量 | `0x28` item 1..8 + 10..18 | `0x2C` | 含 payload_mass/gravity/friction_model/zg/hold_kp_gain |
+| 逐关节向量 | `0x26` item 1..11 + 15/16 | `0x2B` | 一次一整组（7 值）；12..14 已随 1.11.0 删除；16=drag_gain（1.12.0） |
+| 全局标量 | `0x28` item 1..8 + 11 + 17,18 | `0x2C` | 含 payload_mass/gravity/friction_model/drag_db/hold_kp_gain；item10 已于 1.12.0 删除 |
 | ff_mask | `0x27` u32 | `0x2C` item 9 | 复选框组 |
 | 出厂复位 | `0x36` param_reset（须失能） | — | 二次确认 |
 | 固化 | `0x25` param_save（须失能） | — | 二次确认 |
 
 用法：
 
-1. 连接后切到 **参数表** 页 → [刷新当前]：`0x24×7` + `0x2B item1-15` + `0x2C item1-9`
-   一次读回并落表。
+1. 连接后切到 **参数表** 页 → [刷新当前]：`0x24×7` + `0x2B` 逐 item + `0x2C` 逐 item
+   一次读回并落表（不支持项由固件回 `ERR{cmd,0x02}`, 自动跳过）。
 2. 双击表格单元格改值：黄=已改未发，红=越界/下发失败；[下发选中行]（kp/kd/tau_max
    与 q_min/q_max 成组整发）或 [下发全部]，每个写口等 ACK，失败格标红并打日志。
 3. 全局标量用下侧 spin/编辑框；ff_mask 用复选框组，[下发全局] 发送（改动会先确认）。
@@ -253,9 +253,11 @@ python3 -m pytest          # 全部离线用例 (无需硬件)
 - 逐关节：kp[0,500] kd[0,5] tau_max[0.1,120] q_min/q_max[-15,15](须 min<max)
   friction[0,50] ki[0,1000] i_max[0,100] wall_stiff[0,2000] wall_damp[0,50]
   wall_tau_max[0,50] gs/is[0,20] friction_v[0,20] fc0[0,50] fc1[-50,0]
+  drag_gain[0,5]（1.12.0 起逐关节，0x26 item16）
 - 全局：fric_db[1e-4,0.5] wall_margin[0,0.5] friction_slew[0,500]
   payload_mass[0,20] payload_com[-1,1]×3 gravity[-50,50]×3
   friction_model{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 拖动版} fric_v2_eps[1e-3,0.5]
+  drag_db[0,0.5](0=硬 sign) wall_fw_kd[0,5] hold_kp_gain[0,5]
 - ff_mask 位：MASTER=0x01 G=0x02 INERTIA=0x04 CORIOLIS=0x08 FRICTION=0x10
   INTEGRAL=0x20 WALL=0x40 QUANT=0x80 VELREF=0x100
 
@@ -273,6 +275,8 @@ python3 -m pytest          # 全部离线用例 (无需硬件)
   KIN_BENCH 应答含 LINK 诊断行（crc/ovf/rfdrop/txfail）。
 - **1.5.2**：M6b 电机超时保护（`RID_TIMEOUT=9`）。监控页 err 列会把 13 显示为
   "超时保护"。
+- **1.12.0（2026-11-12）**：拖动摩擦补偿比例改为**逐关节**（`0x26` item16），
+  `0x28` item10 全局 `drag_gain` 删除；flash 升 **v11**，刷机后需重新导入模型与参数。
 
 ## 已知边界
 

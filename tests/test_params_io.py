@@ -108,8 +108,9 @@ def test_send_global_sends_ff_mask_exactly_once():
     masks = [c for c in arm.calls if c[0] == "set_ff_mask"]
     scalars = [c for c in arm.calls if c[0] == "set_ff_scalar"]
     assert len(masks) == 1
-    # 20 个循环叶 (含 zg_vel_thr/zg_engage_*) + friction_model = 21
-    assert len(scalars) == 21
+    # [1.12.0] drag_gain 移出 global: 14 个循环叶 (8 标量 + payload_com×3
+    #          + gravity×3) + friction_model = 15
+    assert len(scalars) == 15
     assert all(leaf_ok.values()) and model_ok and mask_ok
 
 
@@ -177,28 +178,25 @@ def test_n_readable_clamps_to_arm_and_table_width():
 def test_read_snapshot_reports_only_board_supported_items():
     """「板子里有什么就显示什么」的核心判据: 能力来自**板子的回答**, 不是本地目录。
 
-    模拟一台没有部分零重力项的固件 (删掉 12/14 与标量 13/15):
+    模拟一台缺个别项的固件 (删掉 vec 15 与标量 17):
       · supported 里如实少这几项;
       · 对应参数在快照里为 None / 缺键 (页面据此隐藏);
       · 其余项照常读回, 不因个别项缺失而整页失败。
     """
     arm = FakeArm()
-    del arm.ff_vec[12]
-    del arm.ff_vec[14]
-    del arm.ff_scalar[(13, 0)]
-    del arm.ff_scalar[(15, 0)]
+    del arm.ff_vec[15]          # kd_extra
+    del arm.ff_scalar[(17, 0)]  # wall_fw_kd
 
     snap = PIO.read_snapshot(arm)
 
-    assert 12 not in snap["supported"]["vec"]
-    assert 14 not in snap["supported"]["vec"]
-    assert 13 in snap["supported"]["vec"]
-    assert snap["joints"][0]["zg_kp"] is None
-    assert snap["joints"][0]["zg_kd"] == arm.ff_vec[13][0]
-    assert "zg_vel_thr" not in snap["global"]
-    assert "zg_engage_kp" not in snap["global"]
+    assert 15 not in snap["supported"]["vec"]
+    assert 17 not in snap["supported"]["scalar"]
+    assert 11 in snap["supported"]["vec"]
+    assert snap["joints"][0]["kd_extra"] is None
+    assert snap["joints"][0]["friction_v"] == arm.ff_vec[9][0]
+    assert "wall_fw_kd" not in snap["global"]
     # 相邻的支持项仍然可读
-    assert snap["global"]["zg_engage_sec"] == pytest.approx(arm.ff_scalar[(14, 0)])
+    assert snap["global"]["hold_kp_gain"] == pytest.approx(arm.ff_scalar[(18, 0)])
     assert snap["global"]["ff_mask"] == 0x1BF
 
 

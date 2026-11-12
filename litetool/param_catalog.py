@@ -97,7 +97,7 @@ class JointParam:
     hi: float
     decimals: int
     kind: str
-    item: int = 0     # kind=='vec' 时的 0x26 item 号 (1..11)
+    item: int = 0     # kind=='vec' 时的 0x26 item 号 (1..11, 15, 16)
     safety: bool = False  # [2026-09-14] 安全类字段: 变化必须独立高亮 + 强制说明, 不适用比率阈值
     role: str = ""    # [调参指南] 作用一句话 (tooltip 用)
     hint: str = ""    # [调参指南] 改参提示 (tooltip 用)
@@ -158,13 +158,15 @@ JOINT_PARAMS: list[JointParam] = [
     JointParam("friction_fc0", "friction_fc0 正库仑(v2)", "Nm", 0.0, 50.0, 4, "vec", 10),
     JointParam("friction_fc1", "friction_fc1 负库仑(v2)", "Nm", -50.0, 0.0, 4, "vec", 11),
     # ---- [段③/段②] ----
-    # ⚠ [2026-10-31 订正] 13-16 曾被判为"v10 已删除"而删; 实测 Litearm1.10.1-7J
-    #   仍正常读写 (固件 params.c 的守卫/case 都在)。目录保留全集, 是否支持由
-    #   **板子探测**决定 (params_io.read_snapshot), 不支持的项页面自动隐藏。
-    JointParam("zg_kp",        "zg_kp 零重力弹簧刚度", "Nm/rad",   0.0, 500.0, 1, "vec", 12),
-    JointParam("zg_kd",        "zg_kd 零重力速度阻尼", "Nm·s/rad", 0.0, 5.0,   3, "vec", 13),
-    JointParam("zg_damping",   "zg_damping 零重力附加阻尼", "Nm·s/rad", 0.0, 50.0, 3, "vec", 14),
+    # [2026-11-09] 固件 1.11.0 起 0x26 item 12/13/14 (zg_kp/zg_kd/zg_damping)
+    #   **确定删除**, item 15 (kd_extra) 之后编号留空不复用 —— 固件对 12..14 回
+    #   ERR{0x26,0x02}。目录里不留已删项: 留着会让「导入」把老 yaml 的键原样下发,
+    #   一整串 0x02 把导入判成部分失败。是否支持仍由**板子探测**决定
+    #   (params_io.read_snapshot), 老固件真有的项会由 supported 集合暴露。
     JointParam("kd_extra",     "kd_extra τ域软件阻尼", "Nm·s/rad", 0.0, 50.0,  3, "vec", 15),
+    # [1.12.0] 逐关节拖动摩擦补偿比例 (厂商 MITDragDemo 的 coeff[i]); 与物理摩擦参数
+    #   fv/fc0/fc1 分工: 后者是摩擦模型, 本项是"补多少"的比例。
+    JointParam("drag_gain",    "drag_gain 拖动补偿比例", "", 0.0, 5.0, 3, "vec", 16),
 ]
 
 # [调参指南] 逐关节 tooltip 元数据: key -> (role, hint, detail)。
@@ -257,23 +259,6 @@ _JP_META = {
                      "单位 Nm, 范围 [-50,0]。与 fc0 合成非对称静摩擦 (SE1 辨识负向常略大)。"
                      "常见误用: 填成正数会被固件整组拒绝/回钳 0。"),
     # ---- [段③/段②] ----
-    "zg_kp": ("零重力虚拟弹簧刚度 (松手保持)",
-              "仅在【零重力模式】生效: 松手后把位置拉回 q_hold 的刚度。大→松手更不漂, 过大→手感发僵。",
-              "含义: 零重力拖动时的虚拟弹簧刚度 τ=zg_kp·(q_hold−q)。单位 Nm/rad, 范围 [0,500], "
-              "出厂 [60,55,50,50,20,20,20]。拖动中(任一轴 |q̇|>zg_vel_thr)时 q_hold 跟随当前位置、"
-              "弹力≈0=纯零重力手感; 松手后 q_hold 冻结、弹簧把位置保持住。改大→松手更不漂但拖动手感发僵; "
-              "改太小→松手后因重力残差缓慢漂移。"),
-    "zg_kd": ("零重力 MIT 速度阻尼",
-              "零重力模式送到电机的 kd。固件会把它抬到「净阻尼为正」的下限以上(≤5), 填更小无效。",
-              "含义: 零重力模式下发 MIT 帧时的速度阻尼 kd。单位 Nm·s/rad, 范围 [0,5], "
-              "出厂 [0.05×5, 0, 0]。⚠ 固件强制执行 kd ≥ |fv|·drag_gain + drag_kd_margin "
-              "(否则摩擦补偿的 fv·q̇ 项会造成负阻尼自激), 且 ≤5 (达妙 MIT kd 上限)。"
-              "腕部(J6/J7)出厂 0, 会被固件抬到下限。"),
-    "zg_damping": ("零重力附加速度阻尼",
-                   "零重力律里额外减去的阻尼项 −damping·q̇。出厂全 0(不用)。",
-                   "含义: 零重力控制律 τ = G + drag 摩擦 − damping·q̇ + 弹簧 + 墙 中的 damping。"
-                   "单位 Nm·s/rad, 范围 [0,50], 出厂全 0。与 zg_kd 的区别: zg_kd 是发给电机的 MIT kd "
-                   "(电机内 kHz 电流环执行), damping 是在固件里直接算进 τ。通常保持 0, 靠 zg_kd 就够。"),
     "kd_extra": ("τ 域软件微分阻尼 (治 movej 起步振铃)",
                  "运动模式专用: τ += kd_extra·(q̇_d−q̇)。出厂 [6,6,6,6,0,0,0] —— 腕部必须 0。",
                  "含义: 加在【力矩】字段上的额外微分阻尼, 用于治 movej 起步振铃。单位 Nm·s/rad, "
@@ -281,6 +266,16 @@ _JP_META = {
                  "且硬上限 5, 而 τ 虽同为 12-bit 但量程是力矩, 分辨率高得多。⚠ **腕部(J5/J6/J7)必须保持 0**: "
                  "J7 惯量极小(≈0.0002 kg·m²), kd_extra/J 远快于控制周期, 延迟阻尼会反向激发"
                  "(上游实测全轴加 3 时 J7 冲到 −3.33 rad/s 被速度包络中止)。"),
+    # ---- [1.12.0] 逐关节拖动摩擦补偿比例 ----
+    "drag_gain": ("拖动摩擦补偿比例 (逐关节)",
+                  "零重力/拖动专用: 每个关节单独补多少摩擦。出厂全 0.6 (厂商 coeff 同值); "
+                  "调大=补得更狠, 调小=更涩。只影响拖动路径。",
+                  "含义: 拖动摩擦补偿 τ_drag = drag_gain_j·(fv_j·q̇ + 库仑_j) 的逐关节比例。"
+                  "单位无量纲, 范围 [0,5], 出厂全 0.6 (与厂商 MITDragDemo 的 coeff[ROBOT_MAX_DOF] 同值)。"
+                  "与 friction_v/fc0/fc1 分工: 后者是辨识出来的物理摩擦参数, 本项只是补偿比例。"
+                  "⚠ 本固件(1.12.0)零重力律固定 kd=0.1、drag_db=0=硬 sign, 不再有 kd 下限/二次稳定项; "
+                  "gain 调得明显大于 1 会过补偿, 可能出现单向漂移。"
+                  "只在【零重力】与 friction_model=2 路径生效, 常规模运动控制不吃本项。"),
 }
 #: [2026-09-14] 安全类字段 —— 它们**同时是控制包络**: `tau_max` 是力矩幅值的唯一兜底
 #: (`control_loop.c` 的 clampf), `q_min/q_max` 是软限位。yaml 的 `torque_max`
@@ -317,14 +312,11 @@ GLOBAL_PARAMS: list[GlobalParam] = [
     GlobalParam("friction_model", "摩擦模型",          "",      0.0,     2.0,    0, 7, (0,), True),
     GlobalParam("fric_v2_eps",   "v2 tanh 平滑带宽",   "rad/s", 1e-3,    0.5,    4, 8),
     # ---- [段② 零重力] item 从 10 起 (9 = ff_mask 读回保留) ----
-    GlobalParam("drag_gain",      "拖动摩擦增益",        "",        0.0,    5.0,   3, 10),
-    GlobalParam("drag_db",        "拖动 tanh 带宽",      "rad/s",   1e-3,   0.5,   4, 11),
-    GlobalParam("drag_kd_margin", "拖动 kd 下限余量",    "Nm·s/rad", 0.0,   5.0,   3, 12),
-    # [2026-10-31 订正] 13..16 在 Litearm1.10.1 上仍可读写 (见 JOINT_PARAMS 同注)。
-    GlobalParam("zg_vel_thr",     "拖动速度阈值",        "rad/s",   0.01,   5.0,   3, 13),
-    GlobalParam("zg_engage_sec",  "零重力进入托举时长",  "s",       0.0,    5.0,   3, 14),
-    GlobalParam("zg_engage_kp",   "托举期 kp",           "Nm/rad",  0.0,   500.0,  1, 15),
-    GlobalParam("zg_engage_kd",   "托举期 kd",           "Nm·s/rad", 0.0,  5.0,   3, 16),
+    # [1.12.0] item 10 全局 drag_gain **已删除**, 改为 0x26 item16 逐关节 (见 JOINT_PARAMS)。
+    # drag_db 允许 0: 0 = 硬 sign (零速满幅库仑); 出厂 0.0 (厂商 MITDragDemo 同款)
+    GlobalParam("drag_db",        "拖动库仑死区带宽",    "rad/s",   0.0,    0.5,   4, 11),
+    # [2026-11-09] 12..16 (drag_kd_margin/zg_vel_thr/zg_engage_*) 固件 1.11.0
+    #   已删除, 编号留空不复用 (同见 JOINT_PARAMS 注)。
     GlobalParam("wall_fw_kd",     "墙区叠加固件 kd",     "Nm·s/rad", 0.0,  5.0,   3, 17),
     # ---- [段③ §6.2] ----
     GlobalParam("hold_kp_gain",   "到位增刚倍数",        "",        0.0,    5.0,   3, 18),
@@ -370,43 +362,14 @@ _GP_META = {
                     "ε 越小速度方向切换越陡(更贴理想库仑, 但过零更冲); 越大摩擦被抹平(补偿不足)。"
                     "通常保持出厂, 需要「硬一点」才小步减小。"),
     # ---- [段② 零重力] ----
-    "drag_gain": ("拖动摩擦整体增益",
-                  "零重力律里拖动摩擦补偿的整体倍率。出厂 1.0; 调大=摩擦补得更狠(可能过补)。",
-                  "含义: 拖动专用摩擦补偿 τ_drag 的整体增益。单位无量纲, 范围 [0,5], 出厂 1.0。"
-                  "τ_drag = gain·(fv·q̇ + a1·sign(q̇)·tanh(u) + a2·tanh(u))。拖动手感发涩→可略增; "
-                  "⚠ gain·fv 是【负阻尼】, 增大会同时削弱净阻尼, 需同步抬 zg_kd。"),
-    "drag_db": ("拖动库仑 tanh 带宽",
-                "零重力专用库仑的平滑带宽。越大越柔和。出厂 0.15。",
-                "含义: 拖动摩擦里 u=(q̇/drag_db)² 的带宽。单位 rad/s, 范围 [1e-3,0.5], 出厂 0.15。"
-                "⚠ 与 fric_v2_eps 不同: 这个只在【拖动】用, 且零速处一二阶行为经过特别设计"
-                "(sign(v)·tanh((v/db)²) 在零速的一阶导为 0), 保证静止时不注入能量 —— "
-                "普通 tanh 版曾致真机跑飞。通常不要改。"),
-    "drag_kd_margin": ("拖动 kd 下限余量",
-                       "固件把零重力 kd 抬到 |fv|·drag_gain + 本值。出厂 0.25。",
-                       "含义: 零重力模式 kd 下限的余量项: kd ≥ |fv|·drag_gain + drag_kd_margin (≤5)。"
-                       "单位 Nm·s/rad, 范围 [0,5], 出厂 0.25。保证「净阻尼 = kd − gain·fv > 0」—— "
-                       "摩擦补偿的 fv·q̇ 是正反馈(负阻尼), 净阻尼必须为正否则自激。调小→松手后易漂; "
-                       "调大→拖动更费力。"),
-    "zg_vel_thr": ("拖动判定速度阈值 (全臂)",
-                   "任一轴 |q̇| 超此值即认为「正在被拖动」→ q_hold 跟随。须高于重力欠补偿的自然漂移速度。",
-                   "含义: 判定「用户正在拖动」的全臂速度阈值 (取各轴 |q̇| 最大值)。单位 rad/s, "
-                   "范围 [0.01,5], 出厂 0.25。超过 → q_hold 跟随当前位置, 弹簧力≈0 (纯零重力手感); "
-                   "低于 → q_hold 冻结, 弹簧把位置保持住。⚠ 若设太小, 重力残差造成的自然漂移(通常 "
-                   "0.05~0.1 rad/s)也会触发跟随 → 弹簧失效、松手会漂。"),
-    "zg_engage_sec": ("零重力进入托举时长",
-                      "进入零重力后先用低刚度托住这么多秒, 再切到纯零重力。防进入瞬间下坠。",
-                      "含义: 进入零重力时「engage」阶段的时长。单位 s, 范围 [0,5], 出厂 0.35。"
-                      "此阶段以 zg_engage_kp/zg_engage_kd 托住当前位置、τ=G+墙, 结束后 q_hold 锚定 "
-                      "当前位姿并转入正常零重力律。调太短→进入瞬间可能下坠; 调太长→进入后要等更久才灵活。"),
-    "zg_engage_kp": ("零重力托举期 kp",
-                     "engage 阶段的位置刚度。出厂 300。",
-                     "含义: 零重力 engage(进入托举)阶段送到电机的 MIT kp。单位 Nm/rad, 范围 [0,500], "
-                     "出厂 300。用于在切换到 kp=0 的纯零重力之前把臂稳住。调大→进入更稳但更死; "
-                     "调小→进入瞬间可能下沉。"),
-    "zg_engage_kd": ("零重力托举期 kd",
-                     "engage 阶段的速度阻尼。出厂 4.2。",
-                     "含义: 零重力 engage 阶段送到电机的 MIT kd。单位 Nm·s/rad, 范围 [0,5], 出厂 4.2。"
-                     "与 zg_engage_kp 配合, 抑制进入瞬间的摆动。"),
+    # [1.12.0] drag_gain 已移到 JOINT_PARAMS/_JP_META (0x26 item16, 逐关节)。
+    "drag_db": ("拖动库仑死区带宽",
+                "零重力专用库仑的死区带宽。出厂 0.0 = 硬 sign (与厂商 MITDragDemo 同款); "
+                "真机抖振时再退 0.02/0.05 走 tanh。",
+                "含义: 拖动摩擦里 u=(q̇/drag_db)² 的死区带宽。单位 rad/s, 范围 [0,0.5], 出厂 0.0。"
+                "0.0 = 硬 sign 库仑: 只要 q̇≠0 就给满幅库仑推力, 零速处没有死区 —— "
+                "真机出现零速抖振时再改 0.02/0.05, 走 tanh (零速一阶导为 0)。"
+                "与 fric_v2_eps 不同: 这个只在【拖动】用。"),
     "wall_fw_kd": ("墙区叠加固件速度阻尼",
                    "进入限位墙区时给电机 kd 额外叠加的量(封顶 5)。治手-工具-墙耦合振荡。",
                    "含义: 关节进入限位墙区时, 给 MIT kd 叠加的量 (叠加后封顶 5)。单位 Nm·s/rad, "
@@ -511,8 +474,8 @@ def check_joint_limits_relation(joint: dict) -> str | None:
 SCALAR_KEYS = {"fric_db", "wall_margin", "friction_slew", "payload_mass",
                "fric_v2_eps",
                # [段② 零重力] + [段③ §6.2]
-               "drag_gain", "drag_db", "drag_kd_margin",
-               "zg_vel_thr", "zg_engage_sec", "zg_engage_kp", "zg_engage_kd",
+               # [1.12.0] drag_gain 已移到 JOINT_PARAMS (0x26 item16)
+               "drag_db",
                "wall_fw_kd", "hold_kp_gain"}
 ARRAY_KEYS = {"payload_com", "gravity"}
 

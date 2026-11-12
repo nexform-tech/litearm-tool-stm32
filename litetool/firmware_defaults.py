@@ -27,6 +27,7 @@ _JOINT_FIELDS = {
     "friction": "friction", "ki": "ki", "i_max": "i_max",
     "wall_stiff": "wall_stiff", "wall_damp": "wall_damp", "wall_tau_max": "wall_tau_max",
     "friction_v": "friction_v", "friction_fc0": "friction_fc0", "friction_fc1": "friction_fc1",
+    "drag_gain": "drag_gain",
     "kd_extra": "kd_extra",
 }
 
@@ -34,16 +35,14 @@ _JOINT_FIELDS = {
 _GLOBAL_FIELDS = {
     "wall_margin": "wall_margin", "fric_db": "fric_db", "friction_slew": "friction_slew",
     "payload_mass": "payload_mass", "fric_v2_eps": "fric_v2_eps",
-    "drag_gain": "drag_gain", "drag_db": "drag_db", "drag_kd_margin": "drag_kd_margin",
-    "zg_vel_thr": "zg_vel_thr", "zg_engage_sec": "zg_engage_sec",
-    "zg_engage_kp": "zg_engage_kp", "zg_engage_kd": "zg_engage_kd",
+    "drag_db": "drag_db",
     "wall_fw_kd": "wall_fw_kd", "hold_kp_gain": "hold_kp_gain",
 }
 
 #: 全局逐关节数组 (preset 关节键 -> dyn 块数组名)
+#: [2026-11-09] zg_kp/zg_kd/zg_damping 随固件 1.11.0 无状态零重力律删除。
 _GLOBAL_ARRAYS = {
     "gravity_scale": "gravity_scale", "inertia_scale": "inertia_scale",
-    "zg_kp": "zg_kp", "zg_kd": "zg_kd", "zg_damping": "zg_damping",
 }
 
 _NUM = r"[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?"

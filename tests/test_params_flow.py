@@ -342,32 +342,33 @@ def test_emergency_drop_pending_keeps_page_usable():
 def test_supported_hides_unsupported_rows_and_global_cells():
     """「板子里有什么就显示什么」: 探测不到的 0x2B/0x2C 项从界面消失, 且不下发。"""
     _app, pg, _rec = _page(load_snap())
-    sup = {"vec": [i for i in range(1, 16) if i not in (12, 14)],
-           "scalar": [i for i in range(1, 19) if i not in (13, 15)]}
+    sup = {"vec": [i for i in range(1, 16) if i != 15],
+           "scalar": [i for i in range(1, 19) if i != 17]}
     pg._apply_supported(sup)
 
     for ri, p in enumerate(C.JOINT_PARAMS):
         if p.kind == "vec":
             assert pg.table.isRowHidden(ri) == (p.item not in sup["vec"]), p.key
-    # item 12/14 缺 -> 对应行隐藏; item 13 仍在
-    assert pg.table.isRowHidden(PP.JOINT_KEYS.index("zg_kp"))
-    assert not pg.table.isRowHidden(PP.JOINT_KEYS.index("zg_kd"))
+    # item 15 缺 -> kd_extra 行隐藏; 其余 vec 仍在
+    assert pg.table.isRowHidden(PP.JOINT_KEYS.index("kd_extra"))
+    assert not pg.table.isRowHidden(PP.JOINT_KEYS.index("friction_v"))
 
     # ⚠ 用 isHidden(): 页面没 show 时 isVisible() 恒 False, 没有判别力
-    assert pg._g_cells["zg_vel_thr"].isHidden()
-    assert pg._g_cells["zg_engage_kp"].isHidden()
-    assert not pg._g_cells["zg_engage_sec"].isHidden()
-    assert not pg._g_cells["wall_fw_kd"].isHidden()
+    assert pg._g_cells["wall_fw_kd"].isHidden()
+    assert not pg._g_cells["hold_kp_gain"].isHidden()
+
+    # [1.12.0] drag_gain 已是逐关节行 (item16), 本用例的板子不支持 item16 -> 行隐藏
+    assert pg.table.isRowHidden(PP.JOINT_KEYS.index("drag_gain"))
 
     g = pg._global_from_ui()
-    assert "zg_vel_thr" not in g and "zg_engage_kp" not in g
-    assert "zg_engage_sec" in g and "wall_fw_kd" in g
+    assert "wall_fw_kd" not in g
+    assert "hold_kp_gain" in g and "drag_gain" not in g
 
 
 def test_build_row_ops_skips_vec_items_the_board_does_not_have():
     mat = load_snap()["joints"]
-    ops = PP.ParamsPage._build_row_ops(set(PP.JOINT_KEYS), mat, set(range(1, 12)) | {15})
+    ops = PP.ParamsPage._build_row_ops(set(PP.JOINT_KEYS), mat, set(range(1, 12)))
     keys = {k for op in ops for (k, _j, _v) in op["cells"]}
-    assert "zg_kp" not in keys and "zg_kd" not in keys and "zg_damping" not in keys
-    assert "kd_extra" in keys
+    assert "kd_extra" not in keys                # vec item 15 板子没有
+    assert "friction_v" in keys
     assert "kp" in keys and "q_min" in keys      # ctrl/limits 恒在

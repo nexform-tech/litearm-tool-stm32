@@ -23,16 +23,13 @@ from litetool import firmware_defaults as FD  # noqa: E402
 
 _JOINT_ORDER = ["kp", "kd", "tau_max", "q_min", "q_max", "friction", "ki", "i_max",
                 "wall_stiff", "wall_damp", "wall_tau_max", "gravity_scale", "inertia_scale",
-                "friction_v", "friction_fc0", "friction_fc1",
-                "zg_kp", "zg_kd", "zg_damping", "kd_extra"]
+                "friction_v", "friction_fc0", "friction_fc1", "drag_gain", "kd_extra"]
 #: 尾字段的注释 (与人工维护版保持一致)
 _JOINT_COMMENT = {
     "kd_extra": "# [段③] τ 域软件微分阻尼 (腕部必须 0)",
 }
 _GLOBAL_SCALARS = ["wall_margin", "fric_db", "fric_v2_eps"]
-_GLOBAL_ZG = ["drag_gain", "drag_db", "drag_kd_margin",
-              "zg_vel_thr", "zg_engage_sec", "zg_engage_kp", "zg_engage_kd",
-              "wall_fw_kd"]
+_GLOBAL_ZG = ["drag_db", "wall_fw_kd"]
 _GLOBAL_MISC = ["hold_kp_gain", "friction_slew", "payload_mass"]
 
 _HEADER = """# ============================================================

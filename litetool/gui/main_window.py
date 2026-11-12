@@ -30,7 +30,7 @@ from litetool.gui.pages.overview_page import OverviewPage
 from litetool.gui.pages.params_page import ParamsPage
 from litetool.gui.pages.zerog_page import ZeroGPage
 from litetool.gui.widgets import LogPanel, NavList, StatusStrip
-from litetool.sdk_worker import SdkWorker
+from litetool.sdk_worker import SdkWorker, exit_zero_g_and_hold
 
 TICK_MS = 50          # 20Hz：状态条/表格刷新
 PLOT_MS = 33          # 30Hz：曲线重绘
@@ -670,8 +670,12 @@ class MainWindow(QMainWindow):
             self._submit(f"零重力进入 (保活 {period:.3f}s)",
                          lambda arm: arm.zero_g_start(period), done)
         else:
-            self._submit("零重力退出",
-                         lambda arm: arm.zero_g_stop(True), self._after_simple)
+            # 退出后必须补一条零位移 movej 保持：只发 off 的话，0.1 s 后命令
+            # 看门狗会进 fail-soft (tau=0, kp=0.6×)，臂按 G/(0.6·kp) 下沉。
+            # 显式退出不是 PC 掉线；movej 到当前 q 会把模式留在 MOVE_J，
+            # 固件在该模式每拍自动 kick 看门狗 + 持续重力前馈。
+            self._submit("零重力退出 + 保持",
+                         lambda arm: exit_zero_g_and_hold(arm), self._after_simple)
 
     # ================= 诊断 =================
     def _on_bench(self):

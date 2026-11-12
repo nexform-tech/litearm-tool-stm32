@@ -35,7 +35,8 @@ from litearm import _protocol as _P
 
 from litetool.plot_model import PlotModel
 
-__all__ = ["SdkWorker", "TaskResult", "StateHookMissing"]
+__all__ = ["SdkWorker", "TaskResult", "StateHookMissing",
+           "exit_zero_g_and_hold"]
 
 #: seq 位宽 —— 固件 1.5.0 起为真 u16（仅发送成功才计数），旧布局 8 位回绕。
 SEQ_MOD = 0x10000
@@ -82,6 +83,38 @@ def _attach_state_hook(arm, on_state: Callable[[Any], None]) -> None:
             on_state(st)
 
     ack._on_status = hooked
+
+
+def exit_zero_g_and_hold(arm, timeout: float = 1.0, speed: float = 0.15):
+    """退出零重力后立刻补一条**零位移 `movej`**，把臂留在持位态。
+
+    为什么需要：`zero_g_stop()` 只发一帧 `0x06 off`，之后没有命令；固件 0.1 s
+    命令看门狗会进入 fail-soft hold（`tau=0`, `kp=0.6×`），臂按
+    `G/(0.6·kp)` 下沉（本臂 J2 实测约 0.04 rad）。**显式退出不是 PC 掉线**，
+    退出后应保持。`movej` 到当前实测 q 会把模式切到 `MOVE_J`；固件在该模式
+    **每拍自动 kick 看门狗**，并持续给重力前馈。
+
+    只在退出后的模式为 `INIT` 时补：若 `ctrl_zero_g_leave()` 已因越限启动了
+    回程 `move_j`，模式已经是 `MOVE_J`，不能再发一条覆盖它。
+
+    返回最终 `RobotState`（链路静默时可能为 `None`）；`zero_g_stop` / `movej`
+    的异常原样上抛，由任务层显示。
+    """
+    arm.zero_g_stop(True)
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    st = None
+    while True:
+        raw = arm.get_state()
+        st = getattr(raw, "value", raw)
+        if getattr(st, "mode_name", None) != "ZERO_G":
+            break
+        if time.monotonic() >= deadline:
+            return st
+        time.sleep(0.01)
+    if st is not None and getattr(st, "mode_name", None) == "INIT":
+        q = [j.q for j in st.joints]
+        return arm.movej(q, speed=speed)
+    return st
 
 
 class SdkWorker:

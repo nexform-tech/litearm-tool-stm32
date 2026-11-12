@@ -1,6 +1,6 @@
 [project]
 name = "litearm-tool-stm32"
-version = "0.2.0"
+version = "0.2.1"
 description = "LiteArm STM32 上位机工具 (PyQt5 GUI over USB CDC)"
 requires-python = ">=3.9"
 dependencies = [

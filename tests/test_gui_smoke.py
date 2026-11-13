@@ -15,7 +15,7 @@ pytest.importorskip("numpy")
 from litetool import settings as settings_mod                 # noqa: E402
 from tests.fake_arm import make_state                         # noqa: E402
 
-PAGE_KEYS = ("overview", "capture", "machine", "joint", "cart",
+PAGE_KEYS = ("overview", "capture", "machine", "fault", "joint", "cart",
              "zerog", "params", "install", "guide", "diag")
 
 

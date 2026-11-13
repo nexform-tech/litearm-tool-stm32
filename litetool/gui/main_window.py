@@ -25,6 +25,7 @@ from litetool.gui.bridge import GuiBridge
 from litetool.gui.pages.capture_page import CapturePage
 from litetool.gui.pages.cart_page import CartPage
 from litetool.gui.pages.diag_page import DiagPage
+from litetool.gui.pages.fault_page import FaultPage
 from litetool.gui.pages.guide_page import TuningGuidePage
 from litetool.gui.pages.installation_page import InstallationPage
 from litetool.gui.pages.joint_page import JointPage
@@ -51,6 +52,7 @@ class MainWindow(QMainWindow):
         self._connected = False
         self._log_tail: list = []       # 诊断包用：最近 200 行
         self._last_error = None         # 最近一次失败（SDK ErrorText）
+        self._fault_snapshot: set = set()   # 已记录过的 (轴, 原因)，用于事件去重
 
         self.bridge = GuiBridge()
         self.worker = SdkWorker(
@@ -143,6 +145,8 @@ class MainWindow(QMainWindow):
         self._add_page("capture", "采集", "固件 300Hz 控制拍采集与导出", CapturePage())
         self._add_page("machine", "整机", "使能/复位/清故障/回零/限速/park",
                        MachinePage())
+        self._add_page("fault", "故障", "当前故障/原因/处置/事件历史/诊断包",
+                       FaultPage())
         self._add_page("joint", "关节", "movej / move_js / move_mit",
                        JointPage(self._settings))
         self._add_page("cart", "笛卡尔", "get_tcp / ik / move_p",
@@ -204,7 +208,7 @@ class MainWindow(QMainWindow):
         return self.stack.currentWidget().widget()
 
     _GROUPS = {"监视": ("overview", "capture"),
-               "操作": ("machine", "joint", "cart", "zerog"),
+               "操作": ("machine", "fault", "joint", "cart", "zerog"),
                # ⚠ 新页 key 必须登记在这里: `_group_for` 用的是无默认值的 next(),
                # 漏登记会在 __init__ 期间抛 StopIteration -> 崩启动。
                "参数": ("params", "install", "guide", "diag")}
@@ -231,6 +235,8 @@ class MainWindow(QMainWindow):
         m.park_req.connect(lambda: self._submit("park", lambda arm: arm.park(),
                                                 self._after_simple))
         m.status_now.connect(self._on_status_now)
+        self.pages["fault"].cmd.connect(self._on_ctrl_cmd)
+        self.pages["fault"].diag_req.connect(self._copy_diagnostics)
         j.movej.connect(self._on_movej)
         j.move_js.connect(self._on_move_js)
         j.mit_one.connect(self._on_mit_one)
@@ -467,6 +473,16 @@ class MainWindow(QMainWindow):
         if st is not None:
             self.pages["cart"].set_seed_q(st.q)
             self.pages["joint"].fill_from(st)
+        self.pages["fault"].update_from(st)
+        # 事件历史：只记**新出现**的 (轴, 原因)；清故障后快照随之清空
+        cur = set(getattr(st, "fault_reasons", []) or []) if st is not None else set()
+        for a, r in sorted(cur - self._fault_snapshot):
+            try:
+                title = pa.describe_fault(r).title
+            except Exception:  # noqa: BLE001
+                title = f"原因 {r}"
+            self.pages["fault"].add_event(f"J{a + 1} {title}")
+        self._fault_snapshot = cur
         self.pages["diag"].set_metrics(
             drops=drops, fps=fps,
             firmware=self.worker.firmware,

@@ -59,7 +59,17 @@ class TaskResult:
     def text(self) -> str:
         if self.ok:
             return f"{self.name} 完成"
-        return f"{self.name} 失败: {self.error}"
+        code, title = _error_summary(self.error)
+        return f"{self.name} 失败 [{code}]: {title}"
+
+
+def _error_summary(e: Optional[BaseException]) -> tuple:
+    """异常 -> (码, 标题)。码来自 SDK 的 `describe_exc`，旧 SDK 回退 E-??。"""
+    try:
+        t = pa.describe_exc(e)
+        return t.code, t.title
+    except Exception:  # noqa: BLE001 - 老 SDK / 异常对象不规整都回退
+        return "E-??", str(e)
 
 
 def _attach_state_hook(arm, on_state: Callable[[Any], None]) -> None:

@@ -11,12 +11,15 @@
 from __future__ import annotations
 
 from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtWidgets import (QCheckBox, QComboBox, QFrame, QHBoxLayout,
-                             QLabel, QMainWindow, QMessageBox, QPushButton,
-                             QScrollArea, QSplitter, QStackedWidget,
-                             QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame,
+                             QHBoxLayout, QLabel, QMainWindow, QMessageBox,
+                             QPushButton, QScrollArea, QSplitter,
+                             QStackedWidget, QVBoxLayout, QWidget)
+
+import litearm as pa
 
 from litetool import checks
+from litetool.diagnostics import build_diag_package, save_diag_package
 from litetool import ports as ports_mod
 from litetool.gui.bridge import GuiBridge
 from litetool.gui.pages.capture_page import CapturePage
@@ -46,6 +49,8 @@ class MainWindow(QMainWindow):
         self._fault_blocked = False
         self._n = 0
         self._connected = False
+        self._log_tail: list = []       # 诊断包用：最近 200 行
+        self._last_error = None         # 最近一次失败（SDK ErrorText）
 
         self.bridge = GuiBridge()
         self.worker = SdkWorker(
@@ -113,6 +118,17 @@ class MainWindow(QMainWindow):
         self.estop_lbl = QLabel("")
         self.estop_lbl.setStyleSheet("color:#ff6b6b;font-weight:bold;")
         bl.addWidget(self.estop_lbl)
+
+        # 最近一次失败的码 + 标题。点一下复制诊断包（白名单 JSON）。
+        self.err_btn = QPushButton("")
+        self.err_btn.setVisible(False)
+        self.err_btn.setToolTip("点击复制诊断包")
+        self.err_btn.setStyleSheet(
+            "QPushButton{color:#ffb454;background:transparent;"
+            "border:1px solid #ffb454;border-radius:4px;padding:4px 8px;}"
+            "QPushButton:hover{background:#3a2f1a;}")
+        self.err_btn.clicked.connect(self._copy_diagnostics)
+        bl.addWidget(self.err_btn)
 
         # ---- 常驻状态条 ----
         self.strip = StatusStrip()
@@ -248,6 +264,9 @@ class MainWindow(QMainWindow):
 
     # ================= 日志 / 任务 =================
     def _log(self, msg: str):
+        self._log_tail.append(str(msg))
+        if len(self._log_tail) > 200:
+            del self._log_tail[:-200]
         self.bridge.sig_log.emit(msg)
 
     def _submit(self, name: str, fn, on_done=None):
@@ -259,9 +278,35 @@ class MainWindow(QMainWindow):
         if res is None:
             return
         self._log(f"[{'OK' if res.ok else 'ERR'}] {res.text}")
+        if not res.ok:
+            try:
+                self._last_error = pa.describe_exc(res.error)
+                self.err_btn.setText(f"[{self._last_error.code}] {self._last_error.title}")
+                self.err_btn.setVisible(True)
+            except Exception:  # noqa: BLE001 - 老 SDK 无 describe_exc 时降级
+                self._last_error = None
         if cb is not None:
             cb(res)
         self._apply_busy()
+
+    def _copy_diagnostics(self):
+        """复制诊断包到剪贴板，同时写 ~/litearm-diag-<时间>.json。"""
+        try:
+            pkg = build_diag_package(
+                firmware=self.worker.firmware,
+                n_joints=self.worker.n_joints,
+                state=self.worker.state,
+                error_text=self._last_error,
+                drops=self.worker.drops,
+                log_tail=self._log_tail,
+            )
+            path = save_diag_package(pkg)
+            import json
+            QApplication.clipboard().setText(
+                json.dumps(pkg, ensure_ascii=False, indent=2))
+            self._log(f"[OK] 诊断包已复制并保存: {path}")
+        except Exception as e:  # noqa: BLE001 - 导出失败不能拖垮界面
+            self._log(f"[ERR] 诊断包导出失败: {e}")
 
     def _after_simple(self, res):
         pass

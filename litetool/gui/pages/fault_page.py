@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as _dt
 
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QBrush, QColor
 from PyQt5.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit,
                              QPushButton, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
@@ -60,6 +61,7 @@ class FaultPage(QWidget):
         hh.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(2, QHeaderView.Stretch)
         hh.setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.setMinimumHeight(300)      # 7 轴一屏可见，不靠滚动
         g_table = group("逐轴故障", self.table)
 
         self.hist = QPlainTextEdit()
@@ -123,7 +125,7 @@ class FaultPage(QWidget):
             drop_txt = _fault_text(drop)[0]
         self.detail.setText(
             f"模式 {st.mode_name} · {'已使能' if st.enabled else '未使能'}"
-            f" · 整臂持位 {drop_txt}")
+            f" · 整臂持位：{drop_txt}")
 
         n = getattr(st, "n", 0)
         self.table.setRowCount(n)
@@ -142,7 +144,10 @@ class FaultPage(QWidget):
                 it.setTextAlignment(Qt.AlignCenter if col < 2 else
                                     Qt.AlignLeft | Qt.AlignVCenter)
                 if color:
-                    it.setForeground(Qt.red if col < 2 else Qt.white)
-                    if col == 1:
-                        it.setBackground(Qt.darkRed)
+                    if col == 1:                      # 状态列：红底白字
+                        it.setBackground(QBrush(QColor("#8b3a3a")))
+                        it.setForeground(Qt.white)
+                    elif col == 0:                    # 轴号：红字
+                        it.setForeground(QColor("#ff6b6b"))
+                    # 原因/处置保持默认深色 —— 白字配白底会看不见（实测踩过）
                 self.table.setItem(i, col, it)

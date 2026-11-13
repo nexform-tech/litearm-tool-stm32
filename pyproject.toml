@@ -8,7 +8,7 @@ dependencies = [
     # [2026-09-14] 必须 >=1.7.0: `arm.model` (动力学模型在线导入) 是 1.7.0 新增的。
     # 装到 1.6.0 环境时 `arm.model` 抛 AttributeError, 而 params_io._call 会把它吞成
     # "超时/无应答" —— 症状与真故障无法区分。
-    "litearm-python>=2.3.0",
+    "litearm-python>=2.4.0",
     "pyserial>=3.5",
     "PyQt5>=5.15",
     "pyqtgraph>=0.13",

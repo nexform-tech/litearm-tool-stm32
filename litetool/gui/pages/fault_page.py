@@ -94,7 +94,7 @@ class FaultPage(QWidget):
         ts = _dt.datetime.now().strftime("%H:%M:%S")
         self.hist.appendPlainText(f"{ts}  {text}")
 
-    def update_from(self, st):
+    def update_from(self, st, detail=None):
         if st is None:
             self.head.setText("未连接")
             self.head.setStyleSheet("font-size:15px;font-weight:bold;color:#888;")
@@ -102,7 +102,10 @@ class FaultPage(QWidget):
             self.table.setRowCount(0)
             return
 
-        reasons = list(getattr(st, "fault_reason", []) or [])
+        # [1.12.3] 优先用按需查询到的 detail；旧固件/1.12.2 回退状态帧自带字段
+        reasons = list(getattr(detail, "fault_reason", None) or []) if detail else []
+        if not reasons:
+            reasons = list(getattr(st, "fault_reason", []) or [])
         faults = []
         for i in range(getattr(st, "n", len(st.joints))):
             bit = bool(st.joint_fault & (1 << i))
@@ -119,7 +122,9 @@ class FaultPage(QWidget):
             self.head.setText("无故障")
             self.head.setStyleSheet("font-size:15px;font-weight:bold;color:#6fdd8b;")
 
-        drop = int(getattr(st, "drop_hold_reason", 0) or 0)
+        drop = int(getattr(detail, "drop_hold_reason", 0) or 0) if detail else 0
+        if not drop:
+            drop = int(getattr(st, "drop_hold_reason", 0) or 0)
         drop_txt = "无"
         if drop:
             drop_txt = _fault_text(drop)[0]

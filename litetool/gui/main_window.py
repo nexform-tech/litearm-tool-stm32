@@ -53,6 +53,9 @@ class MainWindow(QMainWindow):
         self._log_tail: list = []       # 诊断包用：最近 200 行
         self._last_error = None         # 最近一次失败（SDK ErrorText）
         self._fault_snapshot: set = set()   # 已记录过的 (轴, 原因)，用于事件去重
+        self._last_fault_bits = 0           # 上次查询时的 joint_fault 位图
+        self._fault_query_inflight = False  # 防止同一故障重复查询
+        self._fault_detail = None           # 最近一次 0x51 应答
 
         self.bridge = GuiBridge()
         self.worker = SdkWorker(
@@ -473,9 +476,12 @@ class MainWindow(QMainWindow):
         if st is not None:
             self.pages["cart"].set_seed_q(st.q)
             self.pages["joint"].fill_from(st)
-        self.pages["fault"].update_from(st)
+        self._sync_fault_detail(st)
+        self.pages["fault"].update_from(st, self._fault_detail)
         # 事件历史：只记**新出现**的 (轴, 原因)；清故障后快照随之清空
-        cur = set(getattr(st, "fault_reasons", []) or []) if st is not None else set()
+        detail = self._fault_detail
+        cur = set(getattr(detail, "fault_reasons", []) or []) if detail else \
+            set(getattr(st, "fault_reasons", []) or []) if st is not None else set()
         for a, r in sorted(cur - self._fault_snapshot):
             try:
                 title = pa.describe_fault(r).title
@@ -501,8 +507,11 @@ class MainWindow(QMainWindow):
                 self._relock("检测到 FAULT/急停锁存")
             elif faulted:
                 self._log(f"[WARN] 故障: {self._fault_summary(st) or st.fault_detail}")
-            if faulted and getattr(st, "fault_reasons", None):
-                a, r = st.fault_reasons[0]
+            d = self._fault_detail
+            pairs = list(getattr(d, "fault_reasons", []) or []) if d else \
+                list(getattr(st, "fault_reasons", []) or [])
+            if faulted and pairs:
+                a, r = pairs[0]
                 try:
                     t = pa.describe_fault(r)
                     self._last_error = t
@@ -577,10 +586,51 @@ class MainWindow(QMainWindow):
             QMessageBox.Ok | QMessageBox.Cancel,
             QMessageBox.Cancel) == QMessageBox.Ok
 
-    def _fault_summary(self, st) -> str:
-        """故障轴 + 原因，例 `J4: CAN 反馈丢失`。旧固件无原因时只给轴号。"""
+    def _sync_fault_detail(self, st):
+        """[1.12.3] 状态帧 bit11 -> 按需查询 `GET_FAULT 0x51`。
+
+        只在 `joint_fault` 位图变化时查一次；正常运行时零往返。
+        旧固件没有 bit11，直接保持"原因不可知"。
+        """
+        if st is None:
+            return
+        jf = int(getattr(st, "joint_fault", 0) or 0)
+        if not getattr(st, "fault_detail_available", False):
+            self._fault_detail = None
+            self._last_fault_bits = jf
+            return
+        if jf == 0:
+            self._fault_detail = None
+            self._last_fault_bits = 0
+            return
+        if jf == self._last_fault_bits or self._fault_query_inflight:
+            return
+        self._last_fault_bits = jf
+        self._fault_query_inflight = True
+        self._submit("读故障详情", lambda arm: arm.get_fault_detail(),
+                     self._on_fault_detail)
+
+    def _on_fault_detail(self, res):
+        self._fault_query_inflight = False
+        if res.ok:
+            self._fault_detail = res.value
+            self.pages["fault"].update_from(self.worker.state, self._fault_detail)
+        else:
+            self._log(f"[WARN] 故障详情不可用: {res.text}")
+
+    def _fault_summary(self, st=None) -> str:
+        """故障轴 + 原因，例 `J4: CAN 反馈丢失`。
+
+        优先用 0x51 查询结果；没有时回退到状态帧自带的 `fault_reason`
+        （1.12.2）或只给轴号（更老固件）。
+        """
+        d = self._fault_detail
+        pairs = list(getattr(d, "fault_reasons", []) or []) if d else []
+        if not pairs:
+            st = st if st is not None else self.worker.state
+            pairs = list(getattr(st, "fault_reasons", []) or []) if st else []
         parts = []
-        for a, r in getattr(st, "fault_reasons", []) or []:
+        for a, r in pairs:
             try:
                 parts.append(f"J{a + 1}: {pa.describe_fault(r).title}")
             except Exception:  # noqa: BLE001
@@ -591,15 +641,10 @@ class MainWindow(QMainWindow):
         st = self.worker.state
         axes = ""
         if st is not None and st.joint_fault:
-            parts = []
-            for a, r in getattr(st, "fault_reasons", []) or []:
-                try:
-                    parts.append(f"J{a + 1}（{pa.describe_fault(r).title}）")
-                except Exception:  # noqa: BLE001
-                    parts.append(f"J{a + 1}")
-            if not parts:
-                parts = [f"J{a + 1}" for a in st.fault_axes]
-            axes = "\n\n将被恢复出力的轴: " + "、".join(parts)
+            summary = self._fault_summary(st)
+            axes = "\n\n将被恢复出力的轴: " + (summary.replace("；", "、")
+                                               or "、".join(
+                                                   f"J{a + 1}" for a in st.fault_axes))
         return QMessageBox.question(
             self, "确认清故障 clear_faults",
             "清除故障锁存。若臂处于使能态，被锁轴会重新出力。" + axes +

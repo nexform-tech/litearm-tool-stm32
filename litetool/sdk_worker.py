@@ -64,12 +64,21 @@ class TaskResult:
 
 
 def _error_summary(e: Optional[BaseException]) -> tuple:
-    """异常 -> (码, 标题)。码来自 SDK 的 `describe_exc`，旧 SDK 回退 E-??。"""
+    """异常 -> (码, 标题)。码来自 SDK 的 `describe_exc`，旧 SDK 回退 E-??。
+
+    本地错误（`E-xx`）的标题是通用文案，可能掩盖具体状态（例如 E-17 只知道
+    "零重力进行中"，原异常里还有"先 zero_g_stop"）。把原始消息附在标题后。
+    """
     try:
         t = pa.describe_exc(e)
-        return t.code, t.title
     except Exception:  # noqa: BLE001 - 老 SDK / 异常对象不规整都回退
         return "E-??", str(e)
+    msg = str(e or "").strip()
+    if t.code.startswith("E-") and msg and msg not in t.title:
+        if len(msg) > 120:
+            msg = msg[:117] + "..."
+        return t.code, f"{t.title}：{msg}"
+    return t.code, t.title
 
 
 def _attach_state_hook(arm, on_state: Callable[[Any], None]) -> None:

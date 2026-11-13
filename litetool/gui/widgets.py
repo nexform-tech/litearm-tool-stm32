@@ -27,6 +27,10 @@ CHIP_OFF = "QLabel{background:#3a3a3a;color:#b0b0b0;border-radius:4px;padding:2p
 # 其余为未知/故障码 -> 红底
 ERR_STATE = {0: "失能", 1: "使能", 13: "超时保护"}
 
+#: 固件故障原因码 -> 表格短名（完整文案走 SDK `describe_fault`）。
+FAULT_SHORT = {1: "断线", 2: "越限", 3: "超速", 4: "电机", 5: "过温",
+               6: "跟随", 7: "非有限"}
+
 
 def mono_label(width: Optional[int] = None, text: str = "—") -> QLabel:
     """固定宽度等宽小格 —— 数字变化不挤动相邻控件。"""
@@ -179,7 +183,10 @@ class JointTable(QWidget):
             unknown = js.err not in (0, 1)
             faulted = bool(st.joint_fault & (1 << i))     # 固件 G7 断轴锁存
             if faulted:
-                st_text = "断轴"
+                # 固件 1.12.2 起带原因码；旧固件为空列表 -> 只显示"断轴"
+                reasons = getattr(st, "fault_reason", []) or []
+                r = reasons[i] if i < len(reasons) else 0
+                st_text = f"断轴·{FAULT_SHORT.get(r, '?')}" if r else "断轴"
             else:
                 st_text = ERR_STATE.get(js.err, f"0x{js.err:02X}")
             bad = unknown or faulted

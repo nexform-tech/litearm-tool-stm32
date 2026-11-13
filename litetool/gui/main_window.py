@@ -467,10 +467,12 @@ class MainWindow(QMainWindow):
         if st is not None:
             self.pages["cart"].set_seed_q(st.q)
             self.pages["joint"].fill_from(st)
-        self.pages["diag"].set_metrics(drops=drops, fps=fps,
-                                       firmware=self.worker.firmware,
-                                       n_joints=self.worker.n_joints,
-                                       reset_reason=self.worker.last_reset_reason)
+        self.pages["diag"].set_metrics(
+            drops=drops, fps=fps,
+            firmware=self.worker.firmware,
+            n_joints=self.worker.n_joints,
+            reset_reason=self.worker.last_reset_reason,
+            fault=self._fault_summary(st) if st is not None else "—")
 
         # 故障/急停一旦出现就收回解锁（切页/等待都不该让旧解锁态残留）
         faulted = bool(st is not None and st.faulted)
@@ -482,7 +484,16 @@ class MainWindow(QMainWindow):
             if faulted and self._armed:
                 self._relock("检测到 FAULT/急停锁存")
             elif faulted:
-                self._log(f"[WARN] 故障位: {st.fault_detail}")
+                self._log(f"[WARN] 故障: {self._fault_summary(st) or st.fault_detail}")
+            if faulted and getattr(st, "fault_reasons", None):
+                a, r = st.fault_reasons[0]
+                try:
+                    t = pa.describe_fault(r)
+                    self._last_error = t
+                    self.err_btn.setText(f"[{t.code}] J{a + 1} {t.title}")
+                    self.err_btn.setVisible(True)
+                except Exception:  # noqa: BLE001 - 老 SDK 无 describe_fault
+                    pass
 
         self._sync_zero_g(st)
         self._apply_busy()
@@ -550,12 +561,29 @@ class MainWindow(QMainWindow):
             QMessageBox.Ok | QMessageBox.Cancel,
             QMessageBox.Cancel) == QMessageBox.Ok
 
+    def _fault_summary(self, st) -> str:
+        """故障轴 + 原因，例 `J4: CAN 反馈丢失`。旧固件无原因时只给轴号。"""
+        parts = []
+        for a, r in getattr(st, "fault_reasons", []) or []:
+            try:
+                parts.append(f"J{a + 1}: {pa.describe_fault(r).title}")
+            except Exception:  # noqa: BLE001
+                parts.append(f"J{a + 1}: 原因 {r}")
+        return "；".join(parts)
+
     def _confirm_clear_faults(self) -> bool:
         st = self.worker.state
         axes = ""
         if st is not None and st.joint_fault:
-            axes = ("\n\n将被恢复出力的轴: "
-                    + ", ".join(f"J{a + 1}" for a in st.fault_axes))
+            parts = []
+            for a, r in getattr(st, "fault_reasons", []) or []:
+                try:
+                    parts.append(f"J{a + 1}（{pa.describe_fault(r).title}）")
+                except Exception:  # noqa: BLE001
+                    parts.append(f"J{a + 1}")
+            if not parts:
+                parts = [f"J{a + 1}" for a in st.fault_axes]
+            axes = "\n\n将被恢复出力的轴: " + "、".join(parts)
         return QMessageBox.question(
             self, "确认清故障 clear_faults",
             "清除故障锁存。若臂处于使能态，被锁轴会重新出力。" + axes +

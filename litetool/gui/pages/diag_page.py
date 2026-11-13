@@ -38,7 +38,8 @@ class DiagPage(QWidget):
                 ("fps", "状态帧率 (Hz)"),
                 ("firmware", "固件版本"),
                 ("n_joints", "关节数"),
-                ("reset_reason", "上次启动原因"))):
+                ("reset_reason", "上次启动原因"),
+                ("fault", "当前故障原因"))):
             grid.addWidget(static_label(label), r // 2, (r % 2) * 2)
             lb = mono_label(150)
             self.vals[key] = lb
@@ -70,10 +71,12 @@ class DiagPage(QWidget):
     def _refresh(self):
         self.btn_bench.setEnabled(self._online and not self._busy)
 
-    def set_metrics(self, *, drops, fps, firmware, n_joints, reset_reason):
+    def set_metrics(self, *, drops, fps, firmware, n_joints, reset_reason,
+                    fault="—"):
         for key, val in (("drops", drops), ("fps", f"{fps:.0f}"),
                          ("firmware", firmware or "—"), ("n_joints", n_joints),
-                         ("reset_reason", "—" if reset_reason is None else reset_reason)):
+                         ("reset_reason", "—" if reset_reason is None else reset_reason),
+                         ("fault", fault or "无")):
             self.vals[key].setText(str(val))
 
     def set_bench(self, res):

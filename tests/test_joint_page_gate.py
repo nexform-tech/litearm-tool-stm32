@@ -52,6 +52,28 @@ def test_buttons_enabled_when_armed():
     assert p.btn_js.isEnabled()
 
 
+def test_fill_from_does_not_overwrite_user_edits():
+    """目标输入框只在首次连接时填一次；20 Hz 状态刷新不得覆盖用户输入。"""
+    from types import SimpleNamespace
+    p = _page()
+    p.set_online(True)
+    p.fill_from(SimpleNamespace(n=7, q=[0.1 * i for i in range(7)]))
+    p.mj_row.set_value([5.0] * 7)              # 用户输入
+    p.fill_from(SimpleNamespace(n=7, q=[0.2 * i for i in range(7)]))
+    assert p.mj_row.value() == [5.0] * 7
+
+
+def test_reconnect_reseeds():
+    from types import SimpleNamespace
+    p = _page()
+    p.set_online(True)
+    p.fill_from(SimpleNamespace(n=7, q=[0.5] * 7))
+    p.set_online(False)                        # 断开
+    p.set_online(True)
+    p.fill_from(SimpleNamespace(n=7, q=[0.3] * 7))
+    assert p.mj_row.value() == [0.3] * 7
+
+
 def test_buttons_disabled_when_offline():
     p = _page()
     p.set_online(False)

@@ -26,6 +26,7 @@ class JointPage(QWidget):
         self._busy = False
         self._armed = False
         self._fault_blocked = False
+        self._seeded = False        # 目标输入框是否已用实测位填过一次
         self._n = 0
 
         # ---------------- movej ----------------
@@ -113,6 +114,8 @@ class JointPage(QWidget):
     # ---------------- 外部状态 ----------------
     def set_online(self, onl: bool):
         self._online = onl
+        if not onl:
+            self._seeded = False        # 下次连接重新带入当前姿态
         self._refresh()
 
     def set_busy(self, busy: bool):
@@ -166,9 +169,16 @@ class JointPage(QWidget):
 
     # ---------------- 便捷：把当前实测角灌进目标输入 ----------------
     def fill_from(self, st):
-        if st is None or st.n == 0:
+        """只在**首次**收到状态时把实测位填进目标输入框。
+
+        ⚠ 这些框是**指令**，不是遥测。原实现每 50 ms 无条件覆写 —— 用户敲进去的
+        数字还没松开键盘就被实测值盖掉，表现是"根本无法输入"（现场实测）。
+        要刷新显示请用总览页的状态表；目标值只由用户或显式按钮决定。
+        """
+        if st is None or st.n == 0 or self._seeded:
             return
         qs = st.q
         self.mj_row.set_value(qs)
         self.js_q.set_value(qs)
         self.ma_q.set_value(qs)
+        self._seeded = True

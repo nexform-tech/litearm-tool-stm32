@@ -99,7 +99,8 @@ class CartPage(QWidget):
         self.btn_ik.setEnabled(can)
         self.seed_cb.setEnabled(can)
         self.btn_mp.setEnabled(move_can)
-        self.speed.setEnabled(move_can)
+        # 速度是输入，不是动作：始终可编辑（同关节页）
+        self.speed.setEnabled(True)
         # 输入框始终可编辑 —— 否则离线时连"先把目标算好"都做不到
         self.pose.setEnabled(True)
 

@@ -156,6 +156,7 @@ class MachinePage(QWidget):
         self.btn_home.setEnabled(ready and not self._busy)
         self.btn_park.setEnabled(can)
         self.btn_status.setEnabled(can)
-        self.speed.setEnabled(can)
+        # 限速是输入，不是动作：始终可编辑
+        self.speed.setEnabled(True)
         self.btn_speed.setEnabled(can)
         self.btn_enable.setEnabled(can and not self._fault_blocked)

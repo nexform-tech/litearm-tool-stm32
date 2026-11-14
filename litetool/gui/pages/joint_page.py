@@ -135,12 +135,15 @@ class JointPage(QWidget):
         can = ready and not self._busy
         for b in (self.btn_mj, self.btn_js, self.btn_mm, self.btn_ma):
             b.setEnabled(can and self._n > 0)
+        # ⚠ **输入控件始终可编辑**：填目标角/参数不是危险动作，运动闸门只拦
+        # "执行"（按钮）。原实现把它们一起禁掉，导致"没解锁时连数字都输不进去"
+        # —— 用户看到的不是"需要解锁"，而是"这个页面坏了"。
         for w in (self.mj_row, self.js_q, self.js_dq, self.js_tau,
                   self.ma_q, self.ma_dq, self.ma_tau, self.mm_idx,
                   self.js_use_tau, self.ma_kp, self.ma_kd, self.mj_speed):
-            w.setEnabled(can)
+            w.setEnabled(True)
         for sp in self.mm_spins.values():
-            sp.setEnabled(can)
+            sp.setEnabled(True)
 
     # ---------------- 取值 ----------------
     def _emit_js(self):

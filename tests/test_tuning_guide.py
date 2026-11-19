@@ -3,8 +3,6 @@
 公式语义以固件 litearm-stm32 master 源码为准 (law.c / control_loop.c /
 litearm.h FF_* / defaults.c); 本测试只做文案关键段一致性与结构非空检查。
 """
-import re
-
 import pytest
 
 from litetool import param_catalog as C
@@ -69,3 +67,29 @@ def test_ff_footnote_rows_match_catalog_bits():
         assert label in html
     # detail 表为 9 行 (不含标题)
     assert G.FF_BITS_ROWS == [(_b, n, _l) for _b, n, _l in C.FF_BITS]
+
+
+# ---------------- 数值文案必须跟随固件真源 (2026-09-13) ----------------
+def test_gs_baseline_matches_firmware():
+    """出厂 gs 基线以固件 defaults.c 为准 (旧值 [1,0.93,0.88,0.87,1,1,1] 是换辨识惯量前的老口径)。"""
+    import ast
+
+    from litetool import firmware_defaults as FD
+
+    if FD.find_firmware_dir() is None:
+        pytest.skip("未找到 litearm-stm32 固件仓")
+    fw = FD.load_firmware_defaults()
+    assert ast.literal_eval(G.GS_BASELINE) == [j["gravity_scale"] for j in fw["joints"]]
+    # 同一常量必须被指南与参数目录共同使用 (避免两处各写一份再漂移)
+    assert G.GS_BASELINE == C.GS_BASELINE
+    assert G.GS_BASELINE in C.JOINT_BY_KEY["gravity_scale"].hint
+
+
+def test_no_stale_cad_mass_scale_in_texts():
+    """模型源已是辨识模型 (litearm_id.urdf), 旧的 "CAD 质量 ×1.8635" 口径不得再出现。"""
+    texts = [G.FORMULA_TEXT, G.__doc__ or ""] + [d for _s, d in G.SYMBOL_MAP]
+    texts += [C.JOINT_BY_KEY["gravity_scale"].hint, C.JOINT_BY_KEY["gravity_scale"].detail]
+    texts += [p.detail for p in C.JOINT_PARAMS]
+    blob = "\n".join(texts)
+    assert "1.8635" not in blob, "调参文案仍引用已废弃的 CAD 质量口径 ×1.8635"
+    assert "0.93" not in blob and "CAD 质心残差" not in blob, "调参文案仍有废弃的 gs 基线"

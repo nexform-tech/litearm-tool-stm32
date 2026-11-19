@@ -13,11 +13,11 @@
 
 ## 1. 安装依赖
 
-`litearm-python` 2.1.0 或更新版本未发布到 PyPI。PyPI 只有 1.3.0，缺少本工具使用的 API。先安装固定的公开提交，再安装其余依赖：
+`litearm-python` 2.4.0 或更新版本未发布到 PyPI。PyPI 只有 1.3.0，缺少本工具使用的 API。先安装固定的公开提交，再安装其余依赖：
 
 ```bash
 cd litearm-tool-stm32
-pip install "litearm-python @ git+https://github.com/nexform-tech/litearm-python.git@5643e477db6dd74c3283bb92cdad8b62ec627f02"
+pip install "litearm-python @ git+https://github.com/nexform-tech/litearm-python.git@0e43a2ffa5de1bdf34bf94360cc8df0b729da157"
 pip install -r requirements.txt
 ```
 
@@ -53,7 +53,7 @@ QT_QPA_PLATFORM=offscreen python3 -m pytest -q
 
 **`ModuleNotFoundError: No module named 'litearm'`**
 
-SDK 未安装。执行第 1 步中固定版本的 `pip install`。从 PyPI 安装 1.3.0 不满足 `litearm-python>=2.1.0`。
+SDK 未安装。执行第 1 步中固定版本的 `pip install`。从 PyPI 安装 1.3.0 不满足 `litearm-python>=2.4.0`。
 
 **`Permission denied: /dev/ttyACM0`**
 

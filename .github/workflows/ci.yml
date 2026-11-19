@@ -33,11 +33,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3
 
       - name: Install
-        # litearm-python 2.1.0 is not on PyPI; install the pinned public commit.
+        # litearm-python is not on PyPI; install the pinned public commit that
+        # provides the 2.4.x fault-detail / error-description API this branch uses.
         # The project is not pip-installable on this branch (flat layout), so tests
         # rely on `pythonpath = ["."]` from pyproject.toml instead of `pip install -e .`.
         run: |
-          pip install "litearm-python @ git+https://github.com/nexform-tech/litearm-python.git@5643e477db6dd74c3283bb92cdad8b62ec627f02"
+          pip install "litearm-python @ git+https://github.com/nexform-tech/litearm-python.git@0e43a2ffa5de1bdf34bf94360cc8df0b729da157"
           pip install -r requirements.txt pytest
 
       - name: Test

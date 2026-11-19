@@ -1,8 +1,13 @@
 # LiteArm Tool STM32 —— 交互层配置
 # 注：本工具不保存/不下发限位等安全参数（权威在固件）。这里只含操作意图层选项。
+# 每个字段都有合法区间，越界/类型错会回退默认并在 stderr 提示（见 litetool/settings.py）。
 
 # Δq 超过即弹确认框 (rad)。防手滑输错数量级。
 confirm_threshold: 0.5
+
+# move_p 的位姿幅度确认阈值：位置 (m) / 姿态 (rad)。
+pose_confirm_pos: 0.05
+pose_confirm_rot: 0.30
 
 # move_j 默认速度倍率 (0.01 ~ speed_max_ui)，低速起步。
 default_speed: 0.2
@@ -13,7 +18,7 @@ mit_kp_default: 30.0
 mit_kd_default: 2.0
 mit_tau_default: 0.0
 
-# 监控页超温告警阈值 (°C)
+# 总览页超温告警阈值 (°C)
 temp_alert_c: 85.0
 
 # 曲线滚动窗口（秒）

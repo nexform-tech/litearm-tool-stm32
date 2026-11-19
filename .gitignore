@@ -4,3 +4,9 @@ __pycache__/
 dist/
 build/
 *.spec
+.superpowers/
+
+# [打包] 构建产物不进仓
+packaging/out/
+# ...但打包配置必须进仓 (上面 `*.spec` 会连它一起忽略)
+!packaging/*.spec

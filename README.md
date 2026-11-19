@@ -1,289 +1,361 @@
+English | [简体中文](README.zh-CN.md)
+
 # LiteArm Tool STM32
 
-LiteArm 运控固件（`litearm-stm32`，STM32H723）的桌面上位机工具。
+Desktop host tool for the LiteArm motion-control firmware (`litearm-stm32`, STM32H723).
 
-**交互层一律经 [`litearm-python`](https://) 完成** —— 本工具不再自带协议实现，只做
-界面、意图层安全与调参台账。传输走板载复合 USB 的 CDC 口（gs_usb + CDC VCP，
-VID:PID `1d50:606f` → `/dev/ttyACM0`）。
+**All interaction goes through [`litearm-python`](https://github.com/nexform-tech/litearm-python)** —
+the tool no longer carries its own protocol implementation; it only provides the UI, the
+operator-intent safety layer, and the tuning ledger. Transport is the onboard composite USB
+CDC port (gs_usb + CDC VCP, VID:PID `1d50:606f` → `/dev/ttyACM0`).
 
-## 架构
+Requires `litearm-python >= 2.4.0` (firmware 1.12.3 fault-detail-on-demand query).
+
+## Architecture
 
 ```text
-GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 ──▶ litearm.Arm ──▶ USB CDC
-     ▲                                        │
-     └────── 20Hz 读 worker.state  ◀──────────┘   100Hz 状态钩子 → 曲线环形缓冲
+GUI main thread ──submit(fn)──▶ task queue ──▶ SdkWorker thread ──▶ litearm.Arm ──▶ USB CDC
+     ▲                                             │
+     └────── 20 Hz read worker.state  ◀────────────┘   100 Hz state hook → plot ring buffer
 ```
 
-**串口只有一个所有者。** `litearm.Arm` 是按单消费者设计的：`_Ack.expect` /
-`pump` / `_read_status` 都直接从同一条串口抢帧。若 GUI 一边轮询状态、一边下命令
-（两条读线程），状态轮询会把命令的 ACK 吃掉 —— 表现为**随机**的"无应答(超时)"。
+**The serial port has exactly one owner.** `litearm.Arm` is designed for a single consumer:
+`_Ack.expect` / `pump` / `_read_status` all pull frames from the same port. If the GUI polls
+state while also sending commands (two reader threads), the state poll eats the command's ACK —
+which shows up as a **random** "no reply (timeout)".
 
-所以全部 SDK 调用都收进 `litetool/sdk_worker.py` 的 `SdkWorker` 线程：空闲时
-`get_state(refresh=True)`（固件 100Hz 主动推，这一调用天然就是 100Hz 状态源），
-有任务时执行任务，两者串行。SDK **零改动**。
+So every SDK call is funnelled through the `SdkWorker` thread in `litetool/sdk_worker.py`:
+when idle it calls `get_state(refresh=True)` (the firmware pushes at 100 Hz, so this call is
+itself the 100 Hz state source); when a task arrives it runs the task. The two are serialized.
+The SDK is **unmodified**.
 
-**唯一一处私有耦合**（`tests/test_sdk_hook.py` 守着）：把 `Arm._a._on_status` 包一层，
-于是 `movej` 这类阻塞调用内部消费的帧也会进曲线 —— 否则运动期间曲线会冻住，而那正是
-最该看波形的时刻。挂不上时 `_attach_state_hook()` **抛错**，不静默降级。
+**The single private coupling** (guarded by `tests/test_sdk_hook.py`): wrapping
+`Arm._a._on_status` lets frames consumed inside blocking calls such as `movej` reach the plot.
+Without it the plot would freeze during motion — exactly when the waveform matters most. If the
+hook cannot be attached, `_attach_state_hook()` **raises** instead of degrading silently.
 
-## 界面
+## UI
 
-顶栏（串口 / 连接 / 固件版本 / 运动解锁 / ⛔急停）＋ **常驻状态条**（模式 / 使能 /
-6 个安全 flag 灯 / seq / 丢帧 / 帧率）＋ 左侧三组导航 ＋ 底部可折叠日志。
+Top bar (port / connect / firmware version / motion unlock / ⛔ emergency stop) + a **persistent
+status strip** (mode / enabled / six safety flag lamps / seq / dropped frames / frame rate) +
+three navigation groups on the left + a collapsible log at the bottom.
 
-| 分组 | 页面 | 干什么 |
+| Group | Page | What it does |
 | --- | --- | --- |
-| 监视 | **总览** | 逐关节状态表 + 100Hz 三段联动曲线（原「监控」「曲线」两页合并，可一键放大曲线） |
-| | **采集** | 固件 300Hz 控制拍采集：录制 / 查进度 / 读回预览 / 导出原始字节 |
-| 操作 | **整机** | 使能 / 失能 / 复位 / 清故障 / 回零 / 全局调速器 / park / 读状态 / 启动原因 |
-| | **关节** | `move_j` / `move_js` / `move_mit` 单关节 / `move_mit_all` 整臂 |
-| | **笛卡尔** | 读 TCP / `ik` 求解 / `move_p` |
-| | **零重力** | 拖动示教（保活由 SDK 后台线程维持，本工具不发心跳帧） |
-| 参数 | **参数表** | 关节级参数与 0x26/0x27/0x28 前馈族：读回 / 编辑下发 / ff_mask / 批量导入导出 / 固化 Flash / 恢复出厂 |
-| | **调参指南** | 公式与符号映射、读前须知、"症状→建议参数"速查、可展开逐参数详解 |
-| | **诊断** | `KIN_BENCH` 自检、启动复位原因、链路计数（CRC / 队满 / CAN 失败 / 控制拍超预算） |
+| Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot) |
+| | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes |
+| | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
+| Operate | **Machine** | Enable / disable / reset / clear faults / home / global speed / park / read state / reset reason |
+| | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all` |
+| | **Cartesian** | Read TCP / `ik` solve / `move_p` |
+| | **Zero-G** | Hand-guiding (keep-alive is maintained by the SDK background thread; this tool sends no heartbeat frames) |
+| Tuning | **Parameters** | Joint parameters and the 0x26/0x27/0x28 feed-forward family: read back / edit and send / ff_mask / batch import-export / persist to flash / factory reset |
+| | **Tuning guide** | Formulas and symbol mapping, read-before-you-start notes, symptom→parameter quick table, expandable per-parameter details |
+| | **Diagnostics** | `KIN_BENCH` self-test, reset reason, link counters (CRC / queue full / CAN failures / control-tick overruns), error-code text, diagnostics bundle |
 
-## 覆盖：SDK 公开面 → UI 入口
+## Coverage: SDK public surface → UI entry
 
-`litearm-python` v2.0.0 的公开方法逐条对应（`tests/test_sdk_hook.py` 会盯住这张表的
-SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到）。
+Every public method of `litearm-python` v2.4.0+ has an entry point (`tests/test_sdk_hook.py`
+watches whether the SDK side of this table still exists; `tests/test_pages_sdk.py` watches
+whether the UI is actually wired to it).
 
-| SDK | UI 入口 |
+| SDK | UI entry |
 | --- | --- |
-| `connect` / `close` / `reconnect` | 顶栏 连接 / 断开（重连 = 断开后再连） |
-| `firmware` / `n` / `last_reset_reason` | 顶栏固件版本、整机页、诊断页 |
-| `enable` / `disable` / `reset` / `clear_faults` | 整机页（后三者二次确认） |
-| `emergency_stop` | 顶栏 ⛔ 急停（**插队**通道，见下"安全模型"） |
-| `home` | 整机页 [回零 home]（二次确认 + Δq 提示） |
-| `set_speed` | 整机页全局调速器（0..100 整数百分比） |
-| `park` / `set_motion_mode` | 整机页 [park]。固件只识别 `mode=0`（就是 park），其余值回 ACK 而模式不变，故不给无效旋钮 |
-| `movej` | 关节页（Δq 超阈值弹确认） |
-| `move_js` | 关节页单发（页面明示 0.1s 看门狗语义） |
-| `send_mit` / `send_mit_all` | 关节页单关节 / 整臂单帧 |
-| `move_p` | 笛卡尔页（位姿幅度超阈值弹确认） |
-| `ik` | 笛卡尔页 [求解 IK]（只算不动；种子可选当前实测角） |
-| `get_tcp` | 笛卡尔页 [读取当前末端位姿]、总览 |
-| `get_state` | 100Hz 常驻（状态条 + 总览表 + 曲线） |
-| `get_status_now` | 整机页 [读取状态 GET_STATUS] |
-| `zero_g` / `zero_g_start` / `zero_g_stop` / `zero_g_active` / `zero_g_error` | 零重力页（按钮跟**实际**状态走，保活中断会显示原因） |
-| `set_ff_mask` / `get_ff_mask` / `ff_preset` | 参数表页 ff_mask 复选框组 |
-| `set_ff_vec` / `get_ff_vec` | 参数表页逐关节向量（15 组） |
-| `set_ff_scalar` / `get_ff_scalar` | 参数表页全局标量 |
-| `set_gravity_scale` / `set_inertia_scale` | 参数表页 `gravity_scale` / `inertia_scale` 向量（同一写口 0x26 item 7/8 的具名封装） |
-| `set_payload` / `set_gravity_vector` | 参数表页 `payload_mass`/`payload_com`/`gravity` 标量（0x28 item 4/5/6） |
-| `save_params` | 参数表页 [固化到 Flash]（二次确认，须先失能） |
-| `params.get_joint_param` / `all_joint_params` | 参数表页 [刷新当前] |
-| `params.set_joint_param` / `set_joint_limits` | 参数表页逐关节下发（限位写成组整发） |
-| `params.reset_factory` | 参数表页 [恢复出厂] |
-| `log.start` / `stop` / `reader` / `capture` / `dump` | 采集页 |
-| `LogReader.total` / `wait_for` / `read_all` / `iter_chunks` / `samples` | 采集页 查进度 / 读回预览 / 采集全程 |
-| `diag.kin_bench` | 诊断页 [运行 KIN_BENCH 自检] |
-| `find_cdc_port` | 顶栏串口下拉（`litetool/ports.py` 另列全部候选口，板载 CDC 恒排最前） |
+| `connect` / `close` / `reconnect` | Top bar connect / disconnect (reconnect = disconnect then connect) |
+| `firmware` / `n` / `last_reset_reason` | Top-bar firmware version, Machine page, Diagnostics page |
+| `enable` / `disable` / `reset` / `clear_faults` | Machine page (the last three ask for confirmation) |
+| `emergency_stop` | Top bar ⛔ emergency stop (**queue-jumping** path, see "Safety model") |
+| `home` | Machine page [Home] (confirmation + Δq hint) |
+| `set_speed` | Machine page global speed (0..100 integer percent) |
+| `park` / `set_motion_mode` | Machine page [Park]. The firmware only recognizes `mode=0` (park); other values return ACK without changing the mode, so no useless knob is exposed |
+| `movej` | Joints page (Δq confirmation above the threshold) |
+| `move_js` | Joints page, single shot (the page states the 0.1 s watchdog semantics) |
+| `send_mit` / `send_mit_all` | Joints page, single joint / whole arm, single frame |
+| `move_p` | Cartesian page (pose-magnitude confirmation above the threshold) |
+| `ik` | Cartesian page [Solve IK] (computes only, never moves; the seed may be the current measured angles) |
+| `get_tcp` | Cartesian page [Read current TCP pose], Overview |
+| `get_state` | 100 Hz continuous feed (status strip + overview table + plot) |
+| `get_status_now` | Machine page [Read state GET_STATUS] |
+| `get_state().fault_detail_available` / `get_fault_detail()` | Faults page (query `0x51` once when bit11 is set; older firmware shows "reason unavailable") |
+| `describe` / `describe_fault` / `describe_exc` | Faults page / log: error code → title + cause + action; unregistered codes are never blank |
+| `zero_g` / `zero_g_start` / `zero_g_stop` / `zero_g_active` / `zero_g_error` | Zero-G page (buttons follow the **actual** state; a broken keep-alive shows its reason) |
+| `set_ff_mask` / `get_ff_mask` / `ff_preset` | Parameters page ff_mask checkbox group |
+| `set_ff_vec` / `get_ff_vec` | Parameters page per-joint vectors (1.12.3: 1..11, 15, 16; 12..14 removed) |
+| `set_ff_scalar` / `get_ff_scalar` | Parameters page global scalars (1.12.3: 1..8, 11, 17, 18; 10 and 12..16 removed) |
+| `set_gravity_scale` / `set_inertia_scale` | Parameters page `gravity_scale` / `inertia_scale` vectors (named wrappers over the same 0x26 items 7/8) |
+| `set_payload` / `set_gravity_vector` | Parameters page `payload_mass` / `payload_com` / `gravity` scalars (0x28 items 4/5/6) |
+| `save_params` | Parameters page [Persist to flash] (confirmation; the arm must be disabled) |
+| `params.get_joint_param` / `all_joint_params` | Parameters page [Refresh current] |
+| `params.set_joint_param` / `set_joint_limits` | Parameters page per-joint send (limits are sent as a pair) |
+| `params.reset_factory` | Parameters page [Factory reset] |
+| `log.start` / `stop` / `reader` / `capture` / `dump` | Capture page |
+| `LogReader.total` / `wait_for` / `read_all` / `iter_chunks` / `samples` | Capture page progress / read-back preview / full capture |
+| `diag.kin_bench` | Diagnostics page [Run KIN_BENCH self-test] |
+| `find_cdc_port` | Top-bar port drop-down (`litetool/ports.py` also lists every candidate; the onboard CDC port is always first) |
 
-## 安全模型（重要）
+## Safety model (important)
 
-**一切硬防护的权威在固件**：斜率限制、软限位、NaN/非法值拒绝、看门狗 fail-soft、
-急停兜底均由 STM32 承担，不依赖上位机在线与否。本工具**不**复刻这些防护。
+**The firmware is the authority for every hard protection**: slew limits, soft limits, NaN and
+invalid-value rejection, watchdog fail-soft, and the emergency-stop backstop all live in the
+STM32 and do not depend on the host tool being online. This tool does **not** duplicate them.
 
-工具只承担固件防不了的**操作意图**层：
+The tool covers only the operator-intent layer the firmware cannot enforce:
 
-1. **运动解锁（全局一把）**：顶栏勾选"我已确认机械臂周围无障碍、急停可及"后，
-   整机[回零]/关节/笛卡尔/零重力四个页面才放行。**断线、急停、FAULT/锁存、复位**
-   都会自动收回解锁。未连接时勾选会被拒绝。
-   *为什么是全局一把而不是每页一把*：要防的是"手滑下发一个大幅运动"，风险属于命令
-   而非页面；四把独立开关只会诱导人条件反射地把它们全勾上。
-   **闸门在 `MainWindow._motion_denied()` 收口，不是各页按钮的 `setEnabled`** ——
-   按钮灰态只是 UX，任何能到达处理函数的路径（代码 emit / 某页漏禁一个控件 / 快捷键）
-   都必须在这里被挡住。
-2. **Δq 确认框**：`movej` / `move_js` / `move_mit` / `move_mit_all` 的目标与当前差
-   超过 `confirm_threshold`（默认 0.5 rad）时逐关节列出后确认；`move_p` 另有位姿幅度
-   确认（位置 0.05 m / 姿态 0.30 rad）。
-   **拿不到基线时一律拒绝**，不是免检：状态帧还没到 / 没读过 TCP 时，输入框往往还是
-   默认值，正是最容易手滑的时刻。`move_p` 在无 TCP 基线时会**自动先读一次**再判幅度。
-3. **常驻急停**：顶栏红色按钮，走 `SdkWorker.emergency_now()` —— GUI 线程**直接写帧**，
-   不排队、不等 ACK。在途的 `movej` 可能把所有者线程占住十几秒，急停必须绕开队列。
-   该通道**只写不读**，故不会被在途命令挡住，也不会与所有者线程抢帧。
-   代价是它**不能**声称"已失能"：帧发出 ≠ 固件已执行。界面文案严格区分
-   「急停帧已发出 — 请目视确认臂已停止」与「急停未发出 — 请立即用硬件急停/断电」。
-   急停还会**丢掉排队中的命令**（语义是"停下"，不是"先做完手上的"）并**收掉零重力
-   保活**（否则那条线程会每 40ms 继续空转发帧，而界面还显示"拖动中"）。
-   在途的那一条命令没法抢占，但它的结果会被固件的 EMERGENCY 锁存拒掉，不会真的动臂。
-4. **急停/故障自动重新锁定**，`reset` 之后重新锁定（旧解锁态不跨过急停继续有效）。
-5. 参数页：必须**先 [刷新当前] 成功**才允许下发；臂 enable 态下写控制律弹二次确认；
-   限位写前逐关节校验当前 q 在新 [q_min,q_max] 内；固化 Flash、批量应用、ff_mask 改动
-   均二次确认。
-   **参数项按板子实测能力显示**：[刷新当前] 时逐 item 探测 `0x2B`/`0x2C`，板子回
-   `ERR{cmd,0x02}` 的项隐藏且不参与下发 —— 界面不再靠本地目录去猜某版固件有什么
-   （目录只提供标签/范围，是否显示由板子回答）。超时/链路错误仍按故障上报，不会
-   被误当成"板子没有这项"。
-6. 所有运动页明确标注"单帧/单发"语义 —— 固件 0.1s 看门狗下，`move_js` 连续伺服需
-   调用方 ≥10Hz 重发，本工具不提供连续流。
+1. **Motion unlock (one global switch).** After ticking "the arm is clear and the emergency stop
+   is reachable" in the top bar, the Machine [Home] / Joints / Cartesian / Zero-G pages are
+   released. **Disconnect, emergency stop, FAULT/latch, and reset** all retract the unlock.
+   Ticking it while disconnected is refused.
+   *Why one global switch instead of one per page*: the risk is "sending a large motion by
+   mistake", which belongs to the command, not to a page; four independent switches only train
+   people to tick them all reflexively.
+   **The gate is enforced in `MainWindow._motion_denied()`, not in each page's `setEnabled`** —
+   greyed-out buttons are only UX; every path that can reach a handler (a programmatic emit,
+   a page that forgot to disable one widget, a shortcut) must be blocked here.
+2. **Δq confirmation.** For `movej` / `move_js` / `move_mit` / `move_mit_all`, when the target
+   differs from the current position by more than `confirm_threshold` (default 0.5 rad), every
+   joint delta is listed and confirmed. `move_p` additionally confirms pose magnitude
+   (0.05 m position / 0.30 rad orientation).
+   **Without a baseline the command is refused, not waved through**: when no state frame has
+   arrived or TCP has never been read, the input boxes still hold defaults — exactly the moment
+   a slip is most likely. `move_p` automatically reads TCP once when no baseline exists.
+3. **Always-available emergency stop.** The red top-bar button goes through
+   `SdkWorker.emergency_now()`: the GUI thread **writes the frame directly**, without queueing
+   and without waiting for an ACK. An in-flight `movej` can occupy the owner thread for over ten
+   seconds, so the emergency stop must bypass the queue. That path **writes only, never reads**,
+   so it is neither blocked by an in-flight command nor competing with the owner thread for
+   frames.
+   The cost is that it **cannot** claim "disabled": a frame sent is not a firmware action. The UI
+   text strictly distinguishes "emergency-stop frame sent — visually confirm the arm has
+   stopped" from "emergency stop NOT sent — use the hardware stop or cut power now".
+   The emergency stop also **drops queued commands** (its meaning is "stop", not "finish what is
+   in hand") and **tears down the zero-G keep-alive** (otherwise that thread would keep sending
+   empty frames every 40 ms while the UI still says "dragging").
+   The one in-flight command cannot be pre-empted, but its result will be rejected by the
+   firmware's EMERGENCY latch — the arm will not actually move.
+4. **Emergency stop / fault automatically re-locks**, and `reset` re-locks as well (an old
+   unlock does not survive an emergency stop).
+5. Parameters page: **[Refresh current] must succeed** before anything can be sent; writing the
+   control law while the arm is enabled asks for confirmation; before a limit write every joint's
+   current q is checked against the new [q_min, q_max]; persisting to flash, batch apply, and
+   ff_mask changes all ask for confirmation.
+   **Parameter items follow the board's measured capability**: [Refresh current] probes
+   `0x2B`/`0x2C` item by item; an item the board rejects with `ERR{cmd,0x02}` is hidden and
+   excluded from sending. The UI no longer guesses a firmware's feature set from a local catalog
+   (the catalog supplies labels/ranges; the board answers whether an item exists). Timeouts and
+   link errors are still reported as faults, never mistaken for "the board lacks this item".
+6. Every motion page states its "single frame / single shot" semantics. Under the firmware's
+   0.1 s watchdog, continuous `move_js` servoing requires the caller to resend at ≥10 Hz; this
+   tool provides no continuous stream.
 
-## 使用
+## Usage
 
 ```bash
-pip install -e ../litearm-python     # 交互层依赖
+pip install -e ../litearm-python     # interaction layer (>= 2.4.0)
 pip install -r requirements.txt
-python3 main.py                       # 普通用户即可（串口在 dialout 组则无需 root）
+python3 main.py                       # a normal user is enough if the port is in the dialout group
 ```
 
-启动后：顶栏选串口 → 连接 → 顶栏显示固件版本（如 `Litearm1.5.2-7J`）。
-连接时会校验固件版本约定（最低 1.5.0）。总览页随 100Hz 主动上报自动刷新；
-整臂 7J / 台架 1J 按状态帧长自动识别。
+After launch: choose the port in the top bar → connect → the firmware version appears in the top
+bar (for example `Litearm1.12.3-7J`). The connection checks the firmware naming convention
+(minimum 1.5.0). The overview page refreshes from the 100 Hz stream; a 7-joint arm and a 1-joint
+bench are detected from the status-frame length.
 
-配置见 [config.yaml](config.yaml)（仅交互层参数，不含限位）。
+Configuration lives in [config.yaml](config.yaml) (interaction settings only, no limits).
 
-## 代码组织
+## Code organization
 
 ```text
-main.py                 入口（薄壳, 转调 litetool.app:main）
+main.py                 Entry point (thin shell, forwards to litetool.app:main)
 litetool/
-  app.py                启动入口（`python3 -m litetool` / `litearm-tool` 命令共用）
-  sdk_worker.py         ★ 唯一持有 pa.Arm 的线程 + 任务队列 + 状态钩子
-  params_io.py          在 pa.Arm 之上的参数读写形状层（页面要 (ok, code)）
-  ports.py              串口枚举（板载 CDC 排最前）
-  plot_model.py         状态环形缓冲（线程安全, 含实测帧率）
-  checks.py             意图层确认（Δq / 位姿幅度；唯一的"安全"模块）
-  param_catalog.py      调参参数目录镜像表 + schema/diff/ff_mask + role/hint/detail
-  tuning_guide.py       调参指南内容（公式/符号映射/症状速查）
-  firmware_defaults.py  解析固件 defaults.c（presets/ 生成与一致性断言的真源）
-  settings.py           config.yaml 合并（类型 + 区间校验）
+  app.py                Launch entry (`python3 -m litetool` / the `litearm-tool` command)
+  sdk_worker.py         ★ the only thread that owns pa.Arm + task queue + state hook
+  params_io.py          Parameter read/write shape layer over pa.Arm (pages want (ok, code))
+  diagnostics.py        Error-code text / diagnostics bundle / link-counter summary
+  model_io.py           HYY model and parameter import/export
+  hyy_config.py         HYY configuration parsing
+  ports.py              Port enumeration (onboard CDC first)
+  plot_model.py         Thread-safe state ring buffer (with measured frame rate)
+  checks.py             Intent-layer confirmation (Δq / pose magnitude; the only "safety" module)
+  param_catalog.py      Tuning catalog mirror + schema/diff/ff_mask + role/hint/detail
+  tuning_guide.py       Tuning-guide content (formulas / symbol mapping / symptom table)
+  firmware_defaults.py  Parses firmware defaults.c (source of truth for presets/ and consistency checks)
+  settings.py           config.yaml merge (type + range validation)
   gui/
-    bridge.py           跨线程 Qt 信号桥（日志 / 任务结果 / 在线态）
-    widgets.py          日志面板 / 常驻状态条 / 关节表 / 横幅 / 左侧导航
+    bridge.py           Cross-thread Qt signal bridge (log / task result / online state)
+    widgets.py          Log panel / persistent status strip / joint table / banner / left navigation
     pages/
-      overview_page.py  总览      capture_page.py  采集
-      machine_page.py   整机      joint_page.py    关节
-      cart_page.py      笛卡尔    zerog_page.py    零重力
-      params_page.py    参数表    guide_page.py    调参指南
-      diag_page.py      诊断
-      common.py         pose/关节输入组等共用件
-      plot_pane.py      三段联动曲线组件
-    main_window.py      主窗口组装 + 命令收口（Δq 确认/解锁/急停流程）
-templates/params_example.yaml   导入模板（含单位/范围注释）
-presets/                        出厂 / SE1 摩擦 预设
-tests/                  离线测试（无硬件可跑）
+      overview_page.py  Overview      capture_page.py  Capture
+      fault_page.py     Faults        machine_page.py  Machine
+      joint_page.py     Joints        cart_page.py     Cartesian
+      zerog_page.py     Zero-G        params_page.py   Parameters
+      guide_page.py     Tuning guide  diag_page.py     Diagnostics
+      installation_page.py  Installation direction
+      common.py         Shared pose/joint input widgets
+      plot_pane.py      Three-pane linked plot component
+    main_window.py      Main-window assembly + command gate (Δq / unlock / emergency flows)
+templates/params_example.yaml   Import template with unit and range comments
+presets/                        Factory / SE1 friction presets
+tests/                          Offline tests (no hardware required)
 ```
 
-**线程模型**：SDK 所有者线程（唯一碰 `Arm`）｜ GUI 主线程（20Hz 读快照刷界面、
-30Hz 重绘曲线）。参数页与采集页不再自建线程，一律 `submit` 到所有者线程。
+**Thread model**: one SDK owner thread (the only one touching `Arm`) and the GUI main thread
+(20 Hz reads a snapshot to refresh the UI, 30 Hz redraws the plot). The parameters and capture
+pages no longer create their own threads; everything is `submit`ted to the owner thread.
 
-## 测试
+## Tests
 
 ```bash
-python3 -m pytest          # 全部离线用例 (无需硬件)
+python3 -m pytest          # 438 passed (all offline, no hardware required)
 ```
 
-| 文件 | 盯什么 |
+| File | What it guards |
 | --- | --- |
-| `test_sdk_worker.py` | 串口所有权 / 任务队列 / 状态钩子 / 离线判定 / 丢帧统计 / **急停旁路插队** |
-| `test_sdk_hook.py` | 工具对 SDK 的私有耦合（`_a._on_status`、`_write_cmd(guarded=)`）与公开面仍在 |
-| `test_pages_sdk.py` | 页面 → SDK 的**接线**（每个按钮真的落到哪个 SDK 调用） |
-| `test_params_io.py` | 参数读写形状层（含 ERR code 透传） |
-| `test_params_flow.py` | 参数页安全闸（未刷新禁下发 / enable 态确认 / 限位越界拒绝） |
-| `test_safety_ui.py` | 急停不谎报 / 危险命令二次确认 / 解锁自动收回 / Δq 确认 |
-| `test_gui_smoke.py` | 构建与布局回归（导航 3 组 9 页、台架 1J、运动页默认锁定） |
-| `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | 意图层与纯数据层 |
-| `test_preset_sync.py` | `presets/` 与 `templates/` 逐字段比对固件 `defaults.c`（固件仓在场时生效，`LITEARM_FW_DIR` 可指定） |
+| `test_sdk_worker.py` | Port ownership / task queue / state hook / offline detection / dropped-frame counters / **emergency-stop bypass** |
+| `test_sdk_hook.py` | The tool's private coupling to the SDK (`_a._on_status`, `_write_cmd(guarded=)`) and the public surface |
+| `test_pages_sdk.py` | Page → SDK **wiring** (which SDK call each button really reaches) |
+| `test_params_io.py` | Parameter read/write shape layer (including ERR code passthrough) |
+| `test_params_flow.py` | Parameters-page safety gates (no send before refresh / enabled-state confirmation / out-of-range limit rejection) |
+| `test_safety_ui.py` | The emergency stop never lies / dangerous commands confirm twice / unlock retracts automatically / Δq confirmation |
+| `test_fault_query.py` | bit11 → `0x51` trigger / de-duplication / invalidation after clearing faults |
+| `test_fault_display.py` | Fallback when an older firmware leaves `fault_reason` empty |
+| `test_fault_page.py` | Faults-page layout and all 7 axes on one screen |
+| `test_diagnostics.py` | Error-code text and the diagnostics bundle |
+| `test_gui_smoke.py` | Build and layout regression (3 navigation groups, 9 pages, 1J bench, motion pages locked by default) |
+| `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | Intent layer and pure data layer |
+| `test_preset_sync.py` | Field-by-field comparison of `presets/` and `templates/` against firmware `defaults.c` (runs when the firmware tree is present; `LITEARM_FW_DIR` can point to it) |
 
-## 真机验收清单（需 STM32 + 电机/CAN 在线）
+## On-hardware acceptance checklist (STM32 + motors/CAN online)
 
-> 首次/改动后按顺序执行；任何一步与预期不符即停下排查，不跳过。
+> Run in order on first setup or after a change. If any step differs from the expected result,
+> stop and investigate. Do not skip steps.
 
-1. **只读连接**（不使能，安全）：
-   - [ ] 顶栏选串口 → 连接 → 状态点变绿"● 在线"，顶栏出现固件版本
-   - [ ] 常驻状态条模式=INIT，帧率 ≈ 100Hz，seq 递增无跳变（丢帧≈0）
-   - [ ] 总览页表格每关节显示 q/dq/tau/温度/err；拔串口 → 变红"● 离线"，命令按钮全禁用
-   - [ ] 断线状态下点急停 → 显眼处必须显示"急停未发出"，不得显示"已失能"
-2. **曲线**：总览页随状态滚动；勾选 J1~J7 通道切换；"冻结"暂停、"清屏"重绘；
-   [曲线放大] 收起状态表。**下发一次 movej，确认运动期间曲线仍在更新**（状态钩子）。
-3. **基础控制**（会加磁锁位，臂需受支撑）：
-   - [ ] 未勾选解锁时 [回零] 不可点；勾选后可点
-   - [ ] 使能 enable → ACK；失能 disable / 清故障 / 复位 / 全局调速器生效
-   - [ ] 急停 → 模式=EMERGENCY + FAULT 灯亮；解锁被收回；enable 被拒；
-         复位 reset → 回到 INIT、灯全灭、仍保持锁定
-4. **运动下发**（低速起步，sp=0.1）：
-   - [ ] move_j 目标=当前位置+0.1 rad → 下发到位，幅度小
-   - [ ] move_j 目标与当前差 >0.5 rad → 弹 Δq 确认框；取消则不下发
-   - [ ] 笛卡尔页 [读取当前末端位姿] 有值；[求解 IK] 返回 7 个数；move_p 小幅度到位
-   - [ ] 关节页 move_mit 单帧单关节，幅度小
-5. **零重力**：进入后可用手拖动；按钮与状态条显示一致；退出后关节回到软限内；
-   拔线 → 状态栏显示"保活中断"，按钮自动复位
-6. **采集**：设 n=300 → [开始记录] → 等 1s → [查进度] 应显示 ~300 拍 →
-   [读回并预览] 出三条曲线 → [导出原始字节…] 落盘
-7. **诊断**：[运行 KIN_BENCH 自检] 出原文与计数（crc/rfd/txf 等）
-8. **参数**：见下节
-9. **异常路径**：
-   - [ ] 命令执行中快速连点其它按钮 → 提示"忙"，不并发下发
-   - [ ] 手动给 move_j 输入极大值 → 日志显示固件 ERR 拒绝，臂不动
+1. **Read-only connection** (disabled, safe):
+   - [ ] Choose the port in the top bar → connect → the status dot turns green "● Online" and the firmware version appears
+   - [ ] The persistent status strip shows mode=INIT, frame rate ≈ 100 Hz, seq increasing with no jumps (dropped frames ≈ 0)
+   - [ ] The overview table shows q/dq/tau/temperature/err per joint; unplug the serial cable → red "● Offline", all command buttons disabled
+   - [ ] Press the emergency stop while disconnected → it must clearly say "emergency stop NOT sent", never "disabled"
+2. **Plot**: the overview scrolls with the state; the J1–J7 channel checkboxes switch traces; "Freeze" pauses and "Clear" redraws; [Enlarge plot] collapses the state table. **Send one `movej` and confirm the plot keeps updating during the motion** (state hook).
+3. **Basic control** (the magnets will engage; support the arm):
+   - [ ] [Home] is not clickable before unlocking; it becomes clickable after ticking the unlock
+   - [ ] `enable` → ACK; `disable` / clear faults / reset / global speed take effect
+   - [ ] Emergency stop → mode=EMERGENCY, FAULT lamp on; the unlock is retracted; `enable` is refused; `reset` → back to INIT, all lamps off, still locked
+4. **Motion commands** (start slow, sp=0.1):
+   - [ ] `move_j` to current + 0.1 rad → small motion, arrives
+   - [ ] `move_j` with a delta > 0.5 rad → Δq confirmation; cancelling sends nothing
+   - [ ] Cartesian page [Read current TCP pose] returns a value; [Solve IK] returns 7 numbers; a small `move_p` arrives
+   - [ ] Joints page `move_mit`, single frame, single joint, small magnitude
+5. **Zero-G**: the arm can be hand-dragged after entering; the button and the status strip agree; after exit the joints return inside the soft limits; unplugging the cable shows "keep-alive lost" and resets the button
+6. **Capture**: set n=300 → [Start recording] → wait 1 s → [Progress] should show ~300 ticks → [Read back and preview] draws three curves → [Export raw bytes…] writes a file
+7. **Diagnostics**: [Run KIN_BENCH self-test] prints the raw text and counters (crc/rfd/txf, etc.)
+8. **Parameters**: see the next section
+9. **Faults page** (create a controlled fault per the acceptance plan): state-frame bit11=1 → the Faults page automatically shows the per-axis reason; clearing faults clears the reasons. Older firmware (no `0x51`) shows "reason unavailable", which does not mean "no fault".
+10. **Abnormal paths**:
+   - [ ] Click other buttons rapidly while a command is running → "busy", no concurrent sends
+   - [ ] Enter an extreme value for `move_j` → the log shows the firmware ERR rejection, the arm does not move
 
-## 参数调参页（"参数表"页）
+## Parameter tuning page
 
-读口 `0x24` / `0x2B` / `0x2C` 需固件 1.5.x（参数读回）。
+The read commands `0x24` / `0x2B` / `0x2C` require firmware 1.5.x (parameter readback).
 
-| 区 | 写口 | 读口 | 说明 |
+| Area | Write | Read | Notes |
 | --- | --- | --- | --- |
-| 关节控制/限位 | `0x22` kp/kd/tau_max、`0x23` q_min/q_max | `0x24` | 逐关节 |
-| 逐关节向量 | `0x26` item 1..11 + 15/16 | `0x2B` | 一次一整组（7 值）；12..14 已随 1.11.0 删除；16=drag_gain（1.12.0） |
-| 全局标量 | `0x28` item 1..8 + 11 + 17,18 | `0x2C` | 含 payload_mass/gravity/friction_model/drag_db/hold_kp_gain；item10 已于 1.12.0 删除 |
-| ff_mask | `0x27` u32 | `0x2C` item 9 | 复选框组 |
-| 出厂复位 | `0x36` param_reset（须失能） | — | 二次确认 |
-| 固化 | `0x25` param_save（须失能） | — | 二次确认 |
+| Joint control / limits | `0x22` kp/kd/tau_max, `0x23` q_min/q_max | `0x24` | Per joint |
+| Per-joint vectors | `0x26` items 1..11 + 15/16 | `0x2B` | One 7-value group at a time; 12..14 removed in 1.11.0; 16=drag_gain (1.12.0) |
+| Global scalars | `0x28` items 1..8 + 11 + 17,18 | `0x2C` | Includes payload_mass/gravity/friction_model/drag_db/hold_kp_gain; item 10 removed in 1.12.0 |
+| ff_mask | `0x27` u32 | `0x2C` item 9 | Checkbox group |
+| Factory reset | `0x36` param_reset (requires disabled) | — | Confirmation |
+| Persist | `0x25` param_save (requires disabled) | — | Confirmation |
 
-用法：
+⚠ **Exact 1.12.3 item sets** (the tool displays what the board actually supports; it does not
+guess from a local whitelist):
 
-1. 连接后切到 **参数表** 页 → [刷新当前]：`0x24×7` + `0x2B` 逐 item + `0x2C` 逐 item
-   一次读回并落表（不支持项由固件回 `ERR{cmd,0x02}`, 自动跳过）。
-2. 双击表格单元格改值：黄=已改未发，红=越界/下发失败；[下发选中行]（kp/kd/tau_max
-   与 q_min/q_max 成组整发）或 [下发全部]，每个写口等 ACK，失败格标红并打日志。
-3. 全局标量用下侧 spin/编辑框；ff_mask 用复选框组，[下发全局] 发送（改动会先确认）。
-4. 批量：`presets/` 或 [导入 YAML/JSON…]（模板 `templates/params_example.yaml` 含
-   单位/范围注释）→ **diff 预览对话框**逐格显示旧→新 → [应用] 顺序全 ACK →
-   可勾选"下发后固化 Flash"（会再弹二次确认；须先在整机页 [失能]）。
-   [导出当前]：读回全量写 YAML，与导入同构 —— 同文件再导入 diff 应为空（闭环）。
-5. 状态行显示最近操作结果/ACK/ERR；断线自动禁用并提示，重连后恢复。
+- `0x26`: **1..11, 15, 16** (12..14 removed)
+- `0x28`: **1..8, 11, 17, 18** (item 9 is reserved for reading `ff_mask` via `0x2C`; 10 and 12..16 removed)
+- `0x2B` / `0x2C` read paths use the same sets as their write counterparts
 
-**出厂基线**（与固件 `defaults.c` 一致，由 `tests/test_preset_sync.py` 逐字段守着）：
-`kp=[400,400,300,300,50,50,50]`、`ff_mask=0x1BF`（= G + 惯量 + 科氏 + 摩擦 + 积分，
-见下表位定义）。这两组数字是最容易过期的副本 —— 改了固件就得同步改这里与 `presets/`。
+Usage:
 
-参数范围镜像表在 `litetool/param_catalog.py`（纯 Python，无 Qt，供测试/yaml/UI 共用），
-数值以固件 `params.c` 与 `flash_store.c apply_loaded` 为准。
+1. Connect, open the **Parameters** page, and click [Refresh current]: `0x24×7` + `0x2B` item by
+   item + `0x2C` item by item are read once and populate the table (unsupported items return
+   `ERR{cmd,0x02}` and are skipped automatically).
+2. Double-click a cell to edit. Yellow = changed but not sent; red = out of range or failed.
+   Use [Send selected rows] (kp/kd/tau_max and q_min/q_max are sent as pairs) or [Send all].
+   Every write waits for an ACK; failures are marked red and logged.
+3. Global scalars use the spin boxes below the table; ff_mask uses the checkbox group.
+   [Send global] sends them (changes are confirmed first).
+4. Batch: use `presets/` or [Import YAML/JSON…] (the template
+   `templates/params_example.yaml` documents units and ranges) → a **diff preview** shows every
+   old→new cell → [Apply] sends all writes in order → optionally tick "persist to flash after
+   sending" (a second confirmation; the arm must first be disabled on the Machine page).
+   [Export current] reads everything back to YAML in the same shape as import, so re-importing
+   the same file produces an empty diff (closed loop).
+5. The status line shows the latest result, ACK, or ERR. Disconnect disables the page and shows
+   a notice; reconnecting restores it.
 
-- 逐关节：kp[0,500] kd[0,5] tau_max[0.1,120] q_min/q_max[-15,15](须 min<max)
+**Factory baseline** (matching firmware `defaults.c`, guarded field by field by
+`tests/test_preset_sync.py`): `kp=[400,400,300,300,50,50,50]`, `ff_mask=0x1BF` (= G + inertia +
+Coriolis + friction + integral; see the bit definitions below). These two numbers are the most
+easily stale copies — when the firmware changes, update this page and `presets/`.
+
+The range mirror table lives in `litetool/param_catalog.py` (pure Python, no Qt, shared by tests,
+YAML, and the UI). Values follow firmware `params.c` and `flash_store.c apply_loaded`.
+
+- Per joint: kp[0,500] kd[0,5] tau_max[0.1,120] q_min/q_max[-15,15] (min<max)
   friction[0,50] ki[0,1000] i_max[0,100] wall_stiff[0,2000] wall_damp[0,50]
   wall_tau_max[0,50] gs/is[0,20] friction_v[0,20] fc0[0,50] fc1[-50,0]
-  drag_gain[0,5]（1.12.0 起逐关节，0x26 item16）
-- 全局：fric_db[1e-4,0.5] wall_margin[0,0.5] friction_slew[0,500]
+  drag_gain[0,5] (per joint since 1.12.0, 0x26 item 16)
+- Global: fric_db[1e-4,0.5] wall_margin[0,0.5] friction_slew[0,500]
   payload_mass[0,20] payload_com[-1,1]×3 gravity[-50,50]×3
-  friction_model{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 拖动版} fric_v2_eps[1e-3,0.5]
-  drag_db[0,0.5](0=硬 sign) wall_fw_kd[0,5] hold_kp_gain[0,5]
-- ff_mask 位：MASTER=0x01 G=0x02 INERTIA=0x04 CORIOLIS=0x08 FRICTION=0x10
+  friction_model{0=v1 error direction, 1=v2 SE1 velocity direction, 2=drag} fric_v2_eps[1e-3,0.5]
+  drag_db[0,0.5] (0=hard sign) wall_fw_kd[0,5] hold_kp_gain[0,5]
+- ff_mask bits: MASTER=0x01 G=0x02 INERTIA=0x04 CORIOLIS=0x08 FRICTION=0x10
   INTEGRAL=0x20 WALL=0x40 QUANT=0x80 VELREF=0x100
 
-## 固件版本兼容性
+## Firmware compatibility
 
-- **状态帧双布局自适应**：≤1.4.0 = `4+21N`；1.5.0+ = `6+21N`（尾部 joint_fault
-  u16 断轴位图，flags bit9=enabled）。由 `litearm._protocol` 按帧长识别。
-- **SDK 连接时卡版本门**：< 1.5.0 直接拒连（`FirmwareMismatchError`）。
-- **1.5.0 语义变化**（M3/M8/L4）：急停锁存**仅 [复位 reset] 可退出**；未使能时发运动
-  命令回 `ERR 0x03`；enable 锁存类拒绝回 `ERR 0x06`（须先复位，重试无效）；
-  总览页状态列新增"断轴"（红）。
-- **1.5.1（2026-09-08）**：控制频率 400→300Hz。上位机无感：状态流仍 100Hz。
-  **速度语义（L5 调速器）**：整机页滑块 = 全局封顶，实际速度 = min(move_j 的 sp, 滑块值)；
-  HOME 不再静默改写全局速度；`sp>1.0` 被固件显式拒绝 `ERR 0x02`。
-  KIN_BENCH 应答含 LINK 诊断行（crc/ovf/rfdrop/txfail）。
-- **1.5.2**：M6b 电机超时保护（`RID_TIMEOUT=9`）。监控页 err 列会把 13 显示为
-  "超时保护"。
-- **1.12.0（2026-11-12）**：拖动摩擦补偿比例改为**逐关节**（`0x26` item16），
-  `0x28` item10 全局 `drag_gain` 删除；flash 升 **v11**，刷机后需重新导入模型与参数。
+- **State-frame dual layout**: ≤1.4.0 = `4+21N`; 1.5.0+ = `6+21N` (tail joint_fault u16 bitmap,
+  flags bit9=enabled). `litearm._protocol` identifies the layout from the frame length.
+- **The SDK enforces a version gate on connect**: below 1.5.0 it refuses to connect
+  (`FirmwareMismatchError`).
+- **1.5.0 semantic changes** (M3/M8/L4): the emergency-stop latch can only be cleared by
+  [reset]; motion commands while disabled return `ERR 0x03`; enable latch rejections return
+  `ERR 0x06` (reset first, retrying is useless); the overview state column adds "dropped axis"
+  (red).
+- **1.5.1 (2026-09-08)**: control frequency 400→300 Hz. The host is unaffected: the state stream
+  is still 100 Hz. **Speed semantics (L5 governor)**: the Machine-page slider is a global cap;
+  actual speed = min(move_j's sp, slider value). HOME no longer silently rewrites the global
+  speed; `sp>1.0` is explicitly rejected by the firmware with `ERR 0x02`. The KIN_BENCH reply
+  includes the LINK diagnostic line (crc/ovf/rfdrop/txfail).
+- **1.5.2**: M6b motor timeout protection (`RID_TIMEOUT=9`). The monitor err column shows 13 as
+  "timeout protection".
+- **1.11.0 (2026-11-07)**: zero-G became a stateless law (RNEA + drag + wall); the spring-machine
+  parameters `zg_kp/zg_kd/zg_damping/engage/vel_thr` were removed.
+- **1.12.0 (2026-11-12)**: the drag-friction compensation ratio became **per joint**
+  (`0x26` item 16); `0x28` item 10 (global `drag_gain`) was removed; flash moved to **v11**, so
+  re-import the model and parameters after flashing.
+- **1.12.1 (2026-11-12)**: zero-G exit / INIT hold now includes gravity feed-forward; no protocol
+  change.
+- **1.12.3 (2026-11-13)**: the state frame is back to **153 B**; `flags` bit11 = fault detail
+  available; `CMD_GET_FAULT 0x51` added (7J = 13 B). The tool queries once when bit11 is set. The
+  1.12.2 161 B transitional layout is still parsed by the SDK. Older firmware has no `0x51`, so
+  the reason shows "unavailable".
 
-## 已知边界
+## Known limits
 
-- 状态丢帧只在**接收侧**累积（seq 差分），固件 100Hz 主动推，无 ACK 状态流。
-- 曲线数据 100Hz 全量入环形缓冲（最近 `plot_window_s`），绘图 30Hz 重绘不抽稀。
-- 无自动重连：离线后手动重新连接（连接时自动收回运动解锁）。
-- 参数页的关节列固定 7 列（`param_catalog.NUM_JOINTS`）。台架 1J 上只读得到 J1，
-  J2..J7 显示"—"且封禁编辑、不参与下发（固件只有 1 个关节，SDK 的 `_check_idx` 会拒）。
-- 断线后不再回显最后一帧：`SdkWorker` 在离线/关闭时丢弃状态快照，状态条与表格留白 ——
-  把陈旧遥测当实时数据显示会让人以为臂还在原地。
+- State-frame drops are counted only on the **receive side** (seq differences); the firmware
+  pushes at 100 Hz and there is no ACKed state stream.
+- Plot data enters the ring buffer at the full 100 Hz (the last `plot_window_s`); redraw runs at
+  30 Hz without decimation.
+- No automatic reconnect: reconnect manually after going offline (connecting retracts the motion
+  unlock).
+- The Parameters page always has 7 joint columns (`param_catalog.NUM_JOINTS`). On a 1J bench only
+  J1 is readable; J2..J7 show "—", are locked for editing, and are excluded from sends (the
+  firmware has one joint and the SDK's `_check_idx` rejects the rest).
+- After a disconnect the tool no longer echoes the last frame: `SdkWorker` drops the state
+  snapshot when offline/closed, leaving the status strip and table blank — showing stale telemetry
+  as live data would make people believe the arm is still where it was.
+- Fault reasons are queried only when `flags` bit11=1; older firmware (no `0x51`) shows "reason
+  unavailable", which must not be read as "no fault".
+- The UI's firmware-error display is the command name + generic code meaning (`describe`); the
+  per-command detail is in the SDK exception's `err_reason` message (the `str(e)` of
+  `CommandRejectedError`).

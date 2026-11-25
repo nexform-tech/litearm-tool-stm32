@@ -23,3 +23,6 @@ temp_alert_c: 85.0
 
 # 曲线滚动窗口（秒）
 plot_window_s: 30.0
+
+# 3D 视图 MSAA 采样数（0=关闭）。软件渲染/老显卡上可设 0 换帧率。
+scene_msaa: 4

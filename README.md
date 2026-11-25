@@ -46,6 +46,7 @@ three navigation groups on the left + a collapsible log at the bottom.
 | Group | Page | What it does |
 | --- | --- | --- |
 | Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot; CSV export of the selected joints with units, temperatures and drive error codes) |
+| | **3D** | Read-only digital twin: URDF + STL, base/tool axes, TCP marker; 100 Hz state smoothed to 60 Hz; never touches the serial port |
 | | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes / export the parsed samples as CSV |
 | | **Logs** | Structured JSONL: live view / filter by level, category and text / raw-record detail / history read-back across restarts / export JSONL |
 | | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
@@ -281,22 +282,27 @@ litetool/
     job.py              Upgrade pipeline (disarm → enter DFU → flash → detach → reconnect)
     fake.py             Fake DFU engine for offline tests and demos
     controller.py       Tool-side adapter: SdkWorker + pyusb engine + GUI-thread reconnect
+  scene/
+    urdf_model.py       URDF parse + binary STL + forward kinematics (no Qt/OpenGL; offline-testable)
+    controller.py       Joint display smoothing (100 Hz state → 60 Hz frame)
+    view.py             pyqtgraph.opengl scene widget (imported on demand)
   gui/
     bridge.py           Cross-thread Qt signal bridge (log / task result / online state)
     widgets.py          Log panel / persistent status strip / joint table / banner / left navigation
     pages/
-      overview_page.py  Overview      capture_page.py  Capture
-      fault_page.py     Faults        machine_page.py  Machine
-      joint_page.py     Joints        cart_page.py     Cartesian
-      zerog_page.py     Zero-G        params_page.py   Parameters
+      overview_page.py  Overview      scene_page.py   3D
+      capture_page.py   Capture       fault_page.py   Faults
+      machine_page.py   Machine       joint_page.py   Joints
+      cart_page.py      Cartesian     zerog_page.py   Zero-G
       gripper_page.py   Gripper       log_page.py      Logs
-      guide_page.py     Tuning guide  diag_page.py     Diagnostics
-      installation_page.py  Installation direction
+      params_page.py    Parameters    guide_page.py   Tuning guide
+      diag_page.py      Diagnostics   installation_page.py  Installation direction
       activation_page.py    Activation (read UID / online activation)
       firmware_page.py      Firmware upgrade (USB DFU)
       common.py         Shared pose/joint input widgets
       plot_pane.py      Three-pane linked plot component
     main_window.py      Main-window assembly + command gate (Δq / unlock / emergency flows)
+assets/description/     3D model (decimated URDF + STL, ~6.2 MB; see its README for origin)
 templates/params_example.yaml   Import template with unit and range comments
 presets/                        Factory / SE1 friction presets
 tests/                          Offline tests (no hardware required)
@@ -324,7 +330,9 @@ python3 -m pytest          # 612 passed (all offline, no hardware required)
 | `test_fault_display.py` | Fallback when an older firmware leaves `fault_reason` empty |
 | `test_fault_page.py` | Faults-page layout and all 7 axes on one screen |
 | `test_diagnostics.py` | Error-code text and the diagnostics bundle |
-| `test_gui_smoke.py` | Build and layout regression (3 navigation groups, 13 pages, 1J bench, motion pages locked by default) |
+| `test_gui_smoke.py` | Build and layout regression (3 navigation groups, 16 pages, 1J bench, motion pages locked by default) |
+| `test_scene_model.py` | URDF parse / STL / FK; vendored model has 9 links, 7 joints, >100k triangles |
+| `test_scene_controller.py` | 100 Hz state → 60 Hz display smoothing (no steps; long gaps snap) |
 | `test_activation.py` | Activation client: license parsing / registration validation / service-error mapping / internal channel token (incl. studio's config-path override); **no network** |
 | `test_activation_page.py` | Activation page: record states, stale record / disconnect, consent document, submit-button gating, enabled-device gate, 0x02 + unconfirmed read-back, connect auto-read |
 | `test_app_flags.py` | `--activation-url` parsing (space/`=` forms; a missing value must not swallow the next Qt argument) |
@@ -347,6 +355,7 @@ python3 -m pytest          # 612 passed (all offline, no hardware required)
    - [ ] After the unplug the top bar shows `● Reconnecting (n)`; replug → it reconnects and stays motion-locked; any command queued before the unplug was dropped
    - [ ] Press the emergency stop while disconnected → it must clearly say "emergency stop NOT sent", never "disabled"
 2. **Plot**: the overview scrolls with the state; the J1–J7 channel checkboxes switch traces; "Freeze" pauses and "Clear" redraws; [Enlarge plot] collapses the state table. **Send one `movej` and confirm the plot keeps updating during the motion** (state hook).
+2b. **3D**: after connecting, open the 3D page → the model matches the overview q; no 20 Hz stepping during motion/drag; unplug the serial cable → the frame freezes with a notice; 1J bench → empty state; iso/front/side/tool presets and grid/axes toggles work.
 3. **Basic control** (the magnets will engage; support the arm):
    - [ ] [Home] is not clickable before unlocking; it becomes clickable after ticking the unlock
    - [ ] `enable` → ACK; `disable` / clear faults / reset / global speed take effect

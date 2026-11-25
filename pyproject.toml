@@ -12,6 +12,7 @@ dependencies = [
     "pyserial>=3.5",
     "PyQt5>=5.15",
     "pyqtgraph>=0.13",
+    "PyOpenGL>=3.1",
     "numpy>=1.21",
     "PyYAML>=6.0",
     # 固件升级 (USB DFU)：烧录引擎用 pyusb；libusb-package 自带 DLL，

@@ -40,6 +40,7 @@ GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 
 | 分组 | 页面 | 干什么 |
 | --- | --- | --- |
 | 监视 | **总览** | 逐关节状态表 + 100Hz 三段联动曲线（原「监控」「曲线」两页合并，可一键放大曲线；可把勾选关节导出为带单位、温度与驱动错误码的 CSV） |
+| | **3D** | 数字孪生（只读）：URDF + STL；基座/工具坐标轴、TCP 标记；100Hz 状态平滑到 60Hz；不碰串口 |
 | | **采集** | 固件 300Hz 控制拍采集：录制 / 查进度 / 读回预览 / 导出原始字节 / 导出解析 CSV |
 | | **日志** | 结构化 JSONL：实时视图 / 按级别、类别、文本筛选 / 原始记录详情 / 重启后历史回读 / 导出 JSONL |
 | | **故障** | 按轴故障原因（`flags` bit11 为真时按需查一次 `0x51`）+ flags + `drop_hold`；7 轴一屏，原因/处置分列 |
@@ -244,22 +245,27 @@ litetool/
     job.py              升级流水线（失能 → 进 DFU → 烧录 → 复位 → 重连）
     fake.py             离线测试/演示用的假 DFU 引擎
     controller.py       tool 侧适配：SdkWorker + pyusb 引擎 + GUI 线程重连
+  scene/
+    urdf_model.py       URDF 解析 + binary STL + 正运动学（无 Qt/OpenGL，可离线单测）
+    controller.py       关节角显示平滑（100Hz 状态 → 60Hz 画面）
+    view.py             pyqtgraph.opengl 场景控件（按需 import）
   gui/
     bridge.py           跨线程 Qt 信号桥（日志 / 任务结果 / 在线态）
     widgets.py          日志面板 / 常驻状态条 / 关节表 / 横幅 / 左侧导航
     pages/
-      overview_page.py  总览      capture_page.py  采集
-      fault_page.py     故障      machine_page.py  整机
-      joint_page.py     关节      cart_page.py     笛卡尔
-      zerog_page.py     零重力    params_page.py   参数表
+      overview_page.py  总览      scene_page.py    3D
+      capture_page.py   采集      fault_page.py    故障
+      machine_page.py   整机      joint_page.py    关节
+      cart_page.py      笛卡尔    zerog_page.py    零重力
       gripper_page.py   夹爪      log_page.py      日志
-      guide_page.py     调参指南  diag_page.py     诊断
-      installation_page.py 安装方向
+      params_page.py    参数表    guide_page.py    调参指南
+      diag_page.py      诊断      installation_page.py 安装方向
       activation_page.py 授权（读 UID / 在线激活）
       firmware_page.py 固件升级（USB DFU）
       common.py         pose/关节输入组等共用件
       plot_pane.py      三段联动曲线组件
     main_window.py      主窗口组装 + 命令收口（Δq 确认/解锁/急停流程）
+assets/description/     3D 模型（decimated URDF + STL，约 6.2 MB；来源见其 README）
 templates/params_example.yaml   导入模板（含单位/范围注释）
 presets/                        出厂 / SE1 摩擦 预设
 tests/                  离线测试（无硬件可跑）
@@ -286,7 +292,9 @@ python3 -m pytest          # 612 passed（全部离线，无需硬件）
 | `test_fault_display.py` | 旧固件 `fault_reason` 为空时的回退 |
 | `test_fault_page.py` | 故障页布局与 7 轴一屏 |
 | `test_diagnostics.py` | 错误码文案与诊断包 |
-| `test_gui_smoke.py` | 构建与布局回归（导航 3 组 13 页、台架 1J、运动页默认锁定） |
+| `test_gui_smoke.py` | 构建与布局回归（导航 3 组 16 页、台架 1J、运动页默认锁定） |
+| `test_scene_model.py` | URDF 解析 / STL / FK；随包模型 9 links、7 关节、>10 万三角形 |
+| `test_scene_controller.py` | 100Hz 状态 → 60Hz 显示平滑（无台阶、长间隔直接对齐） |
 | `test_activation.py` | 激活客户端：凭据解析 / 注册信息校验 / 服务错误映射 / 内部通道令牌（含 studio 的配置路径覆盖）；**不出网** |
 | `test_activation_page.py` | 授权页：三态记录、失败重读/断线保留、同意书文案、提交门禁、使能拦截、0x02 与未确认回读、连上自动读取 |
 | `test_app_flags.py` | `--activation-url` 解析（空格/`=` 两种形态；缺值不能吞掉后面的 Qt 参数） |
@@ -309,6 +317,8 @@ python3 -m pytest          # 612 passed（全部离线，无需硬件）
    - [ ] 断线状态下点急停 → 显眼处必须显示"急停未发出"，不得显示"已失能"
 2. **曲线**：总览页随状态滚动；勾选 J1~J7 通道切换；"冻结"暂停、"清屏"重绘；
    [曲线放大] 收起状态表。**下发一次 movej，确认运动期间曲线仍在更新**（状态钩子）。
+2b. **3D**：连接后切到 3D 页 → 模型姿态与总览 q 一致；运动/拖动时无 20Hz 台阶；
+   拔串口 → 画面冻结并提示；1J 台架 → 空状态；等轴/正视/侧视/工具预设、网格/坐标轴切换正常。
 3. **基础控制**（会加磁锁位，臂需受支撑）：
    - [ ] 未勾选解锁时 [回零] 不可点；勾选后可点
    - [ ] 使能 enable → ACK；失能 disable / 清故障 / 复位 / 全局调速器生效

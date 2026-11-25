@@ -19,6 +19,7 @@ _RANGES = {
     "plot_window_s": (1.0, 3600.0),
     "pose_confirm_pos": (1e-9, 10.0),     # movep 位置幅度确认阈值 (m)
     "pose_confirm_rot": (1e-9, 6.28),     # movep 姿态幅度确认阈值 (rad)
+    "scene_msaa": (0.0, 16.0),            # 3D 视图 MSAA 采样数 (0=关闭)
 }
 
 
@@ -34,6 +35,7 @@ class Settings:
     plot_window_s: float = 30.0           # 曲线滚动窗口（秒）
     pose_confirm_pos: float = 0.05        # movep 位置幅度确认阈值 (m)
     pose_confirm_rot: float = 0.30        # movep 姿态幅度确认阈值 (rad)
+    scene_msaa: int = 4                   # 3D 视图 MSAA 采样数 (0=关闭)
 
     @classmethod
     def load(cls, path=None) -> "Settings":

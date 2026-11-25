@@ -59,6 +59,7 @@ def main(argv=None) -> int:
         # 授权页只读这个环境变量；与 `LITEARM_ACTIVATION_URL` 同一入口。
         os.environ["LITEARM_ACTIVATION_URL"] = activation_url
     settings = Settings.load(config_path())
+    _prepare_gl(settings)
     app = QApplication(raw)
     app.setApplicationName("LiteArm Tool STM32")
 
@@ -117,3 +118,20 @@ def _drop_option(argv, name):
             continue
         out.append(arg)
     return out
+def _prepare_gl(settings) -> None:
+    """Qt 之前设置 OpenGL 平台与 MSAA。
+
+    ⚠ PyOpenGL 在 Linux 上默认可能选 EGL，而 Qt5/X11 的 context 是 GLX：
+    实测报 `Attempt to retrieve context when no valid context`，3D 一项都画不出来。
+    有 X11（含 XWayland）时强制 GLX；纯 Wayland 才交给 EGL。
+    """
+    if sys.platform.startswith("linux"):
+        native_wayland = os.environ.get("QT_QPA_PLATFORM", "").startswith("wayland") or (
+            os.environ.get("WAYLAND_DISPLAY") and not os.environ.get("DISPLAY"))
+        os.environ.setdefault("PYOPENGL_PLATFORM", "egl" if native_wayland else "glx")
+    samples = int(getattr(settings, "scene_msaa", 0) or 0)
+    if samples > 0:
+        from PyQt5.QtGui import QSurfaceFormat
+        fmt = QSurfaceFormat.defaultFormat()
+        fmt.setSamples(samples)
+        QSurfaceFormat.setDefaultFormat(fmt)

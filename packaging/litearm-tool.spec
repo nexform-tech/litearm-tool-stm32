@@ -75,10 +75,13 @@ a = Analysis(
     [str(ROOT / "litetool" / "__main__.py")],   # `python3 -m litetool` 的入口
     pathex=[str(ROOT)],                          # 让 litetool 从**工作树**里取
     binaries=_grip_bins + LIBUSB_BINARIES,
-    datas=[(str(ROOT / "config.yaml"), ".")] + _grip_datas + LIBUSB_DATAS,    # 随包基线 (找不到同级那份时兜底)
+    datas=[(str(ROOT / "config.yaml"), "."),
+           (str(ROOT / "assets" / "description"), "assets/description")] + _grip_datas + LIBUSB_DATAS,
     hiddenimports=[
         # 串口枚举靠 pyserial 的运行时后端, 静态分析看不到
         "serial.tools.list_ports",
+        # PyOpenGL 的平台后端是按 PYOPENGL_PLATFORM 动态选的, 静态分析看不到
+        "OpenGL.platform.glx", "OpenGL.platform.egl",
         *_grip_hidden,
         # 固件升级：pyusb 的后端是运行期才 import 的；libusb_package 在
         # `engine._load_backend()` 里也是延迟 import。

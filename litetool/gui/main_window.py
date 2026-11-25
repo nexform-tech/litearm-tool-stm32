@@ -39,6 +39,7 @@ from litetool.gui.pages.log_page import LogPage
 from litetool.gui.pages.machine_page import MachinePage
 from litetool.gui.pages.overview_page import OverviewPage
 from litetool.gui.pages.params_page import ParamsPage
+from litetool.gui.pages.scene_page import ScenePage
 from litetool.gui.pages.zerog_page import ZeroGPage
 from litetool.gui.widgets import LogPanel, NavList, StatusStrip
 from litetool.sdk_worker import SdkWorker, exit_zero_g_and_hold
@@ -157,6 +158,8 @@ class MainWindow(QMainWindow):
         self.scrolls = {}
         self._add_page("overview", "总览", "状态表 + 100Hz 曲线",
                        OverviewPage(self._settings))
+        self._add_page("scene", "3D", "数字孪生（只读，不碰串口）",
+                       ScenePage(self.worker, self._settings))
         self._add_page("capture", "采集", "固件 300Hz 控制拍采集与导出", CapturePage())
         self._add_page("log", "日志", "结构化 JSONL：实时/筛选/历史回读/导出",
                        LogPage(self.slog))
@@ -233,7 +236,7 @@ class MainWindow(QMainWindow):
         """当前显示页面（`stack.currentWidget()` 是外壳 QScrollArea）。"""
         return self.stack.currentWidget().widget()
 
-    _GROUPS = {"监视": ("overview", "capture", "log"),
+    _GROUPS = {"监视": ("overview", "scene", "capture", "log"),
                "操作": ("machine", "fault", "joint", "cart", "zerog", "gripper"),
                # ⚠ 新页 key 必须登记在这里: `_group_for` 用的是无默认值的 next(),
                # 漏登记会在 __init__ 期间抛 StopIteration -> 崩启动。
@@ -662,6 +665,7 @@ class MainWindow(QMainWindow):
         self.strip.update_from(st, drops, fps)
 
         self.pages["overview"].update_from(st)
+        self.pages["scene"].update_from(st)
         self.pages["machine"].update_from(st)
         self.pages["machine"].set_metrics(drops, fps, self.worker.last_reset_reason)
         # 离线时也喂一次 None：让参数页/安装方向页丢掉 enable 态的旧快照

@@ -15,9 +15,9 @@ pytest.importorskip("numpy")
 from litetool import settings as settings_mod                 # noqa: E402
 from tests.fake_arm import make_state                         # noqa: E402
 
-PAGE_KEYS = ("overview", "capture", "log", "machine", "fault", "joint", "cart",
-             "zerog", "gripper", "params", "install", "activation", "firmware",
-             "guide", "diag")
+PAGE_KEYS = ("overview", "scene", "capture", "log", "machine", "fault", "joint",
+             "cart", "zerog", "gripper", "params", "install", "activation",
+             "firmware", "guide", "diag")
 
 
 def _win():
@@ -147,6 +147,30 @@ def test_motion_pages_start_locked():
             b = getattr(page, name, None)
             if b is not None:
                 assert not b.isEnabled(), f"{key}.{name} 未解锁却可用"
+    w.close()
+
+
+def test_scene_page_is_read_only_and_offline_safe():
+    """3D 页不是运动页：不参与解锁，也不该在离线时崩。"""
+    w = _win()
+    scene = w.pages["scene"]
+    assert scene not in (w.pages["machine"], w.pages["joint"])
+    scene.set_online(False)
+    assert "未连接" in scene.placeholder.text()
+    scene.update_from(None)
+    # 页面未 show，不应创建 OpenGL 控件；只允许空状态
+    assert scene._view is None
+    w.close()
+
+
+def test_scene_page_handles_1j_bench():
+    """1J 台架没有 7 轴模型：必须走空状态，不能套 7J 模型。"""
+    w = _win()
+    scene = w.pages["scene"]
+    scene.update_from(make_state(n=1))
+    assert "1J" in scene.placeholder.text()
+    assert scene.stack.currentWidget() is scene.placeholder
+    assert not scene.btn_iso.isEnabled()
     w.close()
 
 

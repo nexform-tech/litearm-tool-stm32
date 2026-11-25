@@ -124,3 +124,17 @@ def test_description_dir_frozen_uses_meipass(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.frozen", True, raising=False)
     monkeypatch.setattr("sys._MEIPASS", str(tmp_path), raising=False)
     assert description_dir() == d
+
+
+def test_render_mesh_is_indexed_and_uses_fast_normals():
+    """渲染层用索引化网格 + 向量化法线；这是 3D 首开从秒级降到亚秒级的关键。"""
+    m = load_default_model()
+    verts, faces, normals = m.render_mesh("base_link")
+    assert verts.shape[1] == 3
+    assert faces.shape[1] == 3
+    assert normals.shape == verts.shape
+    assert int(faces.max()) < len(verts)
+    assert len(faces) == len(m.mesh("base_link")[1])   # 三角形数不变
+    assert len(verts) < len(m.mesh("base_link")[0])    # 重合顶点已焊接
+    assert np.allclose(np.linalg.norm(normals, axis=1), 1.0, atol=1e-5)
+    assert m.render_mesh("base_link")[0] is verts       # 缓存

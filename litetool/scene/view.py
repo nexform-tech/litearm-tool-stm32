@@ -18,6 +18,7 @@ from PyQt5.QtGui import QMatrix4x4, QVector3D
 from PyQt5.QtWidgets import QSizePolicy
 
 import pyqtgraph.opengl as gl
+from OpenGL import GL
 from pyqtgraph.opengl.shaders import FragmentShader, ShaderProgram, VertexShader
 
 from litetool.scene.urdf_model import UrdfModel
@@ -82,6 +83,12 @@ METAL_SHADER = ShaderProgram('litearm-metal', [
 ])
 BG = (240, 242, 245, 255)
 GRID = (150, 158, 170, 140)
+#: 模型是封闭、绕序一致的 STL；开背面剔除可以省掉约一半的三角形光栅化。
+MESH_GLOPS = {
+    GL.GL_DEPTH_TEST: True,
+    GL.GL_BLEND: False,
+    GL.GL_CULL_FACE: True,
+}
 
 
 def qmatrix(m: np.ndarray) -> QMatrix4x4:
@@ -134,12 +141,15 @@ class SceneWidget(gl.GLViewWidget):
     # ------------------------------------------------------------------ 构建
     def _build(self):
         for i, (name, link) in enumerate(self.model.links.items()):
-            verts, faces = self.model.mesh(name)
+            verts, faces, normals = self.model.render_mesh(name)
             md = gl.MeshData(vertexes=verts, faces=faces)
+            # pyqtgraph 没有公开的 setVertexNormals；`vertexNormals()` 会直接返回
+            # 这里的缓存，从而跳过它那个 1.7 s 的逐顶点 Python 循环。
+            md._vertexNormals = normals
             item = gl.GLMeshItem(
                 meshdata=md, smooth=True, drawEdges=False,
                 shader=METAL_SHADER, color=PALETTE[i % len(PALETTE)],
-                glOptions="opaque")
+                glOptions=MESH_GLOPS)
             self._items[name] = item
             self.addItem(item)
 

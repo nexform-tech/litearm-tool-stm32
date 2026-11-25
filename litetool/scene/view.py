@@ -79,8 +79,8 @@ METAL_SHADER = ShaderProgram('litearm-metal', [
         }
     """),
 ])
-BG = (24, 26, 31, 255)
-GRID = (68, 74, 86, 110)
+BG = (240, 242, 245, 255)
+GRID = (150, 158, 170, 140)
 
 
 def qmatrix(m: np.ndarray) -> QMatrix4x4:
@@ -123,7 +123,7 @@ class SceneWidget(gl.GLViewWidget):
 
         self._tcp = gl.GLScatterPlotItem(
             pos=np.array([[0.0, 0.0, 0.0]], dtype=np.float32),
-            color=(0.25, 0.80, 1.0, 1.0), size=9.0, pxMode=True)
+            color=(0.05, 0.45, 0.72, 1.0), size=9.0, pxMode=True)
         self.addItem(self._tcp)
 
         self._build()

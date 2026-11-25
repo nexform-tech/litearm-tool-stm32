@@ -24,16 +24,16 @@ from litetool.scene.urdf_model import UrdfModel
 
 #: 与 tool 深色界面一致的克制配色；末位是 ee/工具强调色。
 PALETTE = (
-    # 工业材质：石墨底座 + 铝/钛交替的连杆 + 蓝色阳极氧化末端。
-    (0.13, 0.14, 0.16, 1.0),   # base — graphite
-    (0.60, 0.62, 0.65, 1.0),   # J1 — aluminium
-    (0.40, 0.42, 0.46, 1.0),   # J2 — titanium
-    (0.63, 0.65, 0.68, 1.0),   # J3 — aluminium
-    (0.40, 0.42, 0.46, 1.0),   # J4 — titanium
-    (0.63, 0.65, 0.68, 1.0),   # J5 — aluminium
-    (0.40, 0.42, 0.46, 1.0),   # J6 — titanium
-    (0.63, 0.65, 0.68, 1.0),   # J7 — aluminium
-    (0.18, 0.30, 0.44, 1.0),   # ee_link — anodised blue
+    # 工业材质：深石墨底座 + 亮铝/中灰钛交替的连杆 + 蓝色阳极氧化末端。
+    (0.50, 0.51, 0.54, 1.0),   # base — graphite
+    (0.84, 0.86, 0.89, 1.0),   # J1 — aluminium
+    (0.70, 0.72, 0.76, 1.0),   # J2 — titanium
+    (0.84, 0.86, 0.89, 1.0),   # J3 — aluminium
+    (0.70, 0.72, 0.76, 1.0),   # J4 — titanium
+    (0.84, 0.86, 0.89, 1.0),   # J5 — aluminium
+    (0.70, 0.72, 0.76, 1.0),   # J6 — titanium
+    (0.84, 0.86, 0.89, 1.0),   # J7 — aluminium
+    (0.25, 0.41, 0.58, 1.0),   # ee_link — anodised blue
 )
 
 #: 比 pyqtgraph 自带的 `shaded` 多一盏补光 + Blinn-Phong 高光 + 轻微菲涅尔；
@@ -70,11 +70,12 @@ METAL_SHADER = ShaderProgram('litearm-metal', [
             float d3 = max(dot(N, rim),  0.0);
             float s1 = pow(max(dot(N, normalize(key  + V)), 0.0), 64.0);
             float s2 = pow(max(dot(N, normalize(fill + V)), 0.0), 24.0);
-            float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+            float front = max(dot(N, V), 0.0);
+            float fres = pow(1.0 - front, 3.0);
             vec3 base = v_color.rgb;
-            vec3 rgb = base * (0.20 + 0.55 * d1 + 0.22 * d2 + 0.10 * d3)
-                     + mix(vec3(1.0), base, 0.35) * (0.45 * s1 + 0.16 * s2)
-                     + base * 0.10 * fres;
+            vec3 rgb = base * (0.34 + 0.46 * d1 + 0.26 * d2 + 0.10 * d3 + 0.22 * front)
+                     + mix(vec3(1.0), base, 0.30) * (0.26 * s1 + 0.09 * s2)
+                     + base * 0.12 * fres;
             gl_FragColor = vec4(rgb, v_color.a);
         }
     """),

@@ -10,7 +10,7 @@ Qt 之前设 `PYOPENGL_PLATFORM=glx`；单独跑本模块时也要设。
 from __future__ import annotations
 
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 import numpy as np
 from PyQt5.QtCore import QTimer
@@ -18,23 +18,67 @@ from PyQt5.QtGui import QMatrix4x4, QVector3D
 from PyQt5.QtWidgets import QSizePolicy
 
 import pyqtgraph.opengl as gl
+from pyqtgraph.opengl.shaders import FragmentShader, ShaderProgram, VertexShader
 
 from litetool.scene.urdf_model import UrdfModel
 
 #: 与 tool 深色界面一致的克制配色；末位是 ee/工具强调色。
 PALETTE = (
-    # 冷色系、逐 link 拉开明度/色相：相邻两节必须一眼分得开。
-    (0.24, 0.29, 0.36, 1.0),   # base — dark slate
-    (0.30, 0.51, 0.68, 1.0),   # J1 — steel blue
-    (0.43, 0.66, 0.79, 1.0),   # J2 — light blue
-    (0.38, 0.68, 0.61, 1.0),   # J3 — teal
-    (0.64, 0.73, 0.82, 1.0),   # J4 — pale steel
-    (0.35, 0.58, 0.73, 1.0),   # J5 — mid blue
-    (0.76, 0.82, 0.88, 1.0),   # J6 — near white
-    (0.47, 0.60, 0.72, 1.0),   # J7 — grey blue
-    (0.15, 0.55, 0.92, 1.0),   # ee_link — accent
+    # 工业材质：石墨底座 + 铝/钛交替的连杆 + 蓝色阳极氧化末端。
+    (0.13, 0.14, 0.16, 1.0),   # base — graphite
+    (0.60, 0.62, 0.65, 1.0),   # J1 — aluminium
+    (0.40, 0.42, 0.46, 1.0),   # J2 — titanium
+    (0.63, 0.65, 0.68, 1.0),   # J3 — aluminium
+    (0.40, 0.42, 0.46, 1.0),   # J4 — titanium
+    (0.63, 0.65, 0.68, 1.0),   # J5 — aluminium
+    (0.40, 0.42, 0.46, 1.0),   # J6 — titanium
+    (0.63, 0.65, 0.68, 1.0),   # J7 — aluminium
+    (0.18, 0.30, 0.44, 1.0),   # ee_link — anodised blue
 )
-SHADER = "balloon"
+
+#: 比 pyqtgraph 自带的 `shaded` 多一盏补光 + Blinn-Phong 高光 + 轻微菲涅尔；
+#: 自带 shader 在深色界面里几乎只有暗面，看起来像塑料/剪影。
+METAL_SHADER = ShaderProgram('litearm-metal', [
+    VertexShader("""
+        uniform mat4 u_mvp;
+        uniform mat3 u_normal;
+        attribute vec4 a_position;
+        attribute vec3 a_normal;
+        attribute vec4 a_color;
+        varying vec4 v_color;
+        varying vec3 v_normal;
+        void main() {
+            v_normal = normalize(u_normal * a_normal);
+            v_color = a_color;
+            gl_Position = u_mvp * a_position;
+        }
+    """),
+    FragmentShader("""
+        #ifdef GL_ES
+        precision mediump float;
+        #endif
+        varying vec4 v_color;
+        varying vec3 v_normal;
+        void main() {
+            vec3 N = normalize(v_normal);
+            vec3 V = vec3(0.0, 0.0, 1.0);
+            vec3 key  = normalize(vec3( 0.40, -0.60,  0.80));
+            vec3 fill = normalize(vec3(-0.70,  0.25,  0.55));
+            vec3 rim  = normalize(vec3( 0.00,  0.75,  0.35));
+            float d1 = max(dot(N, key),  0.0);
+            float d2 = max(dot(N, fill), 0.0);
+            float d3 = max(dot(N, rim),  0.0);
+            float s1 = pow(max(dot(N, normalize(key  + V)), 0.0), 64.0);
+            float s2 = pow(max(dot(N, normalize(fill + V)), 0.0), 24.0);
+            float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+            vec3 base = v_color.rgb;
+            vec3 rgb = base * (0.20 + 0.55 * d1 + 0.22 * d2 + 0.10 * d3)
+                     + mix(vec3(1.0), base, 0.35) * (0.45 * s1 + 0.16 * s2)
+                     + base * 0.10 * fres;
+            gl_FragColor = vec4(rgb, v_color.a);
+        }
+    """),
+])
 BG = (24, 26, 31, 255)
 GRID = (68, 74, 86, 110)
 
@@ -93,7 +137,7 @@ class SceneWidget(gl.GLViewWidget):
             md = gl.MeshData(vertexes=verts, faces=faces)
             item = gl.GLMeshItem(
                 meshdata=md, smooth=True, drawEdges=False,
-                shader=SHADER, color=PALETTE[i % len(PALETTE)],
+                shader=METAL_SHADER, color=PALETTE[i % len(PALETTE)],
                 glOptions="opaque")
             self._items[name] = item
             self.addItem(item)

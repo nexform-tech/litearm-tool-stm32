@@ -24,16 +24,16 @@ from litetool.scene.urdf_model import UrdfModel
 
 #: 与 tool 深色界面一致的克制配色；末位是 ee/工具强调色。
 PALETTE = (
-    # 工业材质：深石墨底座 + 亮铝/中灰钛交替的连杆 + 蓝色阳极氧化末端。
-    (0.50, 0.51, 0.54, 1.0),   # base — graphite
-    (0.84, 0.86, 0.89, 1.0),   # J1 — aluminium
-    (0.70, 0.72, 0.76, 1.0),   # J2 — titanium
-    (0.84, 0.86, 0.89, 1.0),   # J3 — aluminium
-    (0.70, 0.72, 0.76, 1.0),   # J4 — titanium
-    (0.84, 0.86, 0.89, 1.0),   # J5 — aluminium
-    (0.70, 0.72, 0.76, 1.0),   # J6 — titanium
-    (0.84, 0.86, 0.89, 1.0),   # J7 — aluminium
-    (0.25, 0.41, 0.58, 1.0),   # ee_link — anodised blue
+    # 工业材质：石墨底座 + 中灰铝/深钛交替的连杆 + 蓝色阳极氧化末端。
+    (0.32, 0.33, 0.36, 1.0),   # base — graphite
+    (0.66, 0.68, 0.71, 1.0),   # J1 — aluminium
+    (0.48, 0.50, 0.54, 1.0),   # J2 — titanium
+    (0.68, 0.70, 0.73, 1.0),   # J3 — aluminium
+    (0.48, 0.50, 0.54, 1.0),   # J4 — titanium
+    (0.68, 0.70, 0.73, 1.0),   # J5 — aluminium
+    (0.48, 0.50, 0.54, 1.0),   # J6 — titanium
+    (0.68, 0.70, 0.73, 1.0),   # J7 — aluminium
+    (0.22, 0.36, 0.52, 1.0),   # ee_link — anodised blue
 )
 
 #: 比 pyqtgraph 自带的 `shaded` 多一盏补光 + Blinn-Phong 高光 + 轻微菲涅尔；
@@ -73,9 +73,9 @@ METAL_SHADER = ShaderProgram('litearm-metal', [
             float front = max(dot(N, V), 0.0);
             float fres = pow(1.0 - front, 3.0);
             vec3 base = v_color.rgb;
-            vec3 rgb = base * (0.34 + 0.46 * d1 + 0.26 * d2 + 0.10 * d3 + 0.22 * front)
-                     + mix(vec3(1.0), base, 0.30) * (0.26 * s1 + 0.09 * s2)
-                     + base * 0.12 * fres;
+            vec3 rgb = base * (0.26 + 0.55 * d1 + 0.28 * d2 + 0.12 * d3 + 0.16 * front)
+                     + mix(vec3(1.0), base, 0.35) * (0.34 * s1 + 0.12 * s2)
+                     + base * 0.10 * fres;
             gl_FragColor = vec4(rgb, v_color.a);
         }
     """),

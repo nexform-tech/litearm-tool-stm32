@@ -23,16 +23,18 @@ from litetool.scene.urdf_model import UrdfModel
 
 #: 与 tool 深色界面一致的克制配色；末位是 ee/工具强调色。
 PALETTE = (
-    (0.42, 0.45, 0.50, 1.0),   # base
-    (0.58, 0.61, 0.66, 1.0),
-    (0.66, 0.69, 0.74, 1.0),
-    (0.58, 0.61, 0.66, 1.0),
-    (0.66, 0.69, 0.74, 1.0),
-    (0.58, 0.61, 0.66, 1.0),
-    (0.66, 0.69, 0.74, 1.0),
-    (0.58, 0.61, 0.66, 1.0),
-    (0.24, 0.53, 0.82, 1.0),   # ee_link
+    # 冷色系、逐 link 拉开明度/色相：相邻两节必须一眼分得开。
+    (0.24, 0.29, 0.36, 1.0),   # base — dark slate
+    (0.30, 0.51, 0.68, 1.0),   # J1 — steel blue
+    (0.43, 0.66, 0.79, 1.0),   # J2 — light blue
+    (0.38, 0.68, 0.61, 1.0),   # J3 — teal
+    (0.64, 0.73, 0.82, 1.0),   # J4 — pale steel
+    (0.35, 0.58, 0.73, 1.0),   # J5 — mid blue
+    (0.76, 0.82, 0.88, 1.0),   # J6 — near white
+    (0.47, 0.60, 0.72, 1.0),   # J7 — grey blue
+    (0.15, 0.55, 0.92, 1.0),   # ee_link — accent
 )
+SHADER = "balloon"
 BG = (24, 26, 31, 255)
 GRID = (68, 74, 86, 110)
 
@@ -51,6 +53,7 @@ class SceneWidget(gl.GLViewWidget):
         self._fit_center = np.zeros(3)
         self._fit_distance = 1.5
         self._cam_timer: Optional[QTimer] = None
+        self._interacting = False
         self._cam_started = 0.0
         self._cam_start: Dict[str, object] = {}
         self._cam_target: Dict[str, object] = {}
@@ -90,7 +93,7 @@ class SceneWidget(gl.GLViewWidget):
             md = gl.MeshData(vertexes=verts, faces=faces)
             item = gl.GLMeshItem(
                 meshdata=md, smooth=True, drawEdges=False,
-                shader="balloon", color=PALETTE[i % len(PALETTE)],
+                shader=SHADER, color=PALETTE[i % len(PALETTE)],
                 glOptions="opaque")
             self._items[name] = item
             self.addItem(item)
@@ -109,6 +112,18 @@ class SceneWidget(gl.GLViewWidget):
         self.setCameraPosition(pos=QVector3D(*center),
                                distance=self._fit_distance,
                                elevation=24, azimuth=36)
+
+    # ------------------------------------------------------------------ 交互
+    def mousePressEvent(self, ev):  # noqa: N802 - Qt 命名
+        # 相机拖动期间暂停“状态→姿态”刷新：鼠标事件优先，避免 60Hz 定时器
+        # 和拖动抢事件循环（软件渲染下尤其明显）。
+        self._interacting = True
+        super().mousePressEvent(ev)
+
+    def mouseReleaseEvent(self, ev):  # noqa: N802 - Qt 命名
+        super().mouseReleaseEvent(ev)
+        self._interacting = False
+        self.update()
 
     # ------------------------------------------------------------------ 相机
     def camera_preset(self, name: str) -> None:

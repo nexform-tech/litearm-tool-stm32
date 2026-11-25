@@ -8,6 +8,7 @@ PyQt/OpenGL 相关模块在第一次显示时才 import：没打开 3D 的用户
 """
 from __future__ import annotations
 
+import numpy as np
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QPushButton,
                              QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
@@ -29,6 +30,7 @@ class ScenePage(QWidget):
         self._has_state = False
         self._n = 0
         self._seq = None
+        self._last_q = None
         self._model = None
         self._view = None
         self._smoother = None
@@ -186,10 +188,17 @@ class ScenePage(QWidget):
         q = getattr(st, "q", None)
         if q is None or len(q) != self._smoother.n:
             return
-        seq = getattr(st, "seq", None)
-        if seq != self._seq:
-            self._seq = seq
-            self._smoother.set_target(q)
+        qv = np.asarray(q, dtype=float)
+        changed = (self._last_q is None or
+                   float(np.max(np.abs(qv - self._last_q))) > 1e-5)
+        if changed:
+            self._last_q = qv.copy()
+            self._seq = getattr(st, "seq", None)
+            self._smoother.set_target(qv)
+        # 静止且已收敛：不重绘。相机拖动时也暂停姿态刷新 —— 让鼠标事件
+        # 独占事件循环，软件渲染下拖动才跟手。
+        if (not changed and self._smoother.settled) or self._view._interacting:
+            return
         out = self._smoother.sample()
         if out is not None:
             self._view.set_pose(out)
@@ -297,8 +306,8 @@ class ScenePage(QWidget):
 
     def _status_text(self) -> str:
         if self._view is not None:
-            return (f"只读 · {self._view.model.n_joints} 关节 · "
-                    f"{self._view.triangle_count:,} 三角形")
+            return (f"只读 · {self._view.model.n_joints}J · "
+                    f"{self._view.triangle_count // 1000}k 三角形")
         return "只读 · 在线，准备加载模型" if self._online else "只读 · 离线"
 
     def _clear_banner(self):

@@ -4,10 +4,13 @@ English | [简体中文](README.zh-CN.md)
 
 Desktop host tool for the LiteArm motion-control firmware (`litearm-stm32`, STM32H723).
 
-**All interaction goes through [`litearm-python`](https://github.com/nexform-tech/litearm-python)** —
+**All application-level interaction goes through [`litearm-python`](https://github.com/nexform-tech/litearm-python)** —
 the tool no longer carries its own protocol implementation; it only provides the UI, the
 operator-intent safety layer, and the tuning ledger. Transport is the onboard composite USB
-CDC port (gs_usb + CDC VCP, VID:PID `1d50:606f` → `/dev/ttyACM0`).
+CDC port (gs_usb + CDC VCP, VID:PID `1d50:606f` → `/dev/ttyACM0`). The **one exception** is the
+firmware upgrade page: the STM32 ROM bootloader is a separate USB DFU device (`0483:DF11`),
+driven directly through pyusb (see [Firmware upgrade](#firmware-upgrade-usb-dfu)); it is not an
+application-level command and has no `litearm-python` API.
 
 Requires `litearm-python >= 2.4.0` (firmware 1.12.3 fault-detail-on-demand query).
 
@@ -53,6 +56,7 @@ three navigation groups on the left + a collapsible log at the bottom.
 | | **Tuning guide** | Formulas and symbol mapping, read-before-you-start notes, symptom→parameter quick table, expandable per-parameter details |
 | | **Diagnostics** | `KIN_BENCH` self-test, reset reason, link counters (CRC / queue full / CAN failures / control-tick overruns), error-code text, diagnostics bundle |
 | | **Activation** | Read the device license record (UID / state / customer id / issue date); online registration to activate an unactivated arm (`0x2F` / `0x3F`) |
+| | **Firmware upgrade** | USB DFU (`0483:DF11`): pick and inspect an image (version / size / address range / SHA / holes), disarm and enter the ROM bootloader — or start from a board already sitting in it — flash with read-back verification, progress / cancel / result |
 
 ## Coverage: SDK public surface → UI entry
 
@@ -90,6 +94,7 @@ whether the UI is actually wired to it).
 | `params.set_joint_param` / `set_joint_limits` | Parameters page per-joint send (limits are sent as a pair) |
 | `params.reset_factory` | Parameters page [Factory reset] |
 | `license` / `activate` | Activation page (read UID/state; online registration with read-back when unactivated) |
+| `enter_dfu` | Firmware upgrade page (disarm → enter the ROM bootloader; the DfuSe engine lives in `litetool/dfu/`, not in the SDK) |
 | `log.start` / `stop` / `reader` / `capture` / `dump` | Capture page |
 | `LogReader.total` / `wait_for` / `read_all` / `iter_chunks` / `samples` | Capture page progress / read-back preview / full capture |
 | `diag.kin_bench` | Diagnostics page [Run KIN_BENCH self-test] |
@@ -149,6 +154,40 @@ The tool covers only the operator-intent layer the firmware cannot enforce:
    0.1 s watchdog, continuous `move_js` servoing requires the caller to resend at ≥10 Hz; this
    tool provides no continuous stream.
 
+## Firmware upgrade (USB DFU)
+
+The **Firmware upgrade** page writes a `.hex` / `.bin` image through the STM32 ROM bootloader
+(`0483:DF11`). It reuses studio's DfuSe engine verbatim (`litetool/dfu/engine.py`; timing comes
+from upstream `dfu-flash` and must not be rewritten here).
+
+- **Two legal starting points.** A connected arm is disarmed first, then `CMD_ENTER_DFU (0x15)`
+  moves it into the bootloader. A board already sitting in the bootloader has no application
+  session — connect will fail, and that is correct — so the page detects `0483:DF11` and flashes
+  it directly. The page states which path is in effect.
+- **Safety.** Upgrading disarms the arm: the motors release and a gravity-loaded arm will droop,
+  so support it first. The software emergency stop cannot reach a board in the bootloader; use
+  the hardware stop / cut power. The licence sector and the factory-calibration sector
+  (`0x080C0000..0x08100000`) are never touched: an image covering them is rejected before any
+  hardware action.
+- **Image admission.** The summary shows version, size, address range, format, holes and SHA-256;
+  an image that is not at `0x08000000`, exceeds the 1 MB flash, or covers the protected sectors
+  cannot start.
+- **Progress and cancel.** Phase + bytes + detail are visible; cancel takes effect between phases
+  and during waits. Once the flash phase has started, cancel no longer aborts it (stopping
+  mid-erase is worse than finishing), and the result/summary says so.
+- **Dependencies.** `pyusb` + `libusb-package` (both in `requirements.txt` and bundled by the
+  PyInstaller spec). On Windows the DFU device also needs ST's WinUSB driver. On Linux add the
+  udev rule and re-plug:
+  ```bash
+  echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", MODE="0666"' \
+    | sudo tee /etc/udev/rules.d/49-litearm-dfu.rules
+  sudo udevadm control --reload-rules && sudo udevadm trigger
+  ```
+- **Hardware acceptance.** The offline suite covers the engine, image rules and the whole
+  pipeline with fakes. A real board must still be used for the success / cancel / unplug cases
+  (see the on-hardware checklist below); the engine's protections (erase-busy floor, read-back
+  verification, blank-out on failure) are exactly what those runs exercise.
+
 ## Usage
 
 ```bash
@@ -164,6 +203,10 @@ bar (for example `Litearm1.12.3-7J`). The connection checks the firmware naming 
 bench are detected from the status-frame length.
 
 Configuration lives in [config.yaml](config.yaml) (interaction settings only, no limits).
+
+The firmware upgrade page needs `pyusb` + `libusb-package` (installed by `requirements.txt`).
+On Linux add the DFU udev rule shown in [Firmware upgrade](#firmware-upgrade-usb-dfu); on Windows
+install ST's WinUSB driver for the DFU device.
 
 ## Code organization
 
@@ -185,6 +228,12 @@ litetool/
   settings.py           config.yaml merge (type + range validation)
   activation.py         Activation-service client (the only outbound network point; license/registration checks)
   license_io.py         License record (0x2F/0x3F) shape layer + read-back verdict for aggregated error 0x02
+  dfu/
+    engine.py           DfuSe flashing engine (verbatim from studio / upstream dfu-flash; pyusb only)
+    image.py            Offline image parsing + admission rules (base / 1 MB bound / protected sectors)
+    job.py              Upgrade pipeline (disarm → enter DFU → flash → detach → reconnect)
+    fake.py             Fake DFU engine for offline tests and demos
+    controller.py       Tool-side adapter: SdkWorker + pyusb engine + GUI-thread reconnect
   gui/
     bridge.py           Cross-thread Qt signal bridge (log / task result / online state)
     widgets.py          Log panel / persistent status strip / joint table / banner / left navigation
@@ -196,6 +245,7 @@ litetool/
       guide_page.py     Tuning guide  diag_page.py     Diagnostics
       installation_page.py  Installation direction
       activation_page.py    Activation (read UID / online activation)
+      firmware_page.py      Firmware upgrade (USB DFU)
       common.py         Shared pose/joint input widgets
       plot_pane.py      Three-pane linked plot component
     main_window.py      Main-window assembly + command gate (Δq / unlock / emergency flows)
@@ -211,7 +261,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 484 passed (all offline, no hardware required)
+python3 -m pytest          # 534 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -226,10 +276,14 @@ python3 -m pytest          # 484 passed (all offline, no hardware required)
 | `test_fault_display.py` | Fallback when an older firmware leaves `fault_reason` empty |
 | `test_fault_page.py` | Faults-page layout and all 7 axes on one screen |
 | `test_diagnostics.py` | Error-code text and the diagnostics bundle |
-| `test_gui_smoke.py` | Build and layout regression (3 navigation groups, 12 pages, 1J bench, motion pages locked by default) |
+| `test_gui_smoke.py` | Build and layout regression (3 navigation groups, 13 pages, 1J bench, motion pages locked by default) |
 | `test_activation.py` | Activation client: license parsing / registration validation / service-error mapping / internal channel token (incl. studio's config-path override); **no network** |
 | `test_activation_page.py` | Activation page: record states, stale record / disconnect, consent document, submit-button gating, enabled-device gate, 0x02 + unconfirmed read-back, connect auto-read |
 | `test_app_flags.py` | `--activation-url` parsing (space/`=` forms; a missing value must not swallow the next Qt argument) |
+| `test_dfu_engine.py` | DfuSe engine (ported from studio): erase busy-time floor, read-back verification, blank-out protection, protected-sector `skip` / `wipe` |
+| `test_dfu_image.py` | Image admission (base / 1 MB / protected sectors / HEX vs BIN) and the upgrade pipeline phases with fake hooks |
+| `test_dfu_controller.py` | Tool-side adapter: disarm/enter failure mapping, port release after `enter_dfu`, udev-permission retry, prechecks |
+| `test_firmware_page.py` | Firmware page with a fake engine + fake SDK: summary, from-DFU path, full pipeline, failure, cancel, reconnect RPC |
 | `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | Intent layer and pure data layer |
 | `test_preset_sync.py` | Field-by-field comparison of `presets/` and `templates/` against firmware `defaults.c` (runs when the firmware tree is present; `LITEARM_FW_DIR` can point to it) |
 
@@ -261,6 +315,11 @@ python3 -m pytest          # 484 passed (all offline, no hardware required)
 10. **Abnormal paths**:
    - [ ] Click other buttons rapidly while a command is running → "busy", no concurrent sends
    - [ ] Enter an extreme value for `move_j` → the log shows the firmware ERR rejection, the arm does not move
+11. **Firmware upgrade** (needs a test image and the arm supported):
+   - [ ] Connected arm: select image → the summary matches; start → it disarms, enters the bootloader, shows phase + byte progress, and reconnects with the expected version
+   - [ ] Cancel before the flash phase → nothing is written and the board returns to the application
+   - [ ] Unplug during the flash → the result names the failure; re-run the upgrade (the page detects a board left in DFU) and recover it
+   - [ ] Board already in the bootloader: the page shows "DFU" plus the USB location; start flashes it without a serial session
 
 ## Parameter tuning page
 

@@ -22,6 +22,9 @@ _RANGES = {
     "scene_msaa": (0.0, 16.0),            # 3D 视图 MSAA 采样数 (0=关闭)
 }
 
+#: 布尔字段（`true`/`false`）；与数值字段分开校验。
+_BOOLS = {"scene_lod"}
+
 
 @dataclass
 class Settings:
@@ -36,6 +39,7 @@ class Settings:
     pose_confirm_pos: float = 0.05        # movep 位置幅度确认阈值 (m)
     pose_confirm_rot: float = 0.30        # movep 姿态幅度确认阈值 (rad)
     scene_msaa: int = 0                   # 3D 视图 MSAA 采样数 (0=关闭，软件渲染更流畅)
+    scene_lod: bool = True                # 3D 用 LOD 网格（约 45k 三角形）
 
     @classmethod
     def load(cls, path=None) -> "Settings":
@@ -62,6 +66,13 @@ class Settings:
                 print(f"[config] 忽略未知配置项: {key}", file=os.sys.stderr)
                 continue
             default = getattr(s, key)
+            if key in _BOOLS:
+                if not isinstance(val, bool):
+                    print(f"[config] {key} 需是 true/false，使用默认 {default}",
+                          file=os.sys.stderr)
+                    continue
+                setattr(s, key, val)
+                continue
             if key not in _RANGES:
                 # dataclass 加了字段但忘了登记区间 -> 回退默认, 不能 KeyError 崩掉启动
                 print(f"[config] {key} 未登记合法区间，使用默认 {default}",

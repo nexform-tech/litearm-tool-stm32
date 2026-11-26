@@ -231,7 +231,7 @@ class ScenePage(QWidget):
             return
         try:
             from litetool.scene.urdf_model import load_default_model
-            model = load_default_model()
+            model = load_default_model(lod=bool(getattr(self.settings, "scene_lod", True)))
         except Exception as e:  # noqa: BLE001 - 资产坏了显示空状态，不能拖垮主窗口
             self._loading = False
             self._show_placeholder(f"3D 模型加载失败：{e}")

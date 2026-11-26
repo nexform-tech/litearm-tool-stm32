@@ -27,3 +27,7 @@ plot_window_s: 30.0
 # 3D 视图 MSAA 采样数。默认 0：软件渲染/WSLg 下 4x 会把帧率从 ~30 压到 ~7；
 # 有独立 GPU 且在意抗锯齿时可设 4。
 scene_msaa: 0
+
+# 3D 使用 LOD 网格（约 45k 三角形，全模型约 129k）。视口是顶点瓶颈，
+# 关掉它会明显变慢；只在高端 GPU 上想要最大细节时才设 false。
+scene_lod: true

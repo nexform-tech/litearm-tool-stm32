@@ -93,7 +93,7 @@ def test_rpy_and_axis_angle_are_orthonormal():
 def test_vendored_description_loads_and_has_expected_shape():
     d = description_dir()
     assert d is not None, "缺少 assets/description（3D 资产应随包）"
-    m = load_default_model()
+    m = load_default_model(lod=False)      # 这条盯的是随包的**全模型**
     assert m is not None
     assert m.n_joints == 7
     assert len(m.links) == 9
@@ -138,3 +138,34 @@ def test_render_mesh_is_indexed_and_uses_fast_normals():
     assert len(verts) < len(m.mesh("base_link")[0])    # 重合顶点已焊接
     assert np.allclose(np.linalg.norm(normals, axis=1), 1.0, atol=1e-5)
     assert m.render_mesh("base_link")[0] is verts       # 缓存
+
+
+def test_lod_mesh_set_is_complete_and_light():
+    """LOD 资产必须齐、必须真的更轻；缺失会安静回落全模型。"""
+    from litetool.scene.urdf_model import LOD_MESH_DIR, MESH_DIR
+
+    d = description_dir()
+    assert d is not None
+    full = sorted(p.name for p in (d / MESH_DIR).glob("*.STL"))
+    lod = sorted(p.name for p in (d / LOD_MESH_DIR).glob("*.STL"))
+    assert full and lod
+    assert lod == full, "LOD 必须覆盖同名网格，否则个别 link 会悄悄用全模型"
+
+    full_tris = sum(len(load_stl(str(d / MESH_DIR / n))[1]) for n in full)
+    lod_tris = sum(len(load_stl(str(d / LOD_MESH_DIR / n))[1]) for n in lod)
+    assert lod_tris < full_tris
+    assert lod_tris <= 60_000, "LOD 预算约 45k；超了要重新生成"
+
+
+def test_lod_model_has_same_structure_and_pose():
+    """LOD 只该改三角形数量，不该改关节/连杆/运动学。"""
+    full = load_default_model(lod=False)
+    lod = load_default_model(lod=True)
+    assert full is not None and lod is not None
+    assert lod.n_joints == full.n_joints
+    assert sorted(lod.links) == sorted(full.links)
+    q = [0.2, -0.4, 0.1, 0.3, -0.2, 0.5, 0.0]
+    wf, wl = full.fk(q), lod.fk(q)
+    for name in full.links:
+        assert np.allclose(wf[name], wl[name], atol=1e-5), name
+    assert lod.mesh_stats()[0] < full.mesh_stats()[0]

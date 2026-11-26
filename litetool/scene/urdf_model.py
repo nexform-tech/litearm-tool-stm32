@@ -21,6 +21,7 @@ import numpy as np
 
 URDF_NAME = "litearm_description.urdf"
 MESH_DIR = "meshes"
+LOD_MESH_DIR = "meshes_lod"
 URDF_DIR = "urdf"
 
 
@@ -297,8 +298,19 @@ def description_dir() -> Optional[Path]:
     return None
 
 
-def load_default_model() -> Optional[UrdfModel]:
+def load_default_model(*, lod: bool = True) -> Optional[UrdfModel]:
+    """载入随包模型。`lod=True` 优先用 `meshes_lod/`（约 45k 三角形）。
+
+    3D 视口是顶点瓶颈而不是填充瓶颈（实测 llvmpipe 1200×800：129k 三角形
+    11.6 ms/帧，29k 4.5 ms，空场景 2.3 ms），所以默认走 LOD；`meshes_lod/`
+    缺失时静默回落到全模型。生成见 `tools/gen_lod.py`。
+    """
     d = description_dir()
     if d is None:
         return None
-    return UrdfModel.load(d / URDF_DIR / URDF_NAME, d / MESH_DIR)
+    mesh_dir = d / MESH_DIR
+    if lod:
+        lod_dir = d / LOD_MESH_DIR
+        if lod_dir.is_dir() and any(lod_dir.glob("*.STL")):
+            mesh_dir = lod_dir
+    return UrdfModel.load(d / URDF_DIR / URDF_NAME, mesh_dir)

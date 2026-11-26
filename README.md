@@ -46,7 +46,7 @@ three navigation groups on the left + a collapsible log at the bottom.
 | Group | Page | What it does |
 | --- | --- | --- |
 | Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot; CSV export of the selected joints with units, temperatures and drive error codes) |
-| | **3D** | Read-only digital twin: URDF + STL, base/tool axes, TCP marker; 100 Hz state smoothed to 60 Hz; never touches the serial port |
+| | **3D** | Read-only digital twin: URDF + STL, base/tool axes, TCP marker; 100 Hz state smoothed to 60 Hz; LOD by default (~45k triangles); never touches the serial port |
 | | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes / export the parsed samples as CSV |
 | | **Logs** | Structured JSONL: live view / filter by level, category and text / raw-record detail / history read-back across restarts / export JSONL |
 | | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
@@ -302,7 +302,7 @@ litetool/
       common.py         Shared pose/joint input widgets
       plot_pane.py      Three-pane linked plot component
     main_window.py      Main-window assembly + command gate (Δq / unlock / emergency flows)
-assets/description/     3D model (decimated URDF + STL, ~6.2 MB; see its README for origin)
+assets/description/     3D model (decimated URDF + STL; `meshes/` full 129k, `meshes_lod/` 45k; see its README)
 templates/params_example.yaml   Import template with unit and range comments
 presets/                        Factory / SE1 friction presets
 tests/                          Offline tests (no hardware required)

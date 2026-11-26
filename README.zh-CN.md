@@ -40,7 +40,7 @@ GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 
 | 分组 | 页面 | 干什么 |
 | --- | --- | --- |
 | 监视 | **总览** | 逐关节状态表 + 100Hz 三段联动曲线（原「监控」「曲线」两页合并，可一键放大曲线；可把勾选关节导出为带单位、温度与驱动错误码的 CSV） |
-| | **3D** | 数字孪生（只读）：URDF + STL；基座/工具坐标轴、TCP 标记；100Hz 状态平滑到 60Hz；不碰串口 |
+| | **3D** | 数字孪生（只读）：URDF + STL；基座/工具坐标轴、TCP 标记；100Hz 状态平滑到 60Hz；默认 LOD（约 45k 三角形）；不碰串口 |
 | | **采集** | 固件 300Hz 控制拍采集：录制 / 查进度 / 读回预览 / 导出原始字节 / 导出解析 CSV |
 | | **日志** | 结构化 JSONL：实时视图 / 按级别、类别、文本筛选 / 原始记录详情 / 重启后历史回读 / 导出 JSONL |
 | | **故障** | 按轴故障原因（`flags` bit11 为真时按需查一次 `0x51`）+ flags + `drop_hold`；7 轴一屏，原因/处置分列 |
@@ -265,7 +265,7 @@ litetool/
       common.py         pose/关节输入组等共用件
       plot_pane.py      三段联动曲线组件
     main_window.py      主窗口组装 + 命令收口（Δq 确认/解锁/急停流程）
-assets/description/     3D 模型（decimated URDF + STL，约 6.2 MB；来源见其 README）
+assets/description/     3D 模型（decimated URDF + STL；`meshes/` 全模型 129k，`meshes_lod/` 45k；见其 README）
 templates/params_example.yaml   导入模板（含单位/范围注释）
 presets/                        出厂 / SE1 摩擦 预设
 tests/                  离线测试（无硬件可跑）

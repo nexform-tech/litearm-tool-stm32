@@ -136,6 +136,7 @@ def test_activated_record_hides_form_and_formats_issued():
     assert page.cust_lbl.text() == "1042"
     assert page.flags_lbl.text() == "—"
     assert page.form_box.isHidden()
+    assert not page.btn_activate.isEnabled()
     page.close()
 
 
@@ -216,6 +217,32 @@ def test_state_label_tracks_connection():
 
 
 # --------------------------------------------------------------------------- 门禁
+def test_submit_button_follows_form_readiness():
+    """与 studio 的 `canSubmitActivation` 同一组门禁；tooltip 说明还差什么。"""
+    page, _ = _page()
+    assert not page.btn_activate.isEnabled()
+    assert "同意书" in page.btn_activate.toolTip()
+
+    _fill(page)
+    assert page.btn_activate.isEnabled()
+
+    page.edit_phone.setText("12345")
+    assert not page.btn_activate.isEnabled()
+    assert "手机号" in page.btn_activate.toolTip()
+
+    page.edit_phone.setText("13800000000")
+    page.update_from(type("S", (), {"enabled": True})())
+    assert not page.btn_activate.isEnabled()
+    assert "失能" in page.btn_activate.toolTip()
+
+    page.update_from(None)
+    assert page.btn_activate.isEnabled()
+
+    page.set_online(False)
+    assert not page.btn_activate.isEnabled()
+    page.close()
+
+
 def test_activate_requires_consent():
     page, arm = _page(request=lambda *a, **k: LIC)
     page.refresh()

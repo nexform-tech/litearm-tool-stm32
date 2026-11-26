@@ -165,6 +165,11 @@ class ActivationPage(QWidget):
         self.edit_region.setMaxLength(64)
         self.edit_industry.setMaxLength(64)
         self.edit_purpose.textChanged.connect(self._trim_purpose)
+        for edit in (self.edit_name, self.edit_phone, self.edit_org, self.edit_wechat,
+                     self.edit_email, self.edit_region, self.edit_industry):
+            edit.textChanged.connect(lambda _text: self._update_buttons())
+        # QPlainTextEdit.textChanged() 没有参数（QLineEdit 那把带 str）。
+        self.edit_purpose.textChanged.connect(self._update_buttons)
         form.addRow("联系人*", self.edit_name)
         form.addRow("手机号*", self.edit_phone)
         form.addRow("单位*", self.edit_org)
@@ -187,6 +192,7 @@ class ActivationPage(QWidget):
         form.addRow(self.consent_label)
         self.consent_label.setVisible(False)
         self.consent_cb = QCheckBox("我已阅读并同意《激活注册信息同意书》")
+        self.consent_cb.toggled.connect(lambda _checked: self._update_buttons())
         form.addRow(self.consent_cb)
         self.btn_activate = QPushButton("提交并激活")
         self.btn_activate.clicked.connect(self._on_activate)
@@ -321,6 +327,60 @@ class ActivationPage(QWidget):
         self._update_buttons()
 
     # ------------------------------------------------------------------ 激活
+    def _contact_payload(self) -> Dict[str, str]:
+        return {
+            "name": self.edit_name.text(),
+            "phone": self.edit_phone.text(),
+            "organization": self.edit_org.text(),
+            "wechatId": self.edit_wechat.text(),
+            "email": self.edit_email.text(),
+            "region": self.edit_region.text(),
+            "industry": self.edit_industry.text(),
+            "purpose": self.edit_purpose.toPlainText(),
+        }
+
+    def _form_problem(self) -> Optional[activation.ActivationError]:
+        """按 `build_request` 的同一套判据看表单；返回第一个问题或 None。"""
+        uid = uid_of(self._record)
+        if uid is None:
+            return activation.ActivationError("bad_uid", "还没有可信的设备 UID")
+        try:
+            activation.build_request({
+                "uid": uid,
+                "consent": {"granted": True},
+                "contact": self._contact_payload(),
+            })
+        except activation.ActivationError as e:
+            return e
+        return None
+
+    def _can_submit(self) -> bool:
+        """与 studio 的 `canSubmitActivation` 同一组门禁（点击时还会再判一次）。"""
+        if not self._online or self._busy or self._enabled:
+            return False
+        if self._record is None or self._record.get("activated"):
+            return False
+        if not self.consent_cb.isChecked():
+            return False
+        return self._form_problem() is None
+
+    def _submit_tooltip(self) -> str:
+        """按钮为什么不能按 —— 没有行内错误提示时，tooltip 是最近的说明。"""
+        if self._busy:
+            return "正在处理…"
+        if not self._online:
+            return "未连接设备"
+        if self._record is None:
+            return "请先读取授权记录"
+        if self._record.get("activated"):
+            return "这台设备已激活"
+        if self._enabled:
+            return "设备已使能 —— 请先在「整机」页失能"
+        if not self.consent_cb.isChecked():
+            return "请先阅读并勾选同意书"
+        problem = self._form_problem()
+        return _reason_text(problem) if problem is not None else ""
+
     def _on_activate(self):
         if self._submit is None:
             return
@@ -378,16 +438,7 @@ class ActivationPage(QWidget):
             payload = {
                 "uid": uid,
                 "consent": {"granted": True},
-                "contact": {
-                    "name": self.edit_name.text(),
-                    "phone": self.edit_phone.text(),
-                    "organization": self.edit_org.text(),
-                    "wechatId": self.edit_wechat.text(),
-                    "email": self.edit_email.text(),
-                    "region": self.edit_region.text(),
-                    "industry": self.edit_industry.text(),
-                    "purpose": self.edit_purpose.toPlainText(),
-                },
+                "contact": self._contact_payload(),
                 "diagnostics": {
                     # ⚠ 键名是服务端契约（`studio` / `sdk` / `firmware`）。值带上
                     #   `litearm-tool` 前缀，后台的 "Studio" 一栏才能看出是哪一套上位机。
@@ -517,7 +568,8 @@ class ActivationPage(QWidget):
     def _update_buttons(self):
         can_read = self._online and not self._busy and self._submit is not None
         self.btn_refresh.setEnabled(can_read)
-        self.btn_activate.setEnabled(can_read)
+        self.btn_activate.setEnabled(can_read and self._can_submit())
+        self.btn_activate.setToolTip(self._submit_tooltip())
         uid = self.uid_lbl.text()
         self.btn_copy_uid.setEnabled(bool(uid) and uid != "—")
 

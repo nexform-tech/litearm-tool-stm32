@@ -188,7 +188,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 483 passed（全部离线，无需硬件）
+python3 -m pytest          # 484 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |

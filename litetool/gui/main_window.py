@@ -380,6 +380,8 @@ class MainWindow(QMainWindow):
             self.strip.reset()
             # 断线必须回到锁定态 —— 否则重连后第一下手就是未确认的运动
             self._relock("链路断开")
+        # 授权页连上即自动读一次 —— 先把固件版本喂进去，旧固件才能直接提示"升级固件"。
+        self.pages["activation"].set_firmware(self.worker.firmware)
         for page in self.pages.values():
             if hasattr(page, "set_online"):
                 page.set_online(onl)

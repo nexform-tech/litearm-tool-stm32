@@ -11,7 +11,7 @@ import litearm as pa
 
 from litetool.activation import ActivationError
 
-__all__ = ["read_record", "write_license"]
+__all__ = ["read_record", "write_license", "uid_of"]
 
 
 def read_record(arm: Any) -> Dict[str, Any]:

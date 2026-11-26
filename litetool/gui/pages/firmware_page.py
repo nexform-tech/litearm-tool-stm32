@@ -499,7 +499,8 @@ class FirmwarePage(QWidget):
         if not running:
             self.btn_cancel.setText("取消升级")
         from_dfu = self._from_dfu()
-        can_start = (not running and self._summary is not None
+        can_start = (not running and self._worker is not None
+                     and self._summary is not None
                      and self._engine_ready and (self._online or from_dfu)
                      and self.safety_cb.isChecked())
         self.btn_start.setEnabled(can_start)
@@ -509,6 +510,8 @@ class FirmwarePage(QWidget):
     def _start_tooltip(self, from_dfu: bool) -> str:
         if self._running:
             return "升级进行中"
+        if self._worker is None:
+            return "内部错误：SDK 未接入"
         if not self._engine_ready:
             return "烧录引擎不可用 —— 需要 pyusb 与 libusb；Windows 上还要装 ST 的 WinUSB 驱动"
         if self._summary is None:

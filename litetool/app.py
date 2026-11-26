@@ -48,9 +48,41 @@ def main(argv=None) -> int:
     from litetool.gui.main_window import MainWindow
     from litetool.settings import Settings
 
+    raw = list(sys.argv if argv is None else argv)
+    activation_url = _flag_value(raw, "--activation-url")
+    if activation_url:
+        # 授权页只读这个环境变量；与 `LITEARM_ACTIVATION_URL` 同一入口。
+        os.environ["LITEARM_ACTIVATION_URL"] = activation_url
+        raw = _drop_option(raw, "--activation-url")
     settings = Settings.load(config_path())
-    app = QApplication(list(sys.argv if argv is None else argv))
+    app = QApplication(raw)
     app.setApplicationName("LiteArm Tool STM32")
     win = MainWindow(settings)
     win.show()
     return app.exec_()
+
+
+def _flag_value(argv, name):
+    """`--name VALUE` / `--name=VALUE` → VALUE；没有返回 None。"""
+    for i, arg in enumerate(argv):
+        if arg == name and i + 1 < len(argv):
+            return argv[i + 1]
+        if arg.startswith(name + "="):
+            return arg.split("=", 1)[1]
+    return None
+
+
+def _drop_option(argv, name):
+    out = []
+    skip = False
+    for arg in argv:
+        if skip:
+            skip = False
+            continue
+        if arg == name:
+            skip = True
+            continue
+        if arg.startswith(name + "="):
+            continue
+        out.append(arg)
+    return out

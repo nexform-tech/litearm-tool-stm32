@@ -47,6 +47,7 @@ GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 
 | 参数 | **参数表** | 关节级参数与 0x26/0x27/0x28 前馈族：读回 / 编辑下发 / ff_mask / 批量导入导出 / 固化 Flash / 恢复出厂 |
 | | **调参指南** | 公式与符号映射、读前须知、"症状→建议参数"速查、可展开逐参数详解 |
 | | **诊断** | `KIN_BENCH` 自检、启动复位原因、链路计数（CRC / 队满 / CAN 失败 / 控制拍超预算）、错误码文案、诊断包 |
+| | **授权** | 读设备授权记录（UID / 状态 / 客户号 / 签发日）；未激活设备可在线提交注册信息激活（`0x2F` / `0x3F`） |
 
 ## 覆盖：SDK 公开面 → UI 入口
 
@@ -82,6 +83,7 @@ SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到�
 | `params.get_joint_param` / `all_joint_params` | 参数表页 [刷新当前] |
 | `params.set_joint_param` / `set_joint_limits` | 参数表页逐关节下发（限位写成组整发） |
 | `params.reset_factory` | 参数表页 [恢复出厂] |
+| `license` / `activate` | 授权页（读 UID/状态；未激活时在线提交注册信息并回读确认） |
 | `log.start` / `stop` / `reader` / `capture` / `dump` | 采集页 |
 | `LogReader.total` / `wait_for` / `read_all` / `iter_chunks` / `samples` | 采集页 查进度 / 读回预览 / 采集全程 |
 | `diag.kin_bench` | 诊断页 [运行 KIN_BENCH 自检] |
@@ -132,6 +134,7 @@ SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到�
 pip install -e ../litearm-python     # 交互层依赖（>= 2.4.0）
 pip install -r requirements.txt
 python3 main.py                       # 普通用户即可（串口在 dialout 组则无需 root）
+python3 main.py --activation-url https://act.nexform.tech   # 指定激活服务（默认即生产地址）
 ```
 
 启动后：顶栏选串口 → 连接 → 顶栏显示固件版本（如 `Litearm1.12.3-7J`）。
@@ -158,6 +161,8 @@ litetool/
   tuning_guide.py       调参指南内容（公式/符号映射/症状速查）
   firmware_defaults.py  解析固件 defaults.c（presets/ 生成与一致性断言的真源）
   settings.py           config.yaml 合并（类型 + 区间校验）
+  activation.py         激活服务客户端（唯一出网点；凭据/注册信息校验）
+  license_io.py         授权记录（0x2F/0x3F）的形状层 + 聚合错误 0x02 的回读判定
   gui/
     bridge.py           跨线程 Qt 信号桥（日志 / 任务结果 / 在线态）
     widgets.py          日志面板 / 常驻状态条 / 关节表 / 横幅 / 左侧导航
@@ -168,6 +173,7 @@ litetool/
       zerog_page.py     零重力    params_page.py   参数表
       guide_page.py     调参指南  diag_page.py     诊断
       installation_page.py 安装方向
+      activation_page.py 授权（读 UID / 在线激活）
       common.py         pose/关节输入组等共用件
       plot_pane.py      三段联动曲线组件
     main_window.py      主窗口组装 + 命令收口（Δq 确认/解锁/急停流程）
@@ -197,7 +203,9 @@ python3 -m pytest          # 438 passed（全部离线，无需硬件）
 | `test_fault_display.py` | 旧固件 `fault_reason` 为空时的回退 |
 | `test_fault_page.py` | 故障页布局与 7 轴一屏 |
 | `test_diagnostics.py` | 错误码文案与诊断包 |
-| `test_gui_smoke.py` | 构建与布局回归（导航 3 组 9 页、台架 1J、运动页默认锁定） |
+| `test_gui_smoke.py` | 构建与布局回归（导航 3 组 12 页、台架 1J、运动页默认锁定） |
+| `test_activation.py` | 激活客户端：凭据解析 / 注册信息校验 / 服务错误映射 / 内部通道令牌；**不出网** |
+| `test_activation_page.py` | 授权页：未激活/已激活/旧固件三态、同意书、使能拦截、0x02 聚合错误回读 |
 | `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | 意图层与纯数据层 |
 | `test_preset_sync.py` | `presets/` 与 `templates/` 逐字段比对固件 `defaults.c`（固件仓在场时生效，`LITEARM_FW_DIR` 可指定） |
 

@@ -205,7 +205,7 @@ python3 -m pytest          # 484 passed（全部离线，无需硬件）
 | `test_diagnostics.py` | 错误码文案与诊断包 |
 | `test_gui_smoke.py` | 构建与布局回归（导航 3 组 12 页、台架 1J、运动页默认锁定） |
 | `test_activation.py` | 激活客户端：凭据解析 / 注册信息校验 / 服务错误映射 / 内部通道令牌（含 studio 的配置路径覆盖）；**不出网** |
-| `test_activation_page.py` | 授权页：三态记录、失败重读/断线保留、同意书文案、使能拦截、0x02 与未确认回读、连上自动读取 |
+| `test_activation_page.py` | 授权页：三态记录、失败重读/断线保留、同意书文案、提交门禁、使能拦截、0x02 与未确认回读、连上自动读取 |
 | `test_app_flags.py` | `--activation-url` 解析（空格/`=` 两种形态；缺值不能吞掉后面的 Qt 参数） |
 | `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | 意图层与纯数据层 |
 | `test_preset_sync.py` | `presets/` 与 `templates/` 逐字段比对固件 `defaults.c`（固件仓在场时生效，`LITEARM_FW_DIR` 可指定） |

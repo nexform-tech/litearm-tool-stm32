@@ -211,7 +211,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 438 passed (all offline, no hardware required)
+python3 -m pytest          # 483 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -227,8 +227,9 @@ python3 -m pytest          # 438 passed (all offline, no hardware required)
 | `test_fault_page.py` | Faults-page layout and all 7 axes on one screen |
 | `test_diagnostics.py` | Error-code text and the diagnostics bundle |
 | `test_gui_smoke.py` | Build and layout regression (3 navigation groups, 12 pages, 1J bench, motion pages locked by default) |
-| `test_activation.py` | Activation client: license parsing / registration validation / service-error mapping / internal channel token; **no network** |
-| `test_activation_page.py` | Activation page: unactivated/activated/old-firmware states, consent, enabled-device gate, 0x02 aggregated-error read-back |
+| `test_activation.py` | Activation client: license parsing / registration validation / service-error mapping / internal channel token (incl. studio's config-path override); **no network** |
+| `test_activation_page.py` | Activation page: record states, stale record / disconnect, consent document, enabled-device gate, 0x02 + unconfirmed read-back, connect auto-read |
+| `test_app_flags.py` | `--activation-url` parsing (space/`=` forms; a missing value must not swallow the next Qt argument) |
 | `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | Intent layer and pure data layer |
 | `test_preset_sync.py` | Field-by-field comparison of `presets/` and `templates/` against firmware `defaults.c` (runs when the firmware tree is present; `LITEARM_FW_DIR` can point to it) |
 

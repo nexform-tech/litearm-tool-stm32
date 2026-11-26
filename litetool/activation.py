@@ -240,8 +240,11 @@ def build_request(payload: dict) -> dict:
         "uid": uid.strip().lower(),
         "contact": _contact_fields(contact),
         "consent": {"granted": True, "text_version": CONSENT_TEXT_VERSION},
+        # ⚠ 字段名是服务端契约 (`licenseRequestSchema`)：`studio` / `sdk` / `firmware`。
+        #   服务端用 zod 的 object 解析，多出来的键会被**静默丢掉** —— 叫 `tool` 的话，
+        #   工具版本永远进不了激活记录，而且不会报错。
         "diagnostics": {
-            key: str(diag.get(key) or "")[:64] for key in ("tool", "sdk", "firmware")
+            key: str(diag.get(key) or "")[:64] for key in ("studio", "sdk", "firmware")
         },
     }
     code = payload.get("code")
@@ -333,6 +336,8 @@ def request_license(base_url: str, request: dict, *, timeout: float = REQUEST_TI
 
 #: 与 studio 用同一组环境变量：内部测试人员的既有配置不用改。
 CONFIG_ENV = "LITEARM_ACTIVATION_CHANNEL_CONFIG"
+#: studio 文档里的配置路径覆盖变量 —— 测试人员按 studio 的方式配的，也要认。
+STUDIO_CONFIG_ENV = "LITEARM_STUDIO_ACTIVATION_CHANNEL_CONFIG"
 TOKEN_ENV = "LITEARM_ACTIVATION_CHANNEL_TOKEN"
 
 CHANNEL_HEADER = "X-Litearm-Channel"
@@ -343,12 +348,15 @@ TEST_CHANNEL = "test"
 def default_config_paths(environ: Optional[Mapping[str, str]] = None) -> Tuple[Path, ...]:
     """令牌配置文件：tool 自己的位置优先，回落到 studio 的位置。
 
-    `LITEARM_ACTIVATION_CHANNEL_CONFIG` 覆盖时只读那一个。
+    `LITEARM_ACTIVATION_CHANNEL_CONFIG`（本工具）或 studio 文档里的
+    `LITEARM_STUDIO_ACTIVATION_CHANNEL_CONFIG` 覆盖时只读那一个 —— 测试人员按
+    studio 的方式配过的路径不用重配。
     """
     env = os.environ if environ is None else environ
-    override = str(env.get(CONFIG_ENV, "")).strip()
-    if override:
-        return (Path(override).expanduser(),)
+    for name in (CONFIG_ENV, STUDIO_CONFIG_ENV):
+        override = str(env.get(name, "")).strip()
+        if override:
+            return (Path(override).expanduser(),)
 
     if sys.platform == "win32":
         appdata = str(env.get("APPDATA", "")).strip()

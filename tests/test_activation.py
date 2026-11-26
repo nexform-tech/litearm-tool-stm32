@@ -103,7 +103,9 @@ def test_build_request_shape_and_code_truncation():
     assert req["uid"] == GOOD["uid"]
     assert req["consent"] == {"granted": True,
                               "text_version": activation.CONSENT_TEXT_VERSION}
-    assert set(req["diagnostics"]) == {"tool", "sdk", "firmware"}
+    # ⚠ 服务端契约 (`licenseRequestSchema`) 的键集：`studio` / `sdk` / `firmware`。
+    #   服务端用 zod 的 object 解析，多出来的键会被静默丢掉。
+    assert set(req["diagnostics"]) == {"studio", "sdk", "firmware"}
     assert len(req["code"]) == activation.CODE_MAX_LEN
 
 
@@ -193,3 +195,20 @@ def test_channel_token_reads_tool_config_then_studio(tmp_path, monkeypatch):
     (tmp_path / "litearm-tool" / "activation-channel.json").write_text(
         '{"token": "tool-tok"}', encoding="utf-8")
     assert activation.channel_token() == "tool-tok"
+
+
+def test_channel_token_honors_studio_config_override(tmp_path, monkeypatch):
+    """测试人员按 studio 文档配的路径覆盖变量，也要生效（不用重配）。"""
+    monkeypatch.delenv(activation.TOKEN_ENV, raising=False)
+    monkeypatch.delenv(activation.CONFIG_ENV, raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))     # 默认路径为空
+    cfg = tmp_path / "studio-channel.json"
+    cfg.write_text('{"token": "studio-override"}', encoding="utf-8")
+    monkeypatch.setenv(activation.STUDIO_CONFIG_ENV, str(cfg))
+    assert activation.channel_token() == "studio-override"
+
+    # 本工具自己的变量优先于 studio 的。
+    own = tmp_path / "tool-channel.json"
+    own.write_text('{"token": "tool-override"}', encoding="utf-8")
+    monkeypatch.setenv(activation.CONFIG_ENV, str(own))
+    assert activation.channel_token() == "tool-override"

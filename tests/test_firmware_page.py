@@ -15,9 +15,14 @@ pytest.importorskip("PyQt5")
 from PyQt5.QtTest import QTest                         # noqa: E402
 from PyQt5.QtWidgets import QApplication               # noqa: E402
 
+import litearm as pa                                   # noqa: E402
+
+from litetool import settings as settings_mod          # noqa: E402
 from litetool.dfu.fake import FakeEngine               # noqa: E402
+from litetool.gui.main_window import MainWindow        # noqa: E402
 from litetool.gui.pages.firmware_page import FirmwarePage   # noqa: E402
 from litetool.sdk_worker import TaskResult             # noqa: E402
+from tests.fake_arm import FakeArm as WorkerFakeArm, make_state         # noqa: E402
 
 
 # ------------------------------------------------------------------ 造镜像
@@ -302,3 +307,63 @@ def test_reset_clears_the_selected_image():
     assert page.summary_box.isHidden()
     assert not page.btn_start.isEnabled()
     page.close()
+
+
+# ------------------------------------------------------------------ 真 worker 端到端
+
+class DfuFakeArm(WorkerFakeArm):
+    """`tests.fake_arm.FakeArm` + 失能态/授权记录/进 DFU —— 喂给真的 SdkWorker。"""
+
+    def __init__(self):
+        super().__init__(firmware="Litearm1.9.0-7J")
+        self.entered = 0
+
+    def get_state(self, refresh: bool = False, timeout: float = 0.5):
+        st = make_state(self.n, 0, flags=0)          # flags=0 ⇒ enabled=False
+        self._a.state = st
+        self._a._on_status(b"")
+        time.sleep(0.005)
+        return pa.Msg(value=st, hz=0.0, timestamp=0.0)
+
+    def license(self):
+        return pa.LicenseInfo(state=0, ver=1, uid=bytes(range(0x10, 0x1C)),
+                              cust_id=0, issued=0, flags=0)
+
+    def enter_dfu(self):
+        self.entered += 1
+        self.close()
+
+
+def test_full_upgrade_through_mainwindow_and_the_real_worker():
+    """真 `SdkWorker`（SDK 所有者线程）+ 真主窗口 RPC：进 DFU、烧录、重连一条链路。"""
+    _app()
+    w = MainWindow(settings_mod.Settings.load(None))
+    created: list[DfuFakeArm] = []
+
+    def factory(_port):
+        arm = DfuFakeArm()
+        created.append(arm)
+        return arm
+
+    w.worker._factory = factory
+    w._last_port = "fake"
+    w.worker.open("fake")
+    w._apply_online(True, "fake")
+    fw = w.pages["firmware"]
+    fw.set_engine(FakeEngine(steps=2))
+    fw.set_confirm(lambda _from_dfu: True)
+    fw.set_reconnect_override(None)          # 走真实的 MainWindow 重连 RPC
+    fw.inspect_bytes("fw.hex", make_hex().encode())
+    fw.safety_cb.setChecked(True)
+
+    fw._on_start()
+    result = wait_result(fw, timeout=15.0)
+
+    assert result.ok is True, result
+    assert len(created) >= 2, "升级后没有用新 Arm 重新建会话"
+    assert created[0].entered == 1
+    assert result.port == "fake"
+    assert fw.state_lbl.text() == "已连接"
+    assert w.worker.online is True
+    w.worker.close()
+    w.close()

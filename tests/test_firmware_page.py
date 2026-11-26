@@ -309,6 +309,21 @@ def test_reset_clears_the_selected_image():
     page.close()
 
 
+def test_a_version_mismatch_is_a_visible_warning():
+    """镜像 1.9.0、设备复位后报 1.8.0：烧录成功，但页面要把这条不一致摆出来。"""
+    page = make_page(reconnect=lambda _hint: (True, "fake", "Litearm1.8.0-7J", ""))
+    load_valid(page)
+    page.safety_cb.setChecked(True)
+    page._on_start()
+    result = wait_result(page)
+
+    assert result.ok is True
+    assert result.warning and "1.9.0" in result.warning and "1.8.0" in result.warning
+    assert not page.warning_lbl.isHidden()
+    assert "1.8.0" in page.warning_lbl.text()
+    page.close()
+
+
 # ------------------------------------------------------------------ 真 worker 端到端
 
 class DfuFakeArm(WorkerFakeArm):

@@ -202,3 +202,19 @@ def test_upgrade_candidates_prefer_the_hint_then_our_cdc(monkeypatch):
         "/dev/ttyACM9", "/dev/ttyACM1", "/dev/ttyACM2"]
     assert w._upgrade_candidates(None) == ["/dev/ttyACM1", "/dev/ttyACM2"]
     w.close()
+
+
+def test_stale_offline_signal_is_ignored_while_upgrading():
+    """升级自己 close 掉 worker 的那条 False 如果晚于重连的 True 到达，必须丢掉。"""
+    w = _win()
+    w._upgrading = True
+    w.worker._online = True
+    w._connected = True
+    w._on_online(False, "升级自己的 close（过期）")
+    assert w._connected is True
+
+    w._upgrading = False
+    w.worker._online = False
+    w._on_online(False, "真的掉了")
+    assert w._connected is False
+    w.close()

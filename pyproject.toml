@@ -14,6 +14,10 @@ dependencies = [
     "pyqtgraph>=0.13",
     "numpy>=1.21",
     "PyYAML>=6.0",
+    # 固件升级 (USB DFU)：烧录引擎用 pyusb；libusb-package 自带 DLL，
+    # Windows 上 pyusb 自己找不到 libusb（见 litetool/dfu/engine.py 的实测说明）。
+    "pyusb>=1.2",
+    "libusb-package>=1.0",
 ]
 
 [project.scripts]

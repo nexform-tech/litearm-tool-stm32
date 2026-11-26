@@ -16,7 +16,7 @@ from litetool import settings as settings_mod                 # noqa: E402
 from tests.fake_arm import make_state                         # noqa: E402
 
 PAGE_KEYS = ("overview", "capture", "machine", "fault", "joint", "cart",
-             "zerog", "params", "install", "activation", "guide", "diag")
+             "zerog", "params", "install", "activation", "firmware", "guide", "diag")
 
 
 def _win():
@@ -173,4 +173,32 @@ def test_activation_auto_read_uses_firmware_version():
     hint = w.pages["activation"].record_hint.text()
     assert "升级固件" in hint and "1.8.0" in hint, hint
     w.worker.close()
+    w.close()
+
+
+def test_upgrading_locks_connect_and_unlock():
+    """固件升级期间设备在 bootloader 里：连接/解锁入口必须锁死。"""
+    w = _win()
+    w._set_upgrading(True)
+    assert not w.btn_conn.isEnabled()
+    assert not w.unlock_cb.isEnabled()
+    assert "升级中" in w.dot.text()
+    w._set_upgrading(False)
+    assert w.btn_conn.isEnabled()
+    assert w.unlock_cb.isEnabled()
+    assert "离线" in w.dot.text()
+    w.close()
+
+
+def test_upgrade_candidates_prefer_the_hint_then_our_cdc(monkeypatch):
+    """端口名重枚举后会变 —— 上次的口是提示，板载 CDC 才是"找回来"的依据。"""
+    w = _win()
+    rows = [{"device": "/dev/ttyACM0", "_ours": False},
+            {"device": "/dev/ttyACM1", "_ours": True},
+            {"device": "/dev/ttyACM2", "_ours": True}]
+    monkeypatch.setattr("litetool.gui.main_window.ports_mod.find_ports",
+                        lambda: rows)
+    assert w._upgrade_candidates("/dev/ttyACM9") == [
+        "/dev/ttyACM9", "/dev/ttyACM1", "/dev/ttyACM2"]
+    assert w._upgrade_candidates(None) == ["/dev/ttyACM1", "/dev/ttyACM2"]
     w.close()

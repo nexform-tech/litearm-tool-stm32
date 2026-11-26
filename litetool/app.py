@@ -50,10 +50,13 @@ def main(argv=None) -> int:
 
     raw = list(sys.argv if argv is None else argv)
     activation_url = _flag_value(raw, "--activation-url")
+    if not activation_url and _has_option(raw, "--activation-url"):
+        # 缺值不能悄悄回落到生产地址：使用者以为自己指到了 staging。
+        print("[activation] --activation-url 缺少值；使用默认地址", file=sys.stderr)
+    raw = _drop_option(raw, "--activation-url")
     if activation_url:
         # 授权页只读这个环境变量；与 `LITEARM_ACTIVATION_URL` 同一入口。
         os.environ["LITEARM_ACTIVATION_URL"] = activation_url
-        raw = _drop_option(raw, "--activation-url")
     settings = Settings.load(config_path())
     app = QApplication(raw)
     app.setApplicationName("LiteArm Tool STM32")
@@ -62,25 +65,37 @@ def main(argv=None) -> int:
     return app.exec_()
 
 
+def _has_option(argv, name) -> bool:
+    return any(arg == name or arg.startswith(name + "=") for arg in argv)
+
+
 def _flag_value(argv, name):
-    """`--name VALUE` / `--name=VALUE` → VALUE；没有返回 None。"""
+    """`--name VALUE` / `--name=VALUE` → VALUE；没有返回 None。
+
+    VALUE 以 `-` 开头时按"缺值"处理 —— 否则 `--activation-url -platform offscreen`
+    会把 Qt 的 `-platform` 当成地址并把它从参数里删掉。
+    """
     for i, arg in enumerate(argv):
-        if arg == name and i + 1 < len(argv):
-            return argv[i + 1]
+        if arg == name:
+            if i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+                return argv[i + 1]
+            return None
         if arg.startswith(name + "="):
             return arg.split("=", 1)[1]
     return None
 
 
 def _drop_option(argv, name):
+    """删掉 `--name` / `--name=VALUE`；只有确实带了值才连值一起删。"""
     out = []
     skip = False
-    for arg in argv:
+    for i, arg in enumerate(argv):
         if skip:
             skip = False
             continue
         if arg == name:
-            skip = True
+            # 紧跟的 token 以 `-` 开头时它是另一个选项，不是本选项的值。
+            skip = i + 1 < len(argv) and not argv[i + 1].startswith("-")
             continue
         if arg.startswith(name + "="):
             continue

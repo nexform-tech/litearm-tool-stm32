@@ -79,6 +79,8 @@ a = Analysis(
     hiddenimports=[
         # 串口枚举靠 pyserial 的运行时后端, 静态分析看不到
         "serial.tools.list_ports",
+        # `--fake` 只在运行时按需 import；静态分析看不到
+        "litearm.testing",
         *_grip_hidden,
         # 固件升级：pyusb 的后端是运行期才 import 的；libusb_package 在
         # `engine._load_backend()` 里也是延迟 import。

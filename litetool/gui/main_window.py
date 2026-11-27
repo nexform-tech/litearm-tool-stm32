@@ -377,6 +377,9 @@ class MainWindow(QMainWindow):
         for page in self.pages.values():
             if hasattr(page, "set_online"):
                 page.set_online(onl)
+        # 导出上下文跟着连接走；断线后保留最后已知的固件版本（已读回的数据仍可导出）。
+        self.pages["overview"].set_context(self.worker.firmware)
+        self.pages["capture"].set_firmware(self.worker.firmware)
         self._apply_busy()
 
     # ================= 运动解锁（全局一把） =================

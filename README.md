@@ -44,6 +44,7 @@ three navigation groups on the left + a collapsible log at the bottom.
 | --- | --- | --- |
 | Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot) |
 | | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes |
+| | **Logs** | Structured JSONL: live view / filter by level, category and text / raw-record detail / history read-back across restarts / export JSONL |
 | | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
 | Operate | **Machine** | Enable / disable / reset / clear faults / home / global speed / park / read state / reset reason |
 | | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all` |
@@ -162,6 +163,11 @@ bench are detected from the status-frame length.
 
 Configuration lives in [config.yaml](config.yaml) (interaction settings only, no limits).
 
+Structured logs go to `$XDG_STATE_HOME/litearm-tool/tool.jsonl` (`~/.local/state/...` by default;
+`%LOCALAPPDATA%\litearm-tool\Logs` on Windows), 5 MB per file with five rotated backups.
+`LITEARM_TOOL_LOG_DIR` overrides the directory. The **Logs** page reads the current file and its
+backups, so history survives a restart; diagnostics bundles carry the path, not the contents.
+
 ## Code organization
 
 ```text
@@ -180,6 +186,7 @@ litetool/
   tuning_guide.py       Tuning-guide content (formulas / symbol mapping / symptom table)
   firmware_defaults.py  Parses firmware defaults.c (source of truth for presets/ and consistency checks)
   settings.py           config.yaml merge (type + range validation)
+  obs.py                Structured logging (JSONL, OpenTelemetry field names, redaction)
   gui/
     bridge.py           Cross-thread Qt signal bridge (log / task result / online state)
     widgets.py          Log panel / persistent status strip / joint table / banner / left navigation
@@ -190,6 +197,7 @@ litetool/
       zerog_page.py     Zero-G        params_page.py   Parameters
       guide_page.py     Tuning guide  diag_page.py     Diagnostics
       installation_page.py  Installation direction
+      log_page.py       Structured log viewer
       common.py         Shared pose/joint input widgets
       plot_pane.py      Three-pane linked plot component
     main_window.py      Main-window assembly + command gate (Δq / unlock / emergency flows)
@@ -205,7 +213,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 438 passed (all offline, no hardware required)
+python3 -m pytest          # 444 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |

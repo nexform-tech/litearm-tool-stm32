@@ -171,6 +171,13 @@ Windows 是 `%LOCALAPPDATA%\litearm-tool\Logs`），单文件 5 MB、保留 5 �
 CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。停止按钮发
 零力矩帧，动作在途时并失能电机以中止，不是机械臂急停。
 
+**Windows 打包。** 在仓库根目录运行
+`powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1`。脚本会建干净
+venv、从同级 `litearm-python`（或 `-SdkSrc`）装 SDK、跑离线测试，然后产出
+`packaging\out\litearm-tool-stm32-<版本>-windows-x86_64\` 与同名 zip。Windows 10/11 自带
+USB CDC 驱动；端口列表为空时装 STM32 VCP 驱动。夹爪仅 Linux，不进 Windows 包；DFU（WinUSB）
+与 3D OpenGL 的 Windows 验收分别留在 #19 / #17。
+
 ## 代码组织
 
 ```text

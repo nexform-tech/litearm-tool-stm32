@@ -200,6 +200,13 @@ direction, and the SDK refuses motion until one is loaded. The stop button sends
 frame and disables the motor while an action is in flight (so a running grasp stops), not an
 emergency stop for the arm.
 
+**Windows build.** Run `powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1`
+from the repository root. It creates a clean venv, installs `litearm-python` from the sibling
+checkout (or `-SdkSrc`), runs the offline suite, then produces
+`packaging\out\litearm-tool-stm32-<version>-windows-x86_64\` and a zip. Windows 10/11 provides the
+USB CDC driver; if the port list is empty, install the STM32 VCP driver. The gripper is Linux-only
+and is not in the Windows bundle. DFU (WinUSB) and 3D OpenGL acceptance remain with #19 / #17.
+
 ## Code organization
 
 ```text

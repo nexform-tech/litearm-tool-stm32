@@ -167,6 +167,12 @@ Configuration lives in [config.yaml](config.yaml) (interaction settings only, no
 window to the front and exits. The lock is a local socket (`QLocalServer`), so a crash is cleaned
 up by the next launch. The second process shows a short message explaining why it is exiting.
 
+**Link recovery.** If the status stream goes silent or raises a transport error, the tool declares
+the link offline and retries automatically: the last port first, then every enumerated candidate,
+with exponential backoff (0.5 s → 5 s). Commands still queued from the old link are dropped, and
+the motion unlock is never restored. Clicking **Disconnect** stops the retries — a deliberate user
+action is not overridden by auto-reconnect.
+
 Structured logs go to `$XDG_STATE_HOME/litearm-tool/tool.jsonl` (`~/.local/state/...` by default;
 `%LOCALAPPDATA%\litearm-tool\Logs` on Windows), 5 MB per file with five rotated backups.
 `LITEARM_TOOL_LOG_DIR` overrides the directory. The **Logs** page reads the current file and its
@@ -179,7 +185,7 @@ main.py                 Entry point (thin shell, forwards to litetool.app:main)
 litetool/
   app.py                Launch entry (`python3 -m litetool` / the `litearm-tool` command)
   instance.py           Single-instance lock (local socket; second launch focuses the window)
-  sdk_worker.py         ★ the only thread that owns pa.Arm + task queue + state hook
+  sdk_worker.py         ★ the only thread that owns pa.Arm + task queue + state hook + link recovery
   params_io.py          Parameter read/write shape layer over pa.Arm (pages want (ok, code))
   diagnostics.py        Error-code text / diagnostics bundle / link-counter summary
   model_io.py           HYY model and parameter import/export
@@ -219,7 +225,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 465 passed (all offline, no hardware required)
+python3 -m pytest          # 472 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -247,6 +253,7 @@ python3 -m pytest          # 465 passed (all offline, no hardware required)
    - [ ] Choose the port in the top bar → connect → the status dot turns green "● Online" and the firmware version appears
    - [ ] The persistent status strip shows mode=INIT, frame rate ≈ 100 Hz, seq increasing with no jumps (dropped frames ≈ 0)
    - [ ] The overview table shows q/dq/tau/temperature/err per joint; unplug the serial cable → red "● Offline", all command buttons disabled
+   - [ ] After the unplug the top bar shows `● Reconnecting (n)`; replug → it reconnects and stays motion-locked; any command queued before the unplug was dropped
    - [ ] Press the emergency stop while disconnected → it must clearly say "emergency stop NOT sent", never "disabled"
 2. **Plot**: the overview scrolls with the state; the J1–J7 channel checkboxes switch traces; "Freeze" pauses and "Clear" redraws; [Enlarge plot] collapses the state table. **Send one `movej` and confirm the plot keeps updating during the motion** (state hook).
 3. **Basic control** (the magnets will engage; support the arm):

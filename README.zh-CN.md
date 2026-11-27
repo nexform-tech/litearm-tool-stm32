@@ -145,6 +145,10 @@ python3 main.py                       # 普通用户即可（串口在 dialout �
 锁是本地套接字（`QLocalServer`），上次崩溃留下的陈旧锁会在下次启动时自动清理。第二个
 进程会弹一条简短提示说明退出原因。
 
+**断线自愈。** 状态流静默或传输异常时判离线并自动重拨：先试上次成功的口，再按枚举顺序
+试其它候选，指数退避（0.5s → 5s）。旧链路上排队的命令一律丢弃，运动解锁不会恢复；
+点 [断开] 会停止重试 —— 用户的主动操作不被自动重连覆盖。
+
 结构化日志写到 `$XDG_STATE_HOME/litearm-tool/tool.jsonl`（默认 `~/.local/state/...`；
 Windows 是 `%LOCALAPPDATA%\litearm-tool\Logs`），单文件 5 MB、保留 5 份轮转备份；
 `LITEARM_TOOL_LOG_DIR` 可改目录。「日志」页读当前文件与备份，所以重启后历史仍在；
@@ -157,7 +161,7 @@ main.py                 入口（薄壳, 转调 litetool.app:main）
 litetool/
   app.py                启动入口（`python3 -m litetool` / `litearm-tool` 命令共用）
   instance.py           单实例锁（本地套接字；第二次启动只把已有窗口提到前台）
-  sdk_worker.py         ★ 唯一持有 pa.Arm 的线程 + 任务队列 + 状态钩子
+  sdk_worker.py         ★ 唯一持有 pa.Arm 的线程 + 任务队列 + 状态钩子 + 断线自愈
   params_io.py          在 pa.Arm 之上的参数读写形状层（页面要 (ok, code)）
   diagnostics.py        错误码文案 / 诊断包 / 链路计数汇总
   model_io.py           HYY 模型与参数的导入/导出
@@ -196,7 +200,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 465 passed（全部离线，无需硬件）
+python3 -m pytest          # 472 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |
@@ -223,6 +227,7 @@ python3 -m pytest          # 465 passed（全部离线，无需硬件）
    - [ ] 顶栏选串口 → 连接 → 状态点变绿"● 在线"，顶栏出现固件版本
    - [ ] 常驻状态条模式=INIT，帧率 ≈ 100Hz，seq 递增无跳变（丢帧≈0）
    - [ ] 总览页表格每关节显示 q/dq/tau/温度/err；拔串口 → 变红"● 离线"，命令按钮全禁用
+   - [ ] 拔线后顶栏显示 `● 重连中(n)`；插回 → 自动恢复在线且仍保持运动锁定；断线前排队的命令已被丢弃
    - [ ] 断线状态下点急停 → 显眼处必须显示"急停未发出"，不得显示"已失能"
 2. **曲线**：总览页随状态滚动；勾选 J1~J7 通道切换；"冻结"暂停、"清屏"重绘；
    [曲线放大] 收起状态表。**下发一次 movej，确认运动期间曲线仍在更新**（状态钩子）。

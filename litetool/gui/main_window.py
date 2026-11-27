@@ -66,6 +66,7 @@ class MainWindow(QMainWindow):
             log=self._log_from_worker,
             on_online=lambda ok, why: self.bridge.sig_online.emit(ok, why),
             on_task=lambda res: self.bridge.sig_task.emit(res, None),
+            on_reconnect=lambda n, why: self.bridge.sig_reconnect.emit(n, why),
             plot_window_s=settings.plot_window_s,
         )
 
@@ -239,6 +240,7 @@ class MainWindow(QMainWindow):
         self.bridge.sig_log_record.connect(self.pages["log"].append)
         self.bridge.sig_task.connect(self._on_task)
         self.bridge.sig_online.connect(self._on_online)
+        self.bridge.sig_reconnect.connect(self._on_reconnect)
 
         m, j, c, z = (self.pages["machine"], self.pages["joint"],
                       self.pages["cart"], self.pages["zerog"])
@@ -412,6 +414,13 @@ class MainWindow(QMainWindow):
 
     def _on_online(self, ok: bool, why: str):
         self._apply_online(ok, why)
+
+    def _on_reconnect(self, attempt: int, why: str):
+        """自动重连的每次尝试 —— 顶栏必须说"正在重连"，不能只留一个"离线"。"""
+        self.dot.setText(f"● 重连中({attempt})")
+        self.dot.setStyleSheet("color:#ffd166;font-weight:bold;")
+        self.fw_lbl.setText("固件: —")
+        self._log(f"[WARN] {why}")
 
     def _apply_online(self, onl: bool, why: str = ""):
         self._connected = onl

@@ -134,3 +134,18 @@ def test_unserialisable_field_does_not_raise(tmp_path):
     finally:
         log.close()
     assert "object" in rec["fields"]["obj"] or "0x" in rec["fields"]["obj"]
+
+
+def test_unwritable_log_dir_falls_back_to_memory(tmp_path):
+    """日志目录不可写不能让主窗口启动失败；内存环形缓冲仍可用。"""
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x", encoding="utf-8")
+    log = obs.StructuredLogger(blocker / "logs")
+    try:
+        assert log.file_error, "应记录文件日志不可用的原因"
+        rec = log.info("still alive")
+        assert rec["body"] == "still alive"
+        assert log.recent()
+        assert log.read_history() == []
+    finally:
+        log.close()

@@ -83,6 +83,9 @@ class MainWindow(QMainWindow):
 
         self._log("[INFO] LiteArm Tool STM32 —— 交互层经 litearm；"
                   "硬防护权威仍在固件")
+        if self.slog.file_error:
+            # 不能装作日志已经落盘 —— 用户要据此决定要不要先修目录/磁盘。
+            self._log(f"[WARN] 结构化日志无法写入（仅内存保留）: {self.slog.file_error}")
 
     # ================= 界面 =================
     def _build_ui(self):

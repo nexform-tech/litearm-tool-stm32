@@ -188,19 +188,28 @@ class StructuredLogger:
         self._version = version if version is not None else _tool_version()
         self._host = platform.node()
         self.dir = Path(log_dir) if log_dir else default_log_dir()
-        self.dir.mkdir(parents=True, exist_ok=True)
         self.path = self.dir / LOG_FILE_NAME
         self._seq = 0
         self._lock = threading.Lock()
         self._ring = collections.deque(maxlen=int(ring_size))
-        self._handler = logging.handlers.RotatingFileHandler(
-            str(self.path), maxBytes=int(max_bytes), backupCount=int(backups),
-            encoding="utf-8")
-        self._handler.setFormatter(_JsonlFormatter())
-        self._logger = logging.getLogger(f"{SERVICE_NAME}.jsonl.{id(self)}")
-        self._logger.setLevel(logging.DEBUG)
-        self._logger.propagate = False
-        self._logger.addHandler(self._handler)
+        #: 文件日志不可用时的原因（目录不可写/磁盘满/只读文件系统）。此时仍保留
+        #: 内存环形缓冲，界面照常工作 —— 日志打不开不能让程序启动失败。
+        self.file_error: Optional[str] = None
+        self._handler = None
+        self._logger = None
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            handler = logging.handlers.RotatingFileHandler(
+                str(self.path), maxBytes=int(max_bytes), backupCount=int(backups),
+                encoding="utf-8")
+            handler.setFormatter(_JsonlFormatter())
+            logger = logging.getLogger(f"{SERVICE_NAME}.jsonl.{id(self)}")
+            logger.setLevel(logging.DEBUG)
+            logger.propagate = False
+            logger.addHandler(handler)
+            self._handler, self._logger = handler, logger
+        except OSError as e:
+            self.file_error = str(e)
 
     # ---------------- 写 ----------------
     def record(self, severity: object, body: str, *, category: str = "app",
@@ -235,11 +244,13 @@ class StructuredLogger:
             "fields": sanitize(payload),
         }
         ordered = {k: rec.get(k) for k in RECORD_KEYS}
-        self._ring.append(ordered)
-        try:
-            self._logger.log(logging.DEBUG, "", extra={"obs_record": ordered})
-        except Exception:  # noqa: BLE001 - 日志坏了也不能把调用方拖垮
-            pass
+        with self._lock:
+            self._ring.append(ordered)
+        if self._logger is not None:
+            try:
+                self._logger.log(logging.DEBUG, "", extra={"obs_record": ordered})
+            except Exception:  # noqa: BLE001 - 日志坏了也不能把调用方拖垮
+                pass
         return ordered
 
     def info(self, body: str, **kw) -> dict:
@@ -259,6 +270,8 @@ class StructuredLogger:
 
     def _line_files(self) -> list:
         """当前文件 + 轮转备份，**从新到旧**。"""
+        if self._handler is None:
+            return []
         out = [self.path]
         for i in range(1, self._handler.backupCount + 1):
             p = Path(f"{self.path}.{i}")
@@ -298,8 +311,10 @@ class StructuredLogger:
 
     def close(self) -> None:
         try:
-            self._logger.removeHandler(self._handler)
-            self._handler.close()
+            if self._logger is not None:
+                self._logger.removeHandler(self._handler)
+            if self._handler is not None:
+                self._handler.close()
         except Exception:  # noqa: BLE001
             pass
 

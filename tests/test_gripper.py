@@ -281,7 +281,7 @@ def test_page_connects_with_the_configured_identity(app):
     worker = FakeWorker()
     page = _page(worker)
     try:
-        page.channel.setText("can1")
+        page.channel.setCurrentText("can1")
         page.can_id.setValue(9)
         page.mst_id.setValue(24)
         page._toggle_connect()
@@ -320,5 +320,47 @@ def test_page_reports_unavailable_platform(app):
     try:
         assert not page.btn_conn.isEnabled()
         assert "不可用" in page.conn_lbl.text()
+    finally:
+        page.shutdown()
+
+
+def test_page_populates_the_channel_dropdown(monkeypatch, app):
+    monkeypatch.setattr("litetool.gui.pages.gripper_page.list_channels",
+                        lambda: ["can1", "vcan0"])
+    worker = FakeWorker()
+    page = _page(worker)
+    try:
+        items = [page.channel.itemText(i) for i in range(page.channel.count())]
+        assert items == ["can1", "vcan0"]
+        assert page.channel.currentText() == "can1"
+        page.channel.setCurrentText("vcan0")
+        page._toggle_connect()
+        assert worker.calls[0][1]["channel"] == "vcan0"
+    finally:
+        page.shutdown()
+
+
+def test_page_channel_falls_back_to_can0(monkeypatch, app):
+    monkeypatch.setattr("litetool.gui.pages.gripper_page.list_channels",
+                        lambda: [])
+    page = _page(FakeWorker())
+    try:
+        assert page.channel.currentText() == "can0"
+    finally:
+        page.shutdown()
+
+
+def test_refreshing_channels_keeps_a_typed_name(monkeypatch, app):
+    found = ["can0"]
+    monkeypatch.setattr("litetool.gui.pages.gripper_page.list_channels",
+                        lambda: list(found))
+    page = _page(FakeWorker())
+    try:
+        page.channel.setCurrentText("vcan0")
+        found[:] = ["can0", "can1"]
+        page._refresh_channels()
+        assert page.channel.currentText() == "vcan0"
+        items = [page.channel.itemText(i) for i in range(page.channel.count())]
+        assert items == ["can0", "can1", "vcan0"]
     finally:
         page.shutdown()

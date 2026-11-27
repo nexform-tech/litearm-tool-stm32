@@ -17,9 +17,49 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Optional
 
-__all__ = ["GripperWorker", "GripperTaskResult", "GripperUnavailable"]
+__all__ = ["GripperWorker", "GripperTaskResult", "GripperUnavailable",
+           "list_channels"]
+
+#: ``ARPHRD_CAN``, the ``type`` value ``/sys/class/net/<dev>/type`` reports for a
+#: SocketCAN interface. Enumerating through this rather than trying ``can0``,
+#: ``can1``, ``can2`` is what lets a machine whose adapter the driver called
+#: ``can3``, or ``vcan0``, be configured without editing code.
+ARPHRD_CAN = 280
+
+#: Where the kernel keeps the per-interface attributes. Overridable so the
+#: enumeration can be tested against a fake tree instead of the test machine's
+#: real interfaces.
+SYS_CLASS_NET = "/sys/class/net"
+
+
+def list_channels(sys_class_net: str = SYS_CLASS_NET) -> list:
+    """Every CAN interface the kernel knows about, sorted by name.
+
+    Reads ``/sys/class/net/*/type`` and keeps the entries whose value is
+    ``ARPHRD_CAN`` (280). A missing or unreadable ``/sys/class/net`` returns an
+    empty list rather than raising: a machine with no CAN support has no
+    channels, which is a fact the UI shows rather than an error to handle.
+    """
+    root = Path(sys_class_net)
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:
+        return []
+    out = []
+    for entry in entries:
+        try:
+            value = (entry / "type").read_text(encoding="ascii").strip()
+        except OSError:
+            continue
+        try:
+            if int(value) == ARPHRD_CAN:
+                out.append(entry.name)
+        except ValueError:
+            continue
+    return out
 
 
 class GripperUnavailable(RuntimeError):

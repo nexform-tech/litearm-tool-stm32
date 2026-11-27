@@ -198,8 +198,9 @@ Windows 是 `%LOCALAPPDATA%\litearm-tool\Logs`），单文件 5 MB、保留 5 �
 
 **LiteGrip（可选，仅 Linux）。** 安装 `requirements-gripper.txt`，把 SocketCAN 以 1 Mbit/s
 拉起（`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`），再进
-「夹爪」页。Windows 或未安装 `litegrip-python` 时页面保留但禁用连接并写明原因。通道 /
-CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。停止按钮发
+「夹爪」页。通道下拉列出内核枚举到的 CAN 接口（`/sys/class/net/*/type` = `ARPHRD_CAN` 280），
+也允许手填未列出的名字。Windows 或未安装 `litegrip-python` 时页面保留但禁用连接并写明原因。
+通道 / CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。停止按钮发
 零力矩帧，动作在途时并失能电机以中止，不是机械臂急停。
 
 **Windows 打包。** 在仓库根目录运行
@@ -271,7 +272,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 612 passed（全部离线，无需硬件）
+python3 -m pytest          # 617 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |

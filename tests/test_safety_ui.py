@@ -350,7 +350,7 @@ def test_emergency_uses_bypass_even_with_queued_tasks(win):
 def test_emergency_reports_dropped_and_zero_g_errors(win, monkeypatch):
     """收尾出问题要如实记日志，不能静默。"""
     msgs = []
-    monkeypatch.setattr(win, "_log", msgs.append)
+    monkeypatch.setattr(win, "_log", lambda m, **kw: msgs.append(m))
 
     class _Arm:
         zero_g_active = True

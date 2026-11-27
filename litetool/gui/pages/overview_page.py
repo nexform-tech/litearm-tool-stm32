@@ -69,5 +69,9 @@ class OverviewPage(QWidget):
     def refresh_plot(self, model):
         self.plot.refresh(model)
 
+    def set_context(self, firmware: str):
+        """连接上下文（固件版本）—— 曲线 CSV 的文件名用它。"""
+        self.plot.set_context(firmware)
+
     def clear_plot(self):
         self.plot.clear_all()

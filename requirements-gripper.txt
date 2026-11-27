@@ -1,0 +1,9 @@
+# 可选依赖：LiteGrip 夹爪（仅 Linux / SocketCAN）。
+#
+#   pip install -r requirements.txt -r requirements-gripper.txt
+#
+# 不装也能启动工具：夹爪页会显示"未安装 litegrip-python"并禁用连接。
+# 需要先把 CAN 接口拉起来（1 Mbit/s）：
+#   sudo ip link set can0 type can bitrate 1000000
+#   sudo ip link set can0 up
+litegrip-python>=1.1.3

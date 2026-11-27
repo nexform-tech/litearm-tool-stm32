@@ -42,13 +42,15 @@ three navigation groups on the left + a collapsible log at the bottom.
 
 | Group | Page | What it does |
 | --- | --- | --- |
-| Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot) |
-| | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes |
+| Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot; CSV export of the selected joints with units, temperatures and drive error codes) |
+| | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes / export the parsed samples as CSV |
+| | **Logs** | Structured JSONL: live view / filter by level, category and text / raw-record detail / history read-back across restarts / export JSONL |
 | | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
 | Operate | **Machine** | Enable / disable / reset / clear faults / home / global speed / park / read state / reset reason |
-| | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all` |
-| | **Cartesian** | Read TCP / `ik` solve / `move_p` |
+| | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all`; one-click ready pose `[0, 0.5, 0, -1, 0, 0.6, 0]` (trimmed/padded to the axis count); explicit `movej` takeover |
+| | **Cartesian** | Read TCP / `ik` solve / `move_p` / `movel` (straight line) / base- or tool-frame jog (hold to run, release to stop) / controlled stop |
 | | **Zero-G** | Hand-guiding (keep-alive is maintained by the SDK background thread; this tool sends no heartbeat frames) |
+| | **Gripper** | LiteGrip (Linux only): connect / enable / open / close / grasp / zero-torque stop / telemetry / calibration / write zero |
 | Tuning | **Parameters** | Joint parameters and the 0x26/0x27/0x28 feed-forward family: read back / edit and send / ff_mask / batch import-export / persist to flash / factory reset |
 | | **Tuning guide** | Formulas and symbol mapping, read-before-you-start notes, symptom→parameter quick table, expandable per-parameter details |
 | | **Diagnostics** | `KIN_BENCH` self-test, reset reason, link counters (CRC / queue full / CAN failures / control-tick overruns), error-code text, diagnostics bundle |
@@ -73,6 +75,7 @@ whether the UI is actually wired to it).
 | `move_js` | Joints page, single shot (the page states the 0.1 s watchdog semantics) |
 | `send_mit` / `send_mit_all` | Joints page, single joint / whole arm, single frame |
 | `move_p` | Cartesian page (pose-magnitude confirmation above the threshold) |
+| `move_l` | Cartesian page [movel] and hold-to-run jog (requires firmware `LITEARM_CART_PLAN`) |
 | `ik` | Cartesian page [Solve IK] (computes only, never moves; the seed may be the current measured angles) |
 | `get_tcp` | Cartesian page [Read current TCP pose], Overview |
 | `get_state` | 100 Hz continuous feed (status strip + overview table + plot) |
@@ -148,6 +151,15 @@ The tool covers only the operator-intent layer the firmware cannot enforce:
 6. Every motion page states its "single frame / single shot" semantics. Under the firmware's
    0.1 s watchdog, continuous `move_js` servoing requires the caller to resend at ≥10 Hz; this
    tool provides no continuous stream.
+7. **Jog / movel.** Both need the firmware's cartesian planner (`LITEARM_CART_PLAN`); when the
+   connect-time probe says no (or is silent), the buttons stay grey and the page says why.
+   Jog steps read the **measured** TCP each time (no integration): hold a direction to keep
+   stepping, release to void the chain; releasing while a step is in flight sends a controlled
+   stop (`movej` to the current measured joint angles) through the same write-only bypass as the
+   emergency stop. The stop frame is **not** an ACK — the log says "frame sent", never "stopped".
+   The [Movej takeover] checkbox writes a `movej` bypass frame that voids an in-flight cartesian
+   plan; if the in-flight command is another `movej`, the SDK still waits for its original target
+   (firmware already changed course), which the UI states in the log.
 
 ## Usage
 
@@ -165,24 +177,52 @@ bench are detected from the status-frame length.
 
 Configuration lives in [config.yaml](config.yaml) (interaction settings only, no limits).
 
+**Single instance only.** A second launch does not open the serial port; it brings the running
+window to the front and exits. The lock is a local socket (`QLocalServer`), so a crash is cleaned
+up by the next launch. The second process shows a short message explaining why it is exiting.
+
+**Link recovery.** If the status stream goes silent or raises a transport error, the tool declares
+the link offline and retries automatically: the last port first, then every enumerated candidate,
+with exponential backoff (0.5 s → 5 s). Commands still queued from the old link are dropped, and
+the motion unlock is never restored. Clicking **Disconnect** stops the retries — a deliberate user
+action is not overridden by auto-reconnect.
+
+Structured logs go to `$XDG_STATE_HOME/litearm-tool/tool.jsonl` (`~/.local/state/...` by default;
+`%LOCALAPPDATA%\litearm-tool\Logs` on Windows), 5 MB per file with five rotated backups.
+`LITEARM_TOOL_LOG_DIR` overrides the directory. The **Logs** page reads the current file and its
+backups, so history survives a restart; diagnostics bundles carry the path, not the contents.
+
+**LiteGrip (optional, Linux only).** Install `requirements-gripper.txt`, bring up SocketCAN at
+1 Mbit/s (`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`), then use the
+**Gripper** page. On Windows or without `litegrip-python` the page stays visible but disabled and
+states why. Channel / CAN ID / MST ID take effect on reconnect; calibration decides travel and
+direction, and the SDK refuses motion until one is loaded. The stop button sends a zero-torque
+frame and disables the motor while an action is in flight (so a running grasp stops), not an
+emergency stop for the arm.
+
 ## Code organization
 
 ```text
 main.py                 Entry point (thin shell, forwards to litetool.app:main)
 litetool/
   app.py                Launch entry (`python3 -m litetool` / the `litearm-tool` command)
-  sdk_worker.py         ★ the only thread that owns pa.Arm + task queue + state hook
+  instance.py           Single-instance lock (local socket; second launch focuses the window)
+  sdk_worker.py         ★ the only thread that owns pa.Arm + task queue + state hook + link recovery
   params_io.py          Parameter read/write shape layer over pa.Arm (pages want (ok, code))
   diagnostics.py        Error-code text / diagnostics bundle / link-counter summary
   model_io.py           HYY model and parameter import/export
   hyy_config.py         HYY configuration parsing
   ports.py              Port enumeration (onboard CDC first)
+  gripper.py            LiteGrip worker (own thread, SocketCAN; Linux only)
   plot_model.py         Thread-safe state ring buffer (with measured frame rate)
   checks.py             Intent-layer confirmation (Δq / pose magnitude; the only "safety" module)
+  pose_math.py          Jog pose math (base/tool frames, rpy ↔ rotation matrix)
   param_catalog.py      Tuning catalog mirror + schema/diff/ff_mask + role/hint/detail
   tuning_guide.py       Tuning-guide content (formulas / symbol mapping / symptom table)
   firmware_defaults.py  Parses firmware defaults.c (source of truth for presets/ and consistency checks)
   settings.py           config.yaml merge (type + range validation)
+  csv_export.py         CSV writer for the plot window and 300 Hz capture (units in headers)
+  obs.py                Structured logging (JSONL, OpenTelemetry field names, redaction)
   activation.py         Activation-service client (the only outbound network point; license/registration checks)
   license_io.py         License record (0x2F/0x3F) shape layer + read-back verdict for aggregated error 0x02
   gui/
@@ -193,6 +233,7 @@ litetool/
       fault_page.py     Faults        machine_page.py  Machine
       joint_page.py     Joints        cart_page.py     Cartesian
       zerog_page.py     Zero-G        params_page.py   Parameters
+      gripper_page.py   Gripper       log_page.py      Logs
       guide_page.py     Tuning guide  diag_page.py     Diagnostics
       installation_page.py  Installation direction
       activation_page.py    Activation (read UID / online activation)
@@ -211,7 +252,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 484 passed (all offline, no hardware required)
+python3 -m pytest          # 558 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -242,6 +283,7 @@ python3 -m pytest          # 484 passed (all offline, no hardware required)
    - [ ] Choose the port in the top bar → connect → the status dot turns green "● Online" and the firmware version appears
    - [ ] The persistent status strip shows mode=INIT, frame rate ≈ 100 Hz, seq increasing with no jumps (dropped frames ≈ 0)
    - [ ] The overview table shows q/dq/tau/temperature/err per joint; unplug the serial cable → red "● Offline", all command buttons disabled
+   - [ ] After the unplug the top bar shows `● Reconnecting (n)`; replug → it reconnects and stays motion-locked; any command queued before the unplug was dropped
    - [ ] Press the emergency stop while disconnected → it must clearly say "emergency stop NOT sent", never "disabled"
 2. **Plot**: the overview scrolls with the state; the J1–J7 channel checkboxes switch traces; "Freeze" pauses and "Clear" redraws; [Enlarge plot] collapses the state table. **Send one `movej` and confirm the plot keeps updating during the motion** (state hook).
 3. **Basic control** (the magnets will engage; support the arm):
@@ -251,7 +293,11 @@ python3 -m pytest          # 484 passed (all offline, no hardware required)
 4. **Motion commands** (start slow, sp=0.1):
    - [ ] `move_j` to current + 0.1 rad → small motion, arrives
    - [ ] `move_j` with a delta > 0.5 rad → Δq confirmation; cancelling sends nothing
+   - [ ] [Ready pose] fills the target with `[0, 0.5, 0, -1, 0, 0.6, 0]` and sends it through the same confirmation
    - [ ] Cartesian page [Read current TCP pose] returns a value; [Solve IK] returns 7 numbers; a small `move_p` arrives
+   - [ ] Hold a jog direction for ~1 s → several small steps; release → the arm stops and holds; [Stop jog] also holds
+   - [ ] `movel` a 10 mm straight line → arrives; the page refreshes TCP after the motion
+   - [ ] On firmware without `LITEARM_CART_PLAN` (or a silent probe) the jog/movel buttons stay grey and the page states why
    - [ ] Joints page `move_mit`, single frame, single joint, small magnitude
 5. **Zero-G**: the arm can be hand-dragged after entering; the button and the status strip agree; after exit the joints return inside the soft limits; unplugging the cable shows "keep-alive lost" and resets the button
 6. **Capture**: set n=300 → [Start recording] → wait 1 s → [Progress] should show ~300 ticks → [Read back and preview] draws three curves → [Export raw bytes…] writes a file
@@ -261,6 +307,11 @@ python3 -m pytest          # 484 passed (all offline, no hardware required)
 10. **Abnormal paths**:
    - [ ] Click other buttons rapidly while a command is running → "busy", no concurrent sends
    - [ ] Enter an extreme value for `move_j` → the log shows the firmware ERR rejection, the arm does not move
+11. **Gripper** (Linux, LiteGrip on `can0`):
+   - [ ] Connect → enable → open/close; telemetry shows fresh position, force and temperatures
+   - [ ] Grasp 20 N for 3 s → holds; [Stop / release] aborts the hold, drops the torque and disables the motor
+   - [ ] [Read calibration] shows travel and mount direction; save and reload a calibration file
+   - [ ] On Windows (or without `litegrip-python`) the page states the platform limit and disables connect
 
 ## Parameter tuning page
 
@@ -365,6 +416,13 @@ YAML, and the UI). Values follow firmware `params.c` and `flash_store.c apply_lo
   as live data would make people believe the arm is still where it was.
 - Fault reasons are queried only when `flags` bit11=1; older firmware (no `0x51`) shows "reason
   unavailable", which must not be read as "no fault".
+- Cartesian jog/movel require the firmware's `LITEARM_CART_PLAN`; a 1J bench or old firmware
+  disables them. A `movej` takeover voids an in-flight cartesian plan immediately, but if the
+  in-flight SDK call is another `movej`, that call still waits for its original target — the
+  firmware has already changed course while the owner thread finishes the old wait.
 - The UI's firmware-error display is the command name + generic code meaning (`describe`); the
   per-command detail is in the SDK exception's `err_reason` message (the `str(e)` of
   `CommandRejectedError`).
+- Gripper support is Linux-only and needs `litegrip-python` plus a SocketCAN interface already up
+  at 1 Mbit/s. Changing channel / CAN ID / MST ID requires a reconnect. The zero-torque stop is
+  not a substitute for the arm's emergency stop, and the gripper link does not auto-reconnect.

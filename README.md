@@ -47,7 +47,7 @@ three navigation groups on the left + a collapsible log at the bottom.
 | | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
 | Operate | **Machine** | Enable / disable / reset / clear faults / home / global speed / park / read state / reset reason |
 | | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all` |
-| | **Cartesian** | Read TCP / `ik` solve / `move_p` |
+| | **Cartesian** | Read TCP / `ik` solve / `move_p` / `movel` (straight line) / base- or tool-frame jog (hold to run, release to stop) / controlled stop / explicit `movej` takeover |
 | | **Zero-G** | Hand-guiding (keep-alive is maintained by the SDK background thread; this tool sends no heartbeat frames) |
 | Tuning | **Parameters** | Joint parameters and the 0x26/0x27/0x28 feed-forward family: read back / edit and send / ff_mask / batch import-export / persist to flash / factory reset |
 | | **Tuning guide** | Formulas and symbol mapping, read-before-you-start notes, symptom→parameter quick table, expandable per-parameter details |
@@ -72,6 +72,7 @@ whether the UI is actually wired to it).
 | `move_js` | Joints page, single shot (the page states the 0.1 s watchdog semantics) |
 | `send_mit` / `send_mit_all` | Joints page, single joint / whole arm, single frame |
 | `move_p` | Cartesian page (pose-magnitude confirmation above the threshold) |
+| `move_l` | Cartesian page [movel] and hold-to-run jog (requires firmware `LITEARM_CART_PLAN`) |
 | `ik` | Cartesian page [Solve IK] (computes only, never moves; the seed may be the current measured angles) |
 | `get_tcp` | Cartesian page [Read current TCP pose], Overview |
 | `get_state` | 100 Hz continuous feed (status strip + overview table + plot) |
@@ -146,6 +147,15 @@ The tool covers only the operator-intent layer the firmware cannot enforce:
 6. Every motion page states its "single frame / single shot" semantics. Under the firmware's
    0.1 s watchdog, continuous `move_js` servoing requires the caller to resend at ≥10 Hz; this
    tool provides no continuous stream.
+7. **Jog / movel.** Both need the firmware's cartesian planner (`LITEARM_CART_PLAN`); when the
+   connect-time probe says no (or is silent), the buttons stay grey and the page says why.
+   Jog steps read the **measured** TCP each time (no integration): hold a direction to keep
+   stepping, release to void the chain; releasing while a step is in flight sends a controlled
+   stop (`movej` to the current measured joint angles) through the same write-only bypass as the
+   emergency stop. The stop frame is **not** an ACK — the log says "frame sent", never "stopped".
+   The [Movej takeover] checkbox writes a `movej` bypass frame that voids an in-flight cartesian
+   plan; if the in-flight command is another `movej`, the SDK still waits for its original target
+   (firmware already changed course), which the UI states in the log.
 
 ## Usage
 
@@ -176,6 +186,7 @@ litetool/
   ports.py              Port enumeration (onboard CDC first)
   plot_model.py         Thread-safe state ring buffer (with measured frame rate)
   checks.py             Intent-layer confirmation (Δq / pose magnitude; the only "safety" module)
+  pose_math.py          Jog pose math (base/tool frames, rpy ↔ rotation matrix)
   param_catalog.py      Tuning catalog mirror + schema/diff/ff_mask + role/hint/detail
   tuning_guide.py       Tuning-guide content (formulas / symbol mapping / symptom table)
   firmware_defaults.py  Parses firmware defaults.c (source of truth for presets/ and consistency checks)
@@ -205,7 +216,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 438 passed (all offline, no hardware required)
+python3 -m pytest          # 445 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -243,6 +254,9 @@ python3 -m pytest          # 438 passed (all offline, no hardware required)
    - [ ] `move_j` to current + 0.1 rad → small motion, arrives
    - [ ] `move_j` with a delta > 0.5 rad → Δq confirmation; cancelling sends nothing
    - [ ] Cartesian page [Read current TCP pose] returns a value; [Solve IK] returns 7 numbers; a small `move_p` arrives
+   - [ ] Hold a jog direction for ~1 s → several small steps; release → the arm stops and holds; [Stop jog] also holds
+   - [ ] `movel` a 10 mm straight line → arrives; the page refreshes TCP after the motion
+   - [ ] On firmware without `LITEARM_CART_PLAN` (or a silent probe) the jog/movel buttons stay grey and the page states why
    - [ ] Joints page `move_mit`, single frame, single joint, small magnitude
 5. **Zero-G**: the arm can be hand-dragged after entering; the button and the status strip agree; after exit the joints return inside the soft limits; unplugging the cable shows "keep-alive lost" and resets the button
 6. **Capture**: set n=300 → [Start recording] → wait 1 s → [Progress] should show ~300 ticks → [Read back and preview] draws three curves → [Export raw bytes…] writes a file
@@ -356,6 +370,10 @@ YAML, and the UI). Values follow firmware `params.c` and `flash_store.c apply_lo
   as live data would make people believe the arm is still where it was.
 - Fault reasons are queried only when `flags` bit11=1; older firmware (no `0x51`) shows "reason
   unavailable", which must not be read as "no fault".
+- Cartesian jog/movel require the firmware's `LITEARM_CART_PLAN`; a 1J bench or old firmware
+  disables them. A `movej` takeover voids an in-flight cartesian plan immediately, but if the
+  in-flight SDK call is another `movej`, that call still waits for its original target — the
+  firmware has already changed course while the owner thread finishes the old wait.
 - The UI's firmware-error display is the command name + generic code meaning (`describe`); the
   per-command detail is in the SDK exception's `err_reason` message (the `str(e)` of
   `CommandRejectedError`).

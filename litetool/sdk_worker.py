@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import queue
+import struct
 import threading
 import time
 from dataclasses import dataclass
@@ -274,6 +275,25 @@ class SdkWorker:
         except Exception:  # noqa: BLE001
             return None
 
+    @property
+    def cart_supported(self) -> Optional[bool]:
+        """固件的笛卡尔规划能力（connect 时探测）。None = 未知/未连接。
+
+        `Arm` 把结果缓存在私有 `_cart_supported`（SDK 明确不提供公开属性），
+        这里读取它只用于**界面预判**；真正的发令守卫仍在 SDK 的 `move_l`。
+        """
+        arm = self._arm
+        if arm is None:
+            return None
+        value = getattr(arm, "_cart_supported", None)
+        return None if value is None else bool(value)
+
+    @property
+    def cart_probe_silent(self) -> bool:
+        """能力探测是否"没等到应答"（不等于固件不支持，见 SDK 的 `_cart_probe_silent`）。"""
+        arm = self._arm
+        return bool(getattr(arm, "_cart_probe_silent", False)) if arm is not None else False
+
     # ================= 命令 =================
     def submit(self, name: str, fn: Callable[[Any], Any],
                on_done: Optional[Callable[[TaskResult], None]] = None) -> None:
@@ -303,6 +323,45 @@ class SdkWorker:
         except Exception as e:  # noqa: BLE001 - 任何失败都必须如实上报
             return False, str(e)
         return True, "急停帧已发出"
+
+    def takeover_movej(self, q, speed: float = 0.15) -> tuple:
+        """**旁路**写一条 `movej`：作废在途笛卡尔规划并接管运动。
+
+        为什么不能 `submit`：队列正被在途的 `move_l(wait=True)` 占着，排队等于
+        等它走完。这里与急停走同一条"只写不读"旁路 —— `guarded=True` 保留 SDK
+        对零重力保活期的拒绝，但不等 ACK。
+
+        ⚠ 在途任务会以 `MotionSupersededError` 结束（笛卡尔规划被作废）；若在途
+        的是 `movej`，SDK 会一直等到**原目标**超时/到位才返回 —— 固件已经改走新目标，
+        但所有者线程要等旧调用收尾。界面必须如实说明这一点。
+
+        返回 `(ok, 说明)`；ok=False 表示帧没发出去。
+        """
+        arm = self._arm
+        if arm is None:
+            return False, "未连接"
+        try:
+            n = int(getattr(arm, "n", 0) or 0)
+            qs = [float(v) for v in q]
+            if n and len(qs) != n:
+                return False, f"需要 {n} 个关节角，收到 {len(qs)} 个"
+            if not 0.0 <= float(speed) <= 1.0:
+                return False, "speed 需 0..1"
+            payload = _P.pack_f32s(qs) + struct.pack("<f", float(speed))
+            arm._write_cmd(_P.CMD_MOVE_J, payload, guarded=True)
+        except Exception as e:  # noqa: BLE001 - 任何失败都必须如实上报
+            return False, str(e)
+        return True, "接管 movej 帧已发出"
+
+    def stop_jog_now(self) -> tuple:
+        """受控停止点动：`movej` 到**当前实测关节角**，作废在途笛卡尔规划。
+
+        走 `takeover_movej` 的旁路；没有状态帧时拒绝（拿不到"当前"就等于盲停）。
+        """
+        st = self.state
+        if st is None:
+            return False, "还没有状态帧，无法取当前关节角"
+        return self.takeover_movej(list(st.q), 0.1)
 
     def stop_zero_g_now(self) -> Optional[str]:
         """急停时收掉零重力会话 —— 返回错误说明，正常则 None。

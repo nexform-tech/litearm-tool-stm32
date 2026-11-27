@@ -1,6 +1,24 @@
 # Release caller for a NexForm repository.
-# The central workflow owns versioning, tags, and GitHub Releases. This repository
-# owns build and publish jobs, if it ships anything.
+#
+#   release — versioning only. The central workflow reads the merged commit
+#             prefixes, pushes the tag and creates the GitHub release. It
+#             decides the version; nothing here may.
+#   package — builds the artifacts and attaches them to that release. It runs
+#             only when `release` produced a new tag; a push to main that
+#             releases nothing must not spend two runners on a build.
+#
+# The package job builds per platform:
+#   · ubuntu-22.04 — the portable tar.gz, plus a `.deb` built from the same
+#     onedir bundle. The .deb is the only artifact that can set the serial-port
+#     permission (a udev rule with uaccess, so no dialout group and no re-login),
+#     install the DFU rule and register a desktop entry. The host is pinned
+#     because the bundle's glibc floor is the build host's.
+#   · windows-latest — the onedir zip (the same layout `build-windows.ps1`
+#     produces locally).
+#
+# Versions come from the tag, never from a manifest: the build scripts read
+# `LITEARM_TOOL_VERSION` / `-Version`, and the manifest version stays a
+# development placeholder.
 name: Release
 
 on:
@@ -10,18 +28,148 @@ on:
       - master
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
+  contents: write # create the tag and the GitHub release
+  issues: write # comment on released issues
+  pull-requests: write # comment on released pull requests
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: false # never cancel a release mid-flight
 
 jobs:
+  # Versioning only: commit prefixes -> tag -> GitHub release. Language-agnostic.
   release:
     uses: nexform-tech/workflows/.github/workflows/release.yml@v1
     # Uncomment to keep semantic-release's 1.0.0 first release instead of the
     # bootstrapped 0.x line.
     # with:
     #   initial-version: ""
+
+  package:
+    needs: release
+    if: needs.release.outputs.new_tag != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    permissions:
+      contents: write # attach artifacts to the GitHub release
+    env:
+      VERSION: ${{ needs.release.outputs.new_tag }}
+    steps:
+      - name: Checkout tool
+        uses: actions/checkout@v4
+        with:
+          path: litearm-tool-stm32
+
+      # The SDK is not on PyPI and is not a submodule here. Pin the same public
+      # commit the CI uses; both must move together.
+      - name: Checkout SDK
+        uses: actions/checkout@v4
+        with:
+          repository: nexform-tech/litearm-python
+          ref: 0e43a2ffa5de1bdf34bf94360cc8df0b729da157
+          path: litearm-python
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # PyQt5 wheels need these shared libraries even in the offscreen mode the
+      # offline suite uses.
+      - name: Install Qt system libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3
+
+      - name: Resolve the tool version
+        shell: bash
+        run: echo "TOOL_VERSION=${VERSION#v}" >> "$GITHUB_ENV"
+
+      - name: Build the Linux bundle
+        if: runner.os == 'Linux'
+        working-directory: litearm-tool-stm32
+        shell: bash
+        env:
+          PYLITEARM_STM32: ${{ github.workspace }}/litearm-python
+        run: LITEARM_TOOL_VERSION="$TOOL_VERSION" ./packaging/build.sh
+
+      - name: Build the Debian package
+        if: runner.os == 'Linux'
+        working-directory: litearm-tool-stm32
+        shell: bash
+        run: |
+          ./packaging/build-deb.sh \
+            --bundle "packaging/out/litearm-tool-stm32-${TOOL_VERSION}-linux-x86_64" \
+            --version "$TOOL_VERSION" \
+            --outdir upload
+
+      - name: Smoke-test the Linux bundle
+        if: runner.os == 'Linux'
+        working-directory: litearm-tool-stm32
+        shell: bash
+        run: |
+          QT_QPA_PLATFORM=offscreen timeout 10 \
+            "packaging/out/litearm-tool-stm32-${TOOL_VERSION}-linux-x86_64/litearm-tool" \
+            || [ $? -eq 124 ]
+
+      # Installing the .deb on the build host catches a broken wrapper, a bad
+      # control file or an unresolvable dependency before the artifact is
+      # attached. The postinst's udev/desktop calls are best-effort.
+      - name: Install and smoke-test the Debian package
+        if: runner.os == 'Linux'
+        working-directory: litearm-tool-stm32
+        shell: bash
+        run: |
+          sudo apt-get install -y "./upload/litearm-tool-stm32_${TOOL_VERSION}_amd64.deb"
+          QT_QPA_PLATFORM=offscreen timeout 10 litearm-tool || [ $? -eq 124 ]
+
+      - name: Stage the Linux artifacts
+        if: runner.os == 'Linux'
+        working-directory: litearm-tool-stm32
+        shell: bash
+        run: |
+          mkdir -p upload
+          cp "packaging/out/litearm-tool-stm32-${TOOL_VERSION}-linux-x86_64.tar.gz" upload/
+
+      - name: Build the Windows bundle
+        if: runner.os == 'Windows'
+        working-directory: litearm-tool-stm32
+        shell: pwsh
+        run: |
+          $py = (Get-Command python).Source
+          powershell -NoProfile -ExecutionPolicy Bypass `
+            -File packaging\build-windows.ps1 `
+            -PythonExe $py `
+            -SdkSrc "$env:GITHUB_WORKSPACE\litearm-python" `
+            -Version "$env:TOOL_VERSION"
+
+      - name: Stage the Windows artifact
+        if: runner.os == 'Windows'
+        working-directory: litearm-tool-stm32
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force upload | Out-Null
+          Copy-Item "packaging\out\litearm-tool-stm32-$env:TOOL_VERSION-windows-x86_64.zip" `
+            -Destination upload
+
+      # Sidecar files, not one aggregate SHA256SUMS: the two runners cannot see
+      # each other's uploads, and an aggregate file would be overwritten by the
+      # second one. See packaging/checksums.py.
+      - name: Checksums
+        working-directory: litearm-tool-stm32
+        run: python packaging/checksums.py upload
+
+      - name: Attach artifacts to the release
+        working-directory: litearm-tool-stm32
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$VERSION" upload/* --clobber

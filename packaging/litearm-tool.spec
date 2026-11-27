@@ -22,7 +22,16 @@
 
 **`config.yaml` 进 `_internal/`** 作为随包基线; 可执行文件同级的那份由 `build.sh`
 复制, 用户可直接改 —— `litetool/app.py::config_path()` 的冻结候选**优先取同级那份**。
+
+**Windows 体积收尾（2026-11-27）**：PyInstaller 的 PyQt5 hook 会把 `qwebgl.dll`
+平台插件也收进来，而它静态依赖 Qt5Quick / Qt5Qml / Qt5QmlModels / Qt5WebSockets
+—— 本工具是纯 QtWidgets，一个 QML 界面都没有，这四个 DLL 纯属被平台插件拖进来的
+（实测 `Qt5Gui/Qt5Widgets` 的导入表里没有它们）。同理，`Qt5/translations/*.qm`
+只有调用 `QTranslator` 才会被加载，本工具没有安装任何 translator。两者都在
+Analysis 之后从 `binaries` / `datas` 里滤掉；`opengl32sw.dll`（20 MB）**不动**，
+无 GPU 的机器/远程桌面可能要靠它兜底。
 """
+import os
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -82,6 +91,25 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+
+# `qwebgl` 只为 WebGL 远程推流存在；它把一整套 Quick/Qml 拖进包，本工具用不到。
+_DROP_QT_DLLS = {
+    "qwebgl.dll",              # 平台插件：不进 QtWidgets 应用的启动路径
+    "qt5quick.dll",
+    "qt5qml.dll",
+    "qt5qmlmodels.dll",
+    "qt5websockets.dll",       # 只有 qwebgl 依赖它
+}
+def _drop_entry(entry) -> bool:
+    dest = entry[0].replace("\\", "/").lower()
+    return (os.path.basename(dest) in _DROP_QT_DLLS
+            # 没有 QTranslator，Qt 自带翻译永远不会被加载；整目录不随包发。
+            or "pyqt5/qt5/translations/" in dest)
+
+
+a.binaries = [entry for entry in a.binaries if not _drop_entry(entry)]
+a.datas = [entry for entry in a.datas if not _drop_entry(entry)]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

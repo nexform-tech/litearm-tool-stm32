@@ -46,7 +46,7 @@ three navigation groups on the left + a collapsible log at the bottom.
 | | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes |
 | | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
 | Operate | **Machine** | Enable / disable / reset / clear faults / home / global speed / park / read state / reset reason |
-| | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all` |
+| | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all`; one-click ready pose `[0, 0.5, 0, -1, 0, 0.6, 0]` (trimmed/padded to the axis count) |
 | | **Cartesian** | Read TCP / `ik` solve / `move_p` |
 | | **Zero-G** | Hand-guiding (keep-alive is maintained by the SDK background thread; this tool sends no heartbeat frames) |
 | Tuning | **Parameters** | Joint parameters and the 0x26/0x27/0x28 feed-forward family: read back / edit and send / ff_mask / batch import-export / persist to flash / factory reset |
@@ -205,7 +205,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 438 passed (all offline, no hardware required)
+python3 -m pytest          # 429 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -242,6 +242,7 @@ python3 -m pytest          # 438 passed (all offline, no hardware required)
 4. **Motion commands** (start slow, sp=0.1):
    - [ ] `move_j` to current + 0.1 rad → small motion, arrives
    - [ ] `move_j` with a delta > 0.5 rad → Δq confirmation; cancelling sends nothing
+   - [ ] [Ready pose] fills the target with `[0, 0.5, 0, -1, 0, 0.6, 0]` and sends it through the same confirmation
    - [ ] Cartesian page [Read current TCP pose] returns a value; [Solve IK] returns 7 numbers; a small `move_p` arrives
    - [ ] Joints page `move_mit`, single frame, single joint, small magnitude
 5. **Zero-G**: the arm can be hand-dragged after entering; the button and the status strip agree; after exit the joints return inside the soft limits; unplugging the cable shows "keep-alive lost" and resets the button

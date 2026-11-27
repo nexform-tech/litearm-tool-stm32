@@ -58,6 +58,10 @@ def main(argv=None) -> int:
     if activation_url:
         # 授权页只读这个环境变量；与 `LITEARM_ACTIVATION_URL` 同一入口。
         os.environ["LITEARM_ACTIVATION_URL"] = activation_url
+    # `--fake` 是 tool 自己的布尔开关，不是 Qt 参数；先摘掉再交给 QApplication。
+    fake = "--fake" in raw
+    if fake:
+        raw = [arg for arg in raw if arg != "--fake"]
     settings = Settings.load(config_path())
     app = QApplication(raw)
     app.setApplicationName("LiteArm Tool STM32")
@@ -75,7 +79,11 @@ def main(argv=None) -> int:
         # 建不出锁不阻止启动，但必须留痕：否则用户会以为"单实例保护生效了"。
         print(f"[WARN] 单实例锁不可用: {guard.lock_error}", file=sys.stderr)
 
-    win = MainWindow(settings)
+    factory = None
+    if fake:
+        from litetool.fake import build_fake_arm_factory
+        factory = build_fake_arm_factory()
+    win = MainWindow(settings, arm_factory=factory, fake=fake)
     guard.activated.connect(win.activate)
     win.show()
     return app.exec_()

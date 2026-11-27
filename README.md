@@ -206,8 +206,12 @@ from upstream `dfu-flash` and must not be rewritten here).
 pip install -e ../litearm-python     # interaction layer (>= 2.4.0)
 pip install -r requirements.txt
 python3 main.py                       # a normal user is enough if the port is in the dialout group
+python3 main.py --fake                # no hardware: SDK fake transport, auto-connects
 python3 main.py --activation-url https://act.nexform.tech   # activation service (production by default)
 ```
+
+`--fake` never touches the serial port; it is for demos, training, and UI work without an arm.
+The fake firmware must not be used to judge real motion or safety limits.
 
 After launch: choose the port in the top bar → connect → the firmware version appears in the top
 bar (for example `Litearm1.12.3-7J`). The connection checks the firmware naming convention
@@ -311,7 +315,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 617 passed (all offline, no hardware required)
+python3 -m pytest          # 619 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |

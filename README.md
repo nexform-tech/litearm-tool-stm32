@@ -315,7 +315,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 612 passed (all offline, no hardware required)
+python3 -m pytest          # 631 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |

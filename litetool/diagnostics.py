@@ -3,7 +3,7 @@
 为什么白名单而不是排除法：漏掉一个排除项就会泄露。这里只挑明列出的字段，
 多出任何键都按缺陷处理（`tests/test_diagnostics.py` 钉住）。
 
-包内容（P0）: 元信息 / 错误 / 状态快照 / 链路统计 / 日志尾部。
+包内容（P0）: 元信息 / 错误 / 状态快照 / 链路统计 / 日志尾部 / 结构化日志路径。
 参数摘要留到 P1（需要额外读 0x2B/0x2C，不在故障路径上做阻塞读）。
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ SCHEMA = "litearm.diag/1"
 #: 顶层允许出现的键 —— 测试以此为判据。
 WHITELIST_KEYS = frozenset({
     "schema", "exported_at", "tool", "sdk", "firmware",
-    "error", "state", "link", "log_tail",
+    "error", "state", "link", "log_tail", "log",
 })
 
 _LOG_TAIL_MAX = 200
@@ -83,6 +83,7 @@ def _error_dict(err: Any) -> Optional[dict]:
 def build_diag_package(*, firmware: str, n_joints: int, state: Any,
                        error_text: Any = None, drops: int = 0,
                        log_tail: Iterable[str] = (),
+                       log_path: Optional[str] = None,
                        locale: str = "zh-CN") -> dict:
     """构造诊断包。只返回白名单字段。"""
     tail = [_sanitize(x) for x in list(log_tail)[-_LOG_TAIL_MAX:]]
@@ -96,6 +97,8 @@ def build_diag_package(*, firmware: str, n_joints: int, state: Any,
         "state": _state_dict(state),
         "link": {"drops": int(drops or 0)},
         "log_tail": tail,
+        # 只给路径，不内联文件内容：诊断包是白名单快照，完整历史在 JSONL 里。
+        "log": {"path": _sanitize(log_path)} if log_path else None,
     }
 
 

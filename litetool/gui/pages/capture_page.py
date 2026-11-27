@@ -15,6 +15,7 @@ import pyqtgraph as pg
 from PyQt5.QtWidgets import (QFileDialog, QLabel, QPushButton,
                              QVBoxLayout, QWidget)
 
+from litetool import csv_export
 from litetool.gui.pages.common import group, hint, note, row, spin
 from litetool.gui.widgets import mono_label
 
@@ -31,6 +32,8 @@ class CapturePage(QWidget):
         self._online = False
         self._busy = False
         self._recording = False
+        self._samples: list = []          # 最近一次 [读回并预览] 的解析结果
+        self._firmware = ""               # 导出文件名用
 
         # ---------------- 录制控制 ----------------
         self.n_ticks = spin(1, LOG_MAX_SAMPLES, 600, 50, decimals=0)
@@ -52,6 +55,11 @@ class CapturePage(QWidget):
         self.btn_prog.clicked.connect(self._on_progress)
         self.btn_dump = QPushButton("导出原始字节…")
         self.btn_dump.clicked.connect(self._on_dump)
+        self.btn_csv = QPushButton("导出解析 CSV…")
+        self.btn_csv.setToolTip(
+            "把最近一次读回的样本写成 CSV：tick、时间、q_ref/dq/tau。\n"
+            "采集缓冲里没有温度与错误码 —— 那些请到总览页导出曲线 CSV。")
+        self.btn_csv.clicked.connect(self._on_csv)
 
         self.prog_lbl = mono_label(240)
 
@@ -59,12 +67,14 @@ class CapturePage(QWidget):
             "录制",
             row(QLabel("拍数"), self.n_ticks, QLabel("预计"), self.eta_lbl),
             row(self.btn_start, self.btn_stop, self.btn_read, self.btn_dump),
-            row(self.btn_capture, self.btn_prog),
+            row(self.btn_capture, self.btn_prog, self.btn_csv),
             row(QLabel("进度"), self.prog_lbl),
             note(f"固件缓冲上限 {LOG_MAX_SAMPLES} 拍（≈{LOG_MAX_SAMPLES / CTRL_HZ:.1f}s @ {CTRL_HZ}Hz），"
-                 "记满自停。导出的是**原始字节**，解析交给离线脚本。"),
+                 "记满自停。可导出原始字节，也可把最近一次读回的样本写成解析 CSV。"),
             hint("⚠ 固件是逐拍记录的：点开始后缓冲里还没有数据，要等 n/300 秒才录满。"
                  "读回在未录满时也能拿到已录部分。"),
+            note("采集缓冲只有 tick/q_ref/dq/tau —— 温度与错误码在 100Hz 状态流里，"
+                 "请到「总览」页用曲线右上角的 [导出 CSV…]。"),
         )
 
         # ---------------- 预览 ----------------
@@ -87,6 +97,7 @@ class CapturePage(QWidget):
         lay.addWidget(g_rec)
         lay.addWidget(g_plot, 1)
         self._refresh_eta()
+        self._refresh()            # 初始全灰：连接前不暗示可以录制
 
     # ---------------- 外部接线 ----------------
     def set_submit(self, fn):
@@ -101,6 +112,10 @@ class CapturePage(QWidget):
         self._busy = busy
         self._refresh()
 
+    def set_firmware(self, firmware: str):
+        """主窗口在连接后注入固件版本 —— 导出文件名带它。"""
+        self._firmware = str(firmware or "")
+
     def _refresh(self):
         can = self._online and not self._busy and self._submit is not None
         self.btn_start.setEnabled(can and not self._recording)
@@ -109,6 +124,8 @@ class CapturePage(QWidget):
         self.btn_capture.setEnabled(can)
         self.btn_prog.setEnabled(can)
         self.btn_dump.setEnabled(can)
+        # 导出已读回的数据是纯本地操作：断线/忙态都不该拦着现场留档。
+        self.btn_csv.setEnabled(bool(self._samples))
         self.n_ticks.setEnabled(can and not self._recording)
 
     def _refresh_eta(self):
@@ -164,8 +181,10 @@ class CapturePage(QWidget):
             self.prog_lbl.setText(f"读回失败：{res.error}")
             return
         samples = res.value or []
+        self._samples = list(samples)
         self.prog_lbl.setText(f"读回 {len(samples)} 拍")
         self._draw(samples)
+        self._refresh()
 
     def _on_dump(self):
         path, _ = QFileDialog.getSaveFileName(self, "导出采集原始字节", "log_capture.bin",
@@ -176,6 +195,25 @@ class CapturePage(QWidget):
                  lambda res: self.prog_lbl.setText(
                      f"已导出 {res.value} 字节 → {path}" if res.ok
                      else f"导出失败：{res.error}"))
+
+    def _on_csv(self):
+        """把最近一次读回的样本写成 CSV（纯本地，不再碰串口）。"""
+        if not self._samples:
+            self.prog_lbl.setText("还没有可导出的样本 —— 先读回并预览")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出采集解析 CSV",
+            csv_export.timestamped_name("capture", self._firmware),
+            "CSV (*.csv);;全部 (*)")
+        if not path:
+            return
+        try:
+            rows = csv_export.write_capture_csv(path, self._samples,
+                                                firmware=self._firmware, hz=CTRL_HZ)
+        except Exception as e:  # noqa: BLE001 - 导出失败不该拖垮界面
+            self.prog_lbl.setText(f"导出失败：{e}")
+            return
+        self.prog_lbl.setText(f"已导出 {rows} 行 → {path}")
 
     def _do(self, name, fn, cb):
         if self._submit is None:

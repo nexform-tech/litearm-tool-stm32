@@ -2,6 +2,10 @@
 
 这是 **litearm-tool-stm32** 的免安装版本：解压即用，**目标机不需要装 Python，也不需要装任何依赖**。
 
+> 本文档针对 **Linux 免安装包**。Windows 包用 `packaging\build-windows.ps1` 打出，
+> 解压后双击 `litearm-tool.exe`；Windows 10/11 自带 USB CDC 驱动，端口列表为空时装
+> STM32 VCP 驱动。夹爪仅 Linux，不在 Windows 包里。
+
 ---
 
 ## 一、启动
@@ -49,7 +53,26 @@ sudo usermod -aG dialout $USER
 
 ---
 
-## 四、配置文件
+---
+
+## 四、夹爪（可选，仅 Linux）
+
+打包时如果装了 `requirements-gripper.txt`（`litegrip-python`），本包就自带夹爪支持；
+否则「夹爪」页会显示"未安装 litegrip-python"并禁用连接。
+
+使用前先把 SocketCAN 以 1 Mbit/s 拉起（每次重启后都要做）：
+
+```bash
+sudo ip link set can0 type can bitrate 1000000
+sudo ip link set can0 up
+```
+
+然后在「夹爪」页选通道（默认 `can0`）→ 连接 → 使能。身份参数（CAN ID / MST ID）改完
+需要断开重连；标定决定行程与方向，未标定时 SDK 拒绝运动。Windows 不提供夹爪。
+
+---
+
+## 五、配置文件
 
 `config.yaml` 就在可执行文件旁边，**可以直接用文本编辑器改**（例如默认端口、界面参数）。
 

@@ -17,6 +17,7 @@
 
 ## 参考
 
+- [Studio → 工具能力对照](capability-matrix.zh-CN.md)：已落地、评审中、未开始与明确不迁。
 - [参数调参页](../README.zh-CN.md#参数调参页参数页签)：读写命令表与取值范围。
 - [固件兼容性](../README.zh-CN.md#固件版本兼容性14x--150)：状态帧布局与各版本行为。
 - 设计记录：[工具设计 2026-09-07](superpowers/specs/2026-09-07-litearm-tool-stm32-design.md) 与 [限位标定与零位偏置 2026-09-08](superpowers/specs/2026-09-08-limits-calib-zero-offset-design.md)。

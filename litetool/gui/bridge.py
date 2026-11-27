@@ -9,6 +9,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 class GuiBridge(QObject):
     sig_log = pyqtSignal(str)                 # 一行日志
+    sig_log_record = pyqtSignal(object)       # 一条结构化日志记录（dict）
     sig_task = pyqtSignal(object, object)     # (TaskResult, 回调|None)
     sig_online = pyqtSignal(bool, str)        # (在线?, 说明)
     sig_reconnect = pyqtSignal(int, str)      # (第几次尝试, 说明)

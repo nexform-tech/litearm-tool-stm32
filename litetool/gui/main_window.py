@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame,
 import litearm as pa
 
 from litetool import checks
+from litetool import obs
 from litetool.diagnostics import build_diag_package, save_diag_package
 from litetool import ports as ports_mod
 from litetool.gui.bridge import GuiBridge
@@ -29,6 +30,7 @@ from litetool.gui.pages.fault_page import FaultPage
 from litetool.gui.pages.guide_page import TuningGuidePage
 from litetool.gui.pages.installation_page import InstallationPage
 from litetool.gui.pages.joint_page import JointPage
+from litetool.gui.pages.log_page import LogPage
 from litetool.gui.pages.machine_page import MachinePage
 from litetool.gui.pages.overview_page import OverviewPage
 from litetool.gui.pages.params_page import ParamsPage
@@ -43,7 +45,7 @@ ONLINE_TEXT = "● 在线"
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings, parent=None):
+    def __init__(self, settings, parent=None, *, log_dir=None):
         super().__init__(parent)
         self._settings = settings
         self._armed = False
@@ -56,10 +58,12 @@ class MainWindow(QMainWindow):
         self._last_fault_bits = 0           # 上次查询时的 joint_fault 位图
         self._fault_query_inflight = False  # 防止同一故障重复查询
         self._fault_detail = None           # 最近一次 0x51 应答
+        # 结构化日志先于 worker：连接期日志也要落盘（worker 的回调会走到 _log）。
+        self.slog = obs.StructuredLogger(log_dir)
 
         self.bridge = GuiBridge()
         self.worker = SdkWorker(
-            log=lambda m: self.bridge.sig_log.emit(m),
+            log=self._log_from_worker,
             on_online=lambda ok, why: self.bridge.sig_online.emit(ok, why),
             on_task=lambda res: self.bridge.sig_task.emit(res, None),
             on_reconnect=lambda n, why: self.bridge.sig_reconnect.emit(n, why),
@@ -80,6 +84,9 @@ class MainWindow(QMainWindow):
 
         self._log("[INFO] LiteArm Tool STM32 —— 交互层经 litearm；"
                   "硬防护权威仍在固件")
+        if self.slog.file_error:
+            # 不能装作日志已经落盘 —— 用户要据此决定要不要先修目录/磁盘。
+            self._log(f"[WARN] 结构化日志无法写入（仅内存保留）: {self.slog.file_error}")
 
     # ================= 界面 =================
     def _build_ui(self):
@@ -147,6 +154,8 @@ class MainWindow(QMainWindow):
         self._add_page("overview", "总览", "状态表 + 100Hz 曲线",
                        OverviewPage(self._settings))
         self._add_page("capture", "采集", "固件 300Hz 控制拍采集与导出", CapturePage())
+        self._add_page("log", "日志", "结构化 JSONL：实时/筛选/历史回读/导出",
+                       LogPage(self.slog))
         self._add_page("machine", "整机", "使能/复位/清故障/回零/限速/park",
                        MachinePage())
         self._add_page("fault", "故障", "当前故障/原因/处置/事件历史/诊断包",
@@ -211,7 +220,7 @@ class MainWindow(QMainWindow):
         """当前显示页面（`stack.currentWidget()` 是外壳 QScrollArea）。"""
         return self.stack.currentWidget().widget()
 
-    _GROUPS = {"监视": ("overview", "capture"),
+    _GROUPS = {"监视": ("overview", "capture", "log"),
                "操作": ("machine", "fault", "joint", "cart", "zerog"),
                # ⚠ 新页 key 必须登记在这里: `_group_for` 用的是无默认值的 next(),
                # 漏登记会在 __init__ 期间抛 StopIteration -> 崩启动。
@@ -228,6 +237,7 @@ class MainWindow(QMainWindow):
     def _wire(self):
         self.nav.navigated.connect(self._on_nav)
         self.bridge.sig_log.connect(self.log_panel.append_line)
+        self.bridge.sig_log_record.connect(self.pages["log"].append)
         self.bridge.sig_task.connect(self._on_task)
         self.bridge.sig_online.connect(self._on_online)
         self.bridge.sig_reconnect.connect(self._on_reconnect)
@@ -251,11 +261,13 @@ class MainWindow(QMainWindow):
         c.movep.connect(self._on_movep)
         z.zg.connect(self._on_zero_g)
         self.pages["diag"].bench_req.connect(self._on_bench)
-        self.pages["params"].set_log(self._log)
+        self.pages["params"].set_log(
+            lambda m: self._log(m, category="parameter"))
         self.pages["params"].set_submit(self._submit)
         self.pages["params"].show_guide.connect(self._on_guide)
         self.pages["capture"].set_submit(self._submit)
-        self.pages["install"].set_log(self._log)
+        self.pages["install"].set_log(
+            lambda m: self._log(m, category="installation"))
         self.pages["install"].set_submit(self._submit)
         self.nav.navigated.connect(self._on_page_changed)
 
@@ -274,11 +286,36 @@ class MainWindow(QMainWindow):
         self.pages["guide"].reveal(key)
 
     # ================= 日志 / 任务 =================
-    def _log(self, msg: str):
-        self._log_tail.append(str(msg))
+    _LEVEL_PREFIX = (("[TRACE]", "TRACE"), ("[DEBUG]", "DEBUG"),
+                     ("[INFO]", "INFO"), ("[OK]", "INFO"),
+                     ("[WARN]", "WARN"), ("[ERR]", "ERROR"), ("[FATAL]", "FATAL"))
+
+    def _log(self, msg: str, *, category: str = "app", event=None, fields=None):
+        """一行日志同时进：底部面板、结构化 JSONL、日志页实时视图。"""
+        text = str(msg)
+        sev = "INFO"
+        for prefix, level in self._LEVEL_PREFIX:
+            if text.startswith(prefix):
+                sev = level
+                break
+        rec = self.slog.record(sev, text, category=category, event=event,
+                               fields=fields)
+        self._log_tail.append(text)
         if len(self._log_tail) > 200:
             del self._log_tail[:-200]
-        self.bridge.sig_log.emit(msg)
+        self.bridge.sig_log_record.emit(rec)
+        self.bridge.sig_log.emit(text)
+
+    def _log_from_worker(self, msg: str):
+        """SDK 所有者线程的日志 —— 只做分类，不碰任何控件。"""
+        text = str(msg)
+        if text.startswith("[OK] 已连接"):
+            event = "session.connect.succeeded"
+        elif text.startswith("[ERR] 离线") or text.startswith("[WARN] 链路"):
+            event = "session.link.lost"
+        else:
+            event = "session.log"
+        self._log(text, category="session", event=event)
 
     def _submit(self, name: str, fn, on_done=None):
         """把 `fn(arm)` 投到 SDK 所有者线程；`on_done(TaskResult)` 回到 GUI 主线程。"""
@@ -288,14 +325,21 @@ class MainWindow(QMainWindow):
     def _on_task(self, res, cb):
         if res is None:
             return
-        self._log(f"[{'OK' if res.ok else 'ERR'}] {res.text}")
+        err = None
         if not res.ok:
             try:
-                self._last_error = pa.describe_exc(res.error)
-                self.err_btn.setText(f"[{self._last_error.code}] {self._last_error.title}")
+                err = pa.describe_exc(res.error)
+                self._last_error = err
+                self.err_btn.setText(f"[{err.code}] {err.title}")
                 self.err_btn.setVisible(True)
             except Exception:  # noqa: BLE001 - 老 SDK 无 describe_exc 时降级
                 self._last_error = None
+        self._log(f"[{'OK' if res.ok else 'ERR'}] {res.text}",
+                  category="command",
+                  event="command.ok" if res.ok else "command.failed",
+                  fields={"name": res.name, "ok": bool(res.ok),
+                          "code": getattr(err, "code", None),
+                          "title": getattr(err, "title", None)})
         if cb is not None:
             cb(res)
         self._apply_busy()
@@ -310,14 +354,17 @@ class MainWindow(QMainWindow):
                 error_text=self._last_error,
                 drops=self.worker.drops,
                 log_tail=self._log_tail,
+                log_path=str(self.slog.path),
             )
             path = save_diag_package(pkg)
             import json
             QApplication.clipboard().setText(
                 json.dumps(pkg, ensure_ascii=False, indent=2))
-            self._log(f"[OK] 诊断包已复制并保存: {path}")
+            self._log(f"[OK] 诊断包已复制并保存: {path}",
+                      category="diagnostics", event="diagnostics.saved")
         except Exception as e:  # noqa: BLE001 - 导出失败不能拖垮界面
-            self._log(f"[ERR] 诊断包导出失败: {e}")
+            self._log(f"[ERR] 诊断包导出失败: {e}",
+                      category="diagnostics", event="diagnostics.failed")
 
     def _after_simple(self, res):
         pass
@@ -352,7 +399,8 @@ class MainWindow(QMainWindow):
         try:
             self.worker.open(port)
         except Exception as e:  # noqa: BLE001 - SDK 的连接期异常都在这提示
-            self._log(f"[ERR] 连接失败: {e}")
+            self._log(f"[ERR] 连接失败: {e}", category="session",
+                      event="session.connect.failed", fields={"reason": str(e)})
             QMessageBox.critical(self, "连接失败", str(e))
             self._apply_online(False, str(e))
         finally:
@@ -361,6 +409,8 @@ class MainWindow(QMainWindow):
     def _disconnect(self):
         self.worker.close()
         self._apply_online(False, "已断开")
+        self._log("[INFO] 已断开（用户操作）", category="session",
+                  event="session.disconnected", fields={"reason": "用户断开"})
 
     def _on_online(self, ok: bool, why: str):
         self._apply_online(ok, why)
@@ -386,6 +436,9 @@ class MainWindow(QMainWindow):
         for page in self.pages.values():
             if hasattr(page, "set_online"):
                 page.set_online(onl)
+        # 导出上下文跟着连接走；断线后保留最后已知的固件版本（已读回的数据仍可导出）。
+        self.pages["overview"].set_context(self.worker.firmware)
+        self.pages["capture"].set_firmware(self.worker.firmware)
         self._apply_busy()
 
     # ================= 运动解锁（全局一把） =================
@@ -450,17 +503,25 @@ class MainWindow(QMainWindow):
         zg_err = self.worker.stop_zero_g_now()
         self._relock("急停")
         if dropped:
-            self._log(f"[WARN] 急停：已丢弃 {dropped} 条排队中的命令")
+            self._log(f"[WARN] 急停：已丢弃 {dropped} 条排队中的命令",
+                      category="command", event="command.emergency_stop",
+                      fields={"sent": bool(ok), "dropped": int(dropped)})
         if zg_err:
-            self._log(f"[WARN] 急停：零重力会话未能正常收尾（{zg_err}）")
+            self._log(f"[WARN] 急停：零重力会话未能正常收尾（{zg_err}）",
+                      category="command", event="command.emergency_stop",
+                      fields={"sent": bool(ok), "zero_g_error": str(zg_err)})
         if ok:
             self.estop_lbl.setText("急停帧已发出 — 请目视确认臂已停止")
             self.estop_lbl.setStyleSheet("color:#ffd166;font-weight:bold;")
-            self._log("[WARN] 急停帧已发出 —— 请目视确认臂已停止（帧发出≠固件已执行）")
+            self._log("[WARN] 急停帧已发出 —— 请目视确认臂已停止（帧发出≠固件已执行）",
+                      category="command", event="command.emergency_stop",
+                      fields={"sent": True, "dropped": int(dropped)})
         else:
             self.estop_lbl.setText("⚠ 急停未发出 — 请立即用硬件急停/断电")
             self.estop_lbl.setStyleSheet("color:#ff6b6b;font-weight:bold;")
-            self._log(f"[ERR] 急停未发出（{why}）—— 请立即用硬件急停/断电")
+            self._log(f"[ERR] 急停未发出（{why}）—— 请立即用硬件急停/断电",
+                      category="command", event="command.emergency_stop",
+                      fields={"sent": False, "dropped": int(dropped), "reason": str(why)})
 
     # ================= 周期刷新 =================
     def _tick(self):
@@ -497,6 +558,9 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001
                 title = f"原因 {r}"
             self.pages["fault"].add_event(f"J{a + 1} {title}")
+            self._log(f"[WARN] 故障 J{a + 1} {title}", category="fault",
+                      event="fault.detected",
+                      fields={"joint": int(a) + 1, "reason": int(r)})
         self._fault_snapshot = cur
         self.pages["diag"].set_metrics(
             drops=drops, fps=fps,
@@ -830,6 +894,15 @@ class MainWindow(QMainWindow):
                 self.pages["diag"].set_bench_error(str(res.error))
         self._submit("KIN_BENCH", lambda arm: arm.diag.kin_bench().value, done)
 
+    # ================= 窗口 =================
+    def activate(self):
+        """把已有窗口提到前台 —— 第二个实例启动时由单实例锁调用。"""
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     # ================= 关闭 =================
     def closeEvent(self, ev):  # noqa: N802 - Qt 命名
         self._timer.stop()
@@ -838,4 +911,5 @@ class MainWindow(QMainWindow):
             self.worker.close()
         except Exception:  # noqa: BLE001 - 退出不该被链路故障卡住
             pass
+        self.slog.close()
         super().closeEvent(ev)

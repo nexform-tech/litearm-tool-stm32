@@ -17,6 +17,7 @@ This directory documents how to install, run, and extend LiteArm Tool STM32 for 
 
 ## Reference
 
+- [Studio → tool capability matrix](capability-matrix.md): delivered, in review, not started, and deliberately not migrated.
 - [Parameter tuning page](../README.md#parameter-tuning-page): write/read command table and ranges.
 - [Firmware compatibility](../README.md#firmware-compatibility-14x--150): status-frame layouts and version behavior.
 - Design records: [tool design, 2026-09-07](superpowers/specs/2026-09-07-litearm-tool-stm32-design.md) and [limits calibration and zero offset, 2026-09-08](superpowers/specs/2026-09-08-limits-calib-zero-offset-design.md).

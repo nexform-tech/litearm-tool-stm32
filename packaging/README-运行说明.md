@@ -2,6 +2,10 @@
 
 这是 **litearm-tool-stm32** 的免安装版本：解压即用，**目标机不需要装 Python，也不需要装任何依赖**。
 
+> 本文档针对 **Linux 免安装包**。Windows 包用 `packaging\build-windows.ps1` 打出，
+> 解压后双击 `litearm-tool.exe`；Windows 10/11 自带 USB CDC 驱动，端口列表为空时装
+> STM32 VCP 驱动。夹爪仅 Linux，不在 Windows 包里。
+
 ---
 
 ## 一、启动

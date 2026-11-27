@@ -162,6 +162,13 @@ bench are detected from the status-frame length.
 
 Configuration lives in [config.yaml](config.yaml) (interaction settings only, no limits).
 
+**Windows build.** Run `powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1`
+from the repository root. It creates a clean venv, installs `litearm-python` from the sibling
+checkout (or `-SdkSrc`), runs the offline suite, then produces
+`packaging\out\litearm-tool-stm32-<version>-windows-x86_64\` and a zip. Windows 10/11 provides the
+USB CDC driver; if the port list is empty, install the STM32 VCP driver. The gripper is Linux-only
+and is not in the Windows bundle. DFU (WinUSB) and 3D OpenGL acceptance remain with #19 / #17.
+
 ## Code organization
 
 ```text
@@ -205,7 +212,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 438 passed (all offline, no hardware required)
+python3 -m pytest          # 426 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |

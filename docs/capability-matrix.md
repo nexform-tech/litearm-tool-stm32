@@ -5,7 +5,8 @@ This document maps the capabilities of `litearm-studio` (GitHub `main`, 2026-11-
 the remaining work. It is the deliverable for issue #15 and the capability/migration boundary
 required by planning#18.
 
-Status is as of **2026-11-27**. "In review" means an open pull request, not merged.
+Status is as of **2026-11-27**, after the first implementation pass (PR #21–#29). "In review"
+means an open pull request, not merged.
 
 # Studio → tool capability matrix
 
@@ -19,11 +20,11 @@ Status is as of **2026-11-27**. "In review" means an open pull request, not merg
 | Live plot | Yes | 100 Hz ring buffer, 30 Hz redraw, per-joint selection | Delivered |
 | Machine control | Enable / disable / reset / clear faults / speed | Same + home / park / read state / reset reason | Delivered |
 | Joint motion | `movej` | `movej` / `move_js` / `move_mit` / `move_mit_all` | Delivered |
-| Joint sliders + soft limits + ready pose | Sliders, firmware soft limits, ready pose | Numeric `movej` inputs; ready pose not yet wired | Sliders declined 2026-11-27; ready pose open |
+| Joint sliders + soft limits + ready pose | Sliders, firmware soft limits, ready pose | Numeric `movej` inputs; one-click ready pose | Sliders declined 2026-11-27; ready pose in review, PR #27 |
 | Cartesian absolute | `movep` | `get_tcp` / `ik` / `move_p` | Delivered |
 | Cartesian jog / straight line / stop | Base/tool jog, `movel`, controlled stop, takeover | Jog + `movel` + controlled stop + explicit `movej` takeover | In review, PR #25 |
 | Zero-G hand guiding | Yes | Yes, SDK keep-alive, exit-to-hold | Delivered |
-| LiteGrip gripper | Page, telemetry, calibration, settings (Linux only) | None | Not started, issue #7 |
+| LiteGrip gripper | Page, telemetry, calibration, settings (Linux only) | Page + owner thread, telemetry, calibration, zero-torque stop | In review, PR #28 (Linux only; hardware acceptance pending) |
 | Activation | Page + service client | Same contract, stdlib client | In review, PR #18 |
 | USB DFU firmware upgrade | Page + DfuSe engine | DfuSe engine copied verbatim, tool adapter | In review, PR #19 |
 | Parameters / feed-forward | Per-joint gains and limits | Full catalog, 0x26/0x27/0x28, ff_mask, import/export, flash | Delivered, deeper than studio |
@@ -37,7 +38,7 @@ Status is as of **2026-11-27**. "In review" means an open pull request, not merg
 | Single instance / fake device | Daemon lock + `--fake` | Fake device in PR #17; single-instance lock in PR #21 | In review, issues #13/#17 |
 | Chinese / English UI | Yes | Chinese only | Not started, issue #12 |
 | Light / dark theme | Yes | Dark only | Not started; no issue |
-| Windows build | Yes (exe) | Linux PyInstaller only; Windows unverified | Not started, issue #14 |
+| Windows build | Yes (exe) | PyInstaller onedir script; offline build verified on the host Windows | In review, PR #29 (real CDC/DFU/OpenGL pending) |
 | Joint zero-offset calibration | Not a studio feature (`zeroJoints` = firmware home) | None | New scope, issue #20; firmware command IDs unassigned |
 
 ## Migration boundaries
@@ -78,17 +79,21 @@ stated otherwise.
 | M0 | #15 this document | — | Capability map and boundaries accepted |
 | M1 | #6 link recovery | — | Replug/port change recovers without restoring the unlock |
 | M1 | #5 Cartesian jog + `movel` + stop | #6; firmware `LITEARM_CART_PLAN` | Bench and real-arm acceptance |
-| M1 | #4 ready pose (sliders declined) | — | One-click ready pose; numeric inputs stay |
+| M1 | #4 ready pose (sliders declined) | — | One-click ready pose; numeric inputs stay. PR #27 |
 | M2 | #8 activation | Activation service + unactivated arm | Unactivated → activated → enable |
 | M2 | #9 DFU | #8 for branch stacking; real board | Success, cancel, unplug runs |
 | M2 | #16 3D digital twin | Target GPU and Windows | 60 FPS at 1080p; ≤10 MB packaging delta |
-| M2 | #7 LiteGrip gripper | `litegrip` SDK + CAN adapter | Read/write/calibrate with telemetry |
+| M2 | #7 LiteGrip gripper | `litegrip` SDK + CAN adapter | Read/write/calibrate with telemetry. PR #28 |
 | M3 | #12 Chinese/English UI | M1/M2 strings stable | Language switch without restart |
-| M3 | #14 Windows packaging | M1/M2 features | Frozen build starts and connects on Windows |
+| M3 | #14 Windows packaging | M1/M2 features | Frozen build starts and connects on Windows. Offline build in PR #29; real CDC/DFU/OpenGL pending |
 | M3 | #20 joint zeroing | Firmware command IDs and persistence | Manual zero + auto approach on hardware |
 
 Issue #3 (3D spike) reached a positive conclusion: `pyqtgraph.opengl` plus PyOpenGL works in the
 tool's PyQt5 stack. The implementation is tracked by #16; do not open a separate 3D track.
+
+The first implementation pass is in review as PR #21–#29. Single instance and fake mode are split
+across #21 and #17; ready pose is #27; gripper is #28; Windows packaging is #29. No merges are
+assumed here: the "in review" rows describe code, not a shipped main branch.
 
 ## Acceptance mapping (planning#18)
 

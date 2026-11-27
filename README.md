@@ -42,8 +42,8 @@ three navigation groups on the left + a collapsible log at the bottom.
 
 | Group | Page | What it does |
 | --- | --- | --- |
-| Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot) |
-| | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes |
+| Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot; CSV export of the selected joints with units, temperatures and drive error codes) |
+| | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes / export the parsed samples as CSV |
 | | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
 | Operate | **Machine** | Enable / disable / reset / clear faults / home / global speed / park / read state / reset reason |
 | | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all`; one-click ready pose `[0, 0.5, 0, -1, 0, 0.6, 0]` (trimmed/padded to the axis count) |
@@ -185,6 +185,7 @@ litetool/
   tuning_guide.py       Tuning-guide content (formulas / symbol mapping / symptom table)
   firmware_defaults.py  Parses firmware defaults.c (source of truth for presets/ and consistency checks)
   settings.py           config.yaml merge (type + range validation)
+  csv_export.py         CSV writer for the plot window and 300 Hz capture (units in headers)
   gui/
     bridge.py           Cross-thread Qt signal bridge (log / task result / online state)
     widgets.py          Log panel / persistent status strip / joint table / banner / left navigation

@@ -174,8 +174,11 @@ SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到�
 pip install -e ../litearm-python     # 交互层依赖（>= 2.4.0）
 pip install -r requirements.txt
 python3 main.py                       # 普通用户即可（串口在 dialout 组则无需 root）
+python3 main.py --fake                # 无硬件演示：SDK 假传输，自动接上假设备
 python3 main.py --activation-url https://act.nexform.tech   # 指定激活服务（默认即生产地址）
 ```
+
+`--fake` 不碰真实串口，适合演示、培训和没有硬件时的 UI 开发；假固件不能用来判断真实运动或安全边界。
 
 启动后：顶栏选串口 → 连接 → 顶栏显示固件版本（如 `Litearm1.12.3-7J`）。
 连接时会校验固件版本约定（最低 1.5.0）。总览页随 100Hz 主动上报自动刷新；
@@ -271,7 +274,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 612 passed（全部离线，无需硬件）
+python3 -m pytest          # 614 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |

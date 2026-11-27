@@ -47,14 +47,23 @@ EXCLUDES = [
     "PyQt5.QtTextToSpeech", "PyQt5.QtXml", "PyQt5.QtOpenGL",
 ]
 
+# LiteGrip 是可选依赖（requirements-gripper.txt，仅 Linux）。装了就随包收进去；
+# 没装就跳过 —— Windows 本来就不提供夹爪入口。
+try:
+    from PyInstaller.utils.hooks import collect_all
+    _grip_datas, _grip_bins, _grip_hidden = collect_all("litegrip")
+except Exception:
+    _grip_datas, _grip_bins, _grip_hidden = [], [], []
+
 a = Analysis(
     [str(ROOT / "litetool" / "__main__.py")],   # `python3 -m litetool` 的入口
     pathex=[str(ROOT)],                          # 让 litetool 从**工作树**里取
-    binaries=[],
-    datas=[(str(ROOT / "config.yaml"), ".")],    # 随包基线 (找不到同级那份时兜底)
+    binaries=_grip_bins,
+    datas=[(str(ROOT / "config.yaml"), ".")] + _grip_datas,    # 随包基线 (找不到同级那份时兜底)
     hiddenimports=[
         # 串口枚举靠 pyserial 的运行时后端, 静态分析看不到
         "serial.tools.list_ports",
+        *_grip_hidden,
     ],
     hookspath=[],
     runtime_hooks=[],

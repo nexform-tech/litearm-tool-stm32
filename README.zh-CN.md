@@ -45,6 +45,7 @@ GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 
 | | **关节** | `move_j` / `move_js` / `move_mit` 单关节 / `move_mit_all` 整臂；一键就绪姿态 `[0, 0.5, 0, -1, 0, 0.6, 0]`（按轴数裁剪/补 0）；显式 `movej` 接管 |
 | | **笛卡尔** | 读 TCP / `ik` 求解 / `move_p` / `movel` 直线 / 基座或工具系点动（按住连续、松手停止）/ 受控停止 |
 | | **零重力** | 拖动示教（保活由 SDK 后台线程维持，本工具不发心跳帧） |
+| | **夹爪** | LiteGrip（仅 Linux）：连接 / 使能 / 张开 / 闭合 / 抓取 / 零力矩停止 / 遥测 / 标定 / 写零 |
 | 参数 | **参数表** | 关节级参数与 0x26/0x27/0x28 前馈族：读回 / 编辑下发 / ff_mask / 批量导入导出 / 固化 Flash / 恢复出厂 |
 | | **调参指南** | 公式与符号映射、读前须知、"症状→建议参数"速查、可展开逐参数详解 |
 | | **诊断** | `KIN_BENCH` 自检、启动复位原因、链路计数（CRC / 队满 / CAN 失败 / 控制拍超预算）、错误码文案、诊断包 |
@@ -161,6 +162,12 @@ Windows 是 `%LOCALAPPDATA%\litearm-tool\Logs`），单文件 5 MB、保留 5 �
 `LITEARM_TOOL_LOG_DIR` 可改目录。「日志」页读当前文件与备份，所以重启后历史仍在；
 诊断包只附日志路径，不内联内容。
 
+**LiteGrip（可选，仅 Linux）。** 安装 `requirements-gripper.txt`，把 SocketCAN 以 1 Mbit/s
+拉起（`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`），再进
+「夹爪」页。Windows 或未安装 `litegrip-python` 时页面保留但禁用连接并写明原因。通道 /
+CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。停止按钮发
+零力矩帧，动作在途时并失能电机以中止，不是机械臂急停。
+
 ## 代码组织
 
 ```text
@@ -174,6 +181,7 @@ litetool/
   model_io.py           HYY 模型与参数的导入/导出
   hyy_config.py         HYY 配置文件解析
   ports.py              串口枚举（板载 CDC 排最前）
+  gripper.py            LiteGrip 所有者线程（独立线程，SocketCAN；仅 Linux）
   plot_model.py         状态环形缓冲（线程安全, 含实测帧率）
   checks.py             意图层确认（Δq / 位姿幅度；唯一的"安全"模块）
   pose_math.py          点动位姿数学（基座/工具系、rpy ↔ 旋转矩阵）
@@ -191,6 +199,7 @@ litetool/
       fault_page.py     故障      machine_page.py  整机
       joint_page.py     关节      cart_page.py     笛卡尔
       zerog_page.py     零重力    params_page.py   参数表
+      gripper_page.py   夹爪      log_page.py      日志
       guide_page.py     调参指南  diag_page.py     诊断
       installation_page.py 安装方向
       log_page.py       结构化日志页
@@ -208,7 +217,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 491 passed（全部离线，无需硬件）
+python3 -m pytest          # 500 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |
@@ -264,6 +273,11 @@ python3 -m pytest          # 491 passed（全部离线，无需硬件）
 10. **异常路径**：
    - [ ] 命令执行中快速连点其它按钮 → 提示"忙"，不并发下发
    - [ ] 手动给 move_j 输入极大值 → 日志显示固件 ERR 拒绝，臂不动
+11. **夹爪**（Linux，LiteGrip 接在 `can0`）：
+   - [ ] 连接 → 使能 → 张开/闭合；遥测显示新的位置、夹持力与温度
+   - [ ] 以 20N 抓取 3s → 保持住；[停止 / 释放] 中止在途抓取、把力矩拉到 0 并失能
+   - [ ] [读取标定] 显示行程与安装方向；保存并重新加载标定文件
+   - [ ] Windows（或未安装 `litegrip-python`）时页面写明平台限制并禁用连接
 
 ## 参数调参页（"参数表"页）
 
@@ -354,3 +368,6 @@ python3 -m pytest          # 491 passed（全部离线，无需硬件）
   该调用仍要等原目标收尾 —— 固件已改道，所有者线程在跑完旧等待后才释放。
 - 工具 UI 的固件错误显示是命令名 + 通用码义（`describe`）；逐命令细节在 SDK 异常的
   `err_reason` 消息里（`CommandRejectedError` 的 `str(e)`）。
+- 夹爪仅 Linux，且需要 `litegrip-python` 与已拉起的 1 Mbit/s SocketCAN 接口；
+  改通道 / CAN ID / MST ID 后需重新连接。零力矩停止不能替代机械臂急停，夹爪链路也
+  不做自动重连。

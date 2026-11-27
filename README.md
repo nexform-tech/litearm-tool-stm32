@@ -207,8 +207,12 @@ from upstream `dfu-flash` and must not be rewritten here).
 pip install -e ../litearm-python     # interaction layer (>= 2.4.0)
 pip install -r requirements.txt
 python3 main.py                       # a normal user is enough if the port is in the dialout group
+python3 main.py --fake                # no hardware: SDK fake transport, auto-connects
 python3 main.py --activation-url https://act.nexform.tech   # activation service (production by default)
 ```
+
+`--fake` never touches the serial port; it is for demos, training, and UI work without an arm.
+The fake firmware must not be used to judge real motion or safety limits.
 
 After launch: choose the port in the top bar → connect → the firmware version appears in the top
 bar (for example `Litearm1.12.3-7J`). The connection checks the firmware naming convention
@@ -234,11 +238,13 @@ backups, so history survives a restart; diagnostics bundles carry the path, not 
 
 **LiteGrip (optional, Linux only).** Install `requirements-gripper.txt`, bring up SocketCAN at
 1 Mbit/s (`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`), then use the
-**Gripper** page. On Windows or without `litegrip-python` the page stays visible but disabled and
-states why. Channel / CAN ID / MST ID take effect on reconnect; calibration decides travel and
-direction, and the SDK refuses motion until one is loaded. The stop button sends a zero-torque
-frame and disables the motor while an action is in flight (so a running grasp stops), not an
-emergency stop for the arm.
+**Gripper** page. The channel drop-down lists the kernel's CAN interfaces
+(`/sys/class/net/*/type` = `ARPHRD_CAN` 280) and still accepts a typed name that is not listed.
+On Windows or without `litegrip-python` the page stays visible but disabled and states why.
+Channel / CAN ID / MST ID take effect on reconnect; calibration decides travel and direction, and
+the SDK refuses motion until one is loaded. The stop button sends a zero-torque frame and disables
+the motor while an action is in flight (so a running grasp stops), not an emergency stop for the
+arm.
 
 **Windows build.** Run `powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1`
 from the repository root. It creates a clean venv, installs `litearm-python` from the sibling
@@ -250,6 +256,19 @@ and is not in the Windows bundle. DFU (WinUSB) and 3D OpenGL acceptance remain w
 The firmware upgrade page needs `pyusb` + `libusb-package` (installed by `requirements.txt`).
 On Linux add the DFU udev rule shown in [Firmware upgrade](#firmware-upgrade-usb-dfu); on Windows
 install ST's WinUSB driver for the DFU device.
+
+**Release artifacts.** On every new tag the release workflow builds and attaches:
+
+- `litearm-tool-stm32-<version>-linux-x86_64.tar.gz` — the portable onedir bundle;
+- `litearm-tool-stm32_<version>_amd64.deb` — the same bundle under `/opt`, plus a desktop entry and
+  a udev rule that grants the logged-in desktop user access (`uaccess`) to the arm CDC port and the
+  STM32 DFU bootloader, so there is no `dialout` group and no re-login;
+- `litearm-tool-stm32-<version>-windows-x86_64.zip` — the onedir bundle;
+- a `.sha256` sidecar for each artifact.
+
+The package job runs the offline suite before freezing, then installs and starts the `.deb` on the
+build host. The archive is built on Ubuntu 22.04, so its glibc floor is 2.35; the `.deb` declares
+that floor.
 
 ## Code organization
 
@@ -315,7 +334,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 631 passed (all offline, no hardware required)
+python3 -m pytest          # 640 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |

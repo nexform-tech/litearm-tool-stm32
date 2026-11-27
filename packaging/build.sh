@@ -28,7 +28,10 @@ BUILD_VENV="${BUILD_VENV:-/tmp/litearm-tool-build-venv}"
 PYTHON="${PYTHON:-python3}"
 SDK_SRC="${PYLITEARM_STM32:-$ROOT/../litearm-python}"
 PKG_NAME="litearm-tool-stm32"
-VERSION="$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$ROOT/pyproject.toml" | head -1)"
+# 发布构建用 tag 的版本（`LITEARM_TOOL_VERSION`），本地构建回落到 manifest。
+# manifest 的版本号是占位/开发版本，release 的唯一版本来源是 tag。
+VERSION="${LITEARM_TOOL_VERSION:-$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$ROOT/pyproject.toml" | head -1)}"
+VERSION="${VERSION#v}"
 ARCH="$(uname -m)"
 BUNDLE="$PKG_NAME-$VERSION-linux-$ARCH"
 

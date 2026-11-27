@@ -175,8 +175,11 @@ SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到�
 pip install -e ../litearm-python     # 交互层依赖（>= 2.4.0）
 pip install -r requirements.txt
 python3 main.py                       # 普通用户即可（串口在 dialout 组则无需 root）
+python3 main.py --fake                # 无硬件演示：SDK 假传输，自动接上假设备
 python3 main.py --activation-url https://act.nexform.tech   # 指定激活服务（默认即生产地址）
 ```
+
+`--fake` 不碰真实串口，适合演示、培训和没有硬件时的 UI 开发；假固件不能用来判断真实运动或安全边界。
 
 启动后：顶栏选串口 → 连接 → 顶栏显示固件版本（如 `Litearm1.12.3-7J`）。
 连接时会校验固件版本约定（最低 1.5.0）。总览页随 100Hz 主动上报自动刷新；
@@ -199,8 +202,9 @@ Windows 是 `%LOCALAPPDATA%\litearm-tool\Logs`），单文件 5 MB、保留 5 �
 
 **LiteGrip（可选，仅 Linux）。** 安装 `requirements-gripper.txt`，把 SocketCAN 以 1 Mbit/s
 拉起（`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`），再进
-「夹爪」页。Windows 或未安装 `litegrip-python` 时页面保留但禁用连接并写明原因。通道 /
-CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。停止按钮发
+「夹爪」页。通道下拉列出内核枚举到的 CAN 接口（`/sys/class/net/*/type` = `ARPHRD_CAN` 280），
+也允许手填未列出的名字。Windows 或未安装 `litegrip-python` 时页面保留但禁用连接并写明原因。
+通道 / CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。停止按钮发
 零力矩帧，动作在途时并失能电机以中止，不是机械臂急停。
 
 **Windows 打包。** 在仓库根目录运行
@@ -213,6 +217,18 @@ USB CDC 驱动；端口列表为空时装 STM32 VCP 驱动。夹爪仅 Linux，�
 固件升级页需要 `pyusb` + `libusb-package`（`requirements.txt` 已包含）。Linux 上按
 [固件升级](#固件升级usb-dfu) 里的 udev 规则配置；Windows 上给 DFU 设备安装 ST 的 WinUSB
 驱动。
+
+**发布产物。** 每次新 tag 的 release 工作流会构建并附上：
+
+- `litearm-tool-stm32-<版本>-linux-x86_64.tar.gz` —— 便携的 onedir 包；
+- `litearm-tool-stm32_<版本>_amd64.deb` —— 同一份 bundle 装到 `/opt`，外加桌面项和一条 udev
+  规则：机械臂 CDC 与 STM32 DFU bootloader 都用 `uaccess` 授权给桌面用户，不用加 `dialout`、
+  不用重新登录；
+- `litearm-tool-stm32-<版本>-windows-x86_64.zip` —— Windows onedir 包；
+- 每个产物一个 `.sha256` 旁文件。
+
+打包 job 先跑离线测试再冻结，然后在构建机上安装并启动 `.deb` 做冒烟。Linux 包在 Ubuntu
+22.04 上构建，glibc 下限 2.35，`.deb` 里声明了这个下限。
 
 ## 代码组织
 
@@ -277,7 +293,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 631 passed（全部离线，无需硬件）
+python3 -m pytest          # 640 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |

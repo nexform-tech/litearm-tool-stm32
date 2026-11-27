@@ -51,9 +51,11 @@ ONLINE_TEXT = "● 在线"
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings, parent=None, *, log_dir=None):
+    def __init__(self, settings, parent=None, *, log_dir=None,
+                 arm_factory=None, fake: bool = False):
         super().__init__(parent)
         self._settings = settings
+        self._fake = bool(fake)
         self._armed = False
         self._fault_blocked = False
         self._n = 0
@@ -71,6 +73,7 @@ class MainWindow(QMainWindow):
 
         self.bridge = GuiBridge()
         self.worker = SdkWorker(
+            arm_factory=arm_factory,
             log=self._log_from_worker,
             on_online=lambda ok, why: self.bridge.sig_online.emit(ok, why),
             on_task=lambda res: self.bridge.sig_task.emit(res, None),
@@ -92,6 +95,10 @@ class MainWindow(QMainWindow):
 
         self._log("[INFO] LiteArm Tool STM32 —— 交互层经 litearm；"
                   "硬防护权威仍在固件")
+        if self._fake:
+            self.setWindowTitle("LiteArm Tool STM32 — FAKE")
+            self._log("[INFO] --fake 模式：SDK 假传输，不连接真实串口")
+            QTimer.singleShot(0, self.connect_fake)
 
     # ================= 界面 =================
     def _build_ui(self):
@@ -414,6 +421,10 @@ class MainWindow(QMainWindow):
 
     # ================= 串口 =================
     def _refresh_ports(self):
+        if self._fake:
+            self.combo.clear()
+            self.combo.addItem("假设备 (--fake)", "fake")
+            return
         cur = self.combo.currentData()
         self.combo.clear()
         for r in ports_mod.find_ports():
@@ -422,6 +433,14 @@ class MainWindow(QMainWindow):
             i = self.combo.findData(cur)
             if i >= 0:
                 self.combo.setCurrentIndex(i)
+
+    def connect_fake(self):
+        """`--fake` 启动后自动接上假设备（等主窗口事件循环起来再连）。"""
+        i = self.combo.findData("fake")
+        if i >= 0:
+            self.combo.setCurrentIndex(i)
+        if not self._connected:
+            self._toggle_connect()
 
     def _current_device(self):
         return self.combo.currentData()

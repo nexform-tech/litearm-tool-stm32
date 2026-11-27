@@ -4,6 +4,8 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1
 #   # 指定 SDK 源码 / 解释器 / 输出目录：
 #   powershell -NoProfile -File packaging\build-windows.ps1 -SdkSrc C:\src\litearm-python
+#   # 发布构建：版本取 tag，解释器由 CI 提供：
+#   powershell -NoProfile -File packaging\build-windows.ps1 -PythonExe C:\...\python.exe -Version 1.2.3
 #
 # 前置：Python 3.10+（`py -3.14` 可用）、能访问 GitHub/PyPI。目标机不需要 Python。
 # 产物：packaging\out\litearm-tool-stm32-<版本>-windows-x86_64\ 与同名 .zip
@@ -16,6 +18,10 @@
 param(
     [string]$PythonLauncher = "py",
     [string]$PythonVersion = "-3.14",
+    # CI 里用 actions/setup-python 的解释器建 venv；给了它就不再走 py 启动器。
+    [string]$PythonExe = "",
+    # 发布构建用 tag 的版本；留空时回落到 pyproject.toml。
+    [string]$Version = "",
     [string]$SdkSrc = "",
     [string]$OutDir = ""
 )
@@ -45,8 +51,14 @@ Say "1/6 备好干净 venv"
 $Venv = Join-Path $OutDir "build-venv"
 $Vpy = Join-Path $Venv "Scripts\python.exe"
 if (-not (Test-Path $Vpy)) {
-    & $PythonLauncher $PythonVersion -m venv $Venv
-    if ($LASTEXITCODE -ne 0) { throw "建 venv 失败（$PythonLauncher $PythonVersion）" }
+    if ($PythonExe) {
+        & $PythonExe -m venv $Venv
+    } else {
+        & $PythonLauncher $PythonVersion -m venv $Venv
+    }
+    if ($LASTEXITCODE -ne 0) {
+        throw "建 venv 失败（$PythonExe / $PythonLauncher $PythonVersion）"
+    }
 }
 & $Vpy -c "import sys; print('  Python', sys.version.split()[0], sys.executable)"
 
@@ -95,8 +107,11 @@ if ($pyiCode -ne 0) {
 Write-Host "  日志: $Log"
 
 Say "5/6 组装交付目录"
-$Version = (Select-String -Path (Join-Path $Root "pyproject.toml") `
-    -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+if (-not $Version) {
+    $Version = (Select-String -Path (Join-Path $Root "pyproject.toml") `
+        -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+}
+$Version = $Version.TrimStart('v')
 $Bundle = "litearm-tool-stm32-$Version-windows-x86_64"
 $Stage = Join-Path $OutDir $Bundle
 Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue

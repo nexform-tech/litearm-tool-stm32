@@ -15,7 +15,7 @@ pytest.importorskip("numpy")
 from litetool import settings as settings_mod                 # noqa: E402
 from tests.fake_arm import make_state                         # noqa: E402
 
-PAGE_KEYS = ("overview", "capture", "machine", "fault", "joint", "cart",
+PAGE_KEYS = ("overview", "capture", "log", "machine", "fault", "joint", "cart",
              "zerog", "params", "install", "guide", "diag")
 
 
@@ -51,6 +51,13 @@ def test_activate_raises_an_existing_window():
     w.hide()
     w.activate()
     assert w.isVisible()
+    w.close()
+
+
+def test_log_page_is_wired_to_main_window_logs():
+    w = _win()
+    assert w.pages["log"].table.rowCount() >= 1, "启动那行 INFO 应进入日志页"
+    assert w.pages["log"].slog is w.slog
     w.close()
 
 

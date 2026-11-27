@@ -253,6 +253,10 @@ checkout (or `-SdkSrc`), runs the offline suite, then produces
 USB CDC driver; if the port list is empty, install the STM32 VCP driver. The gripper is Linux-only
 and is not in the Windows bundle. DFU (WinUSB) and 3D OpenGL acceptance remain with #19 / #17.
 
+If the 3D viewport stays black on Windows (common over remote desktop or a virtual display), set
+`scene_software_gl: true` in `config.yaml` (or `LITEARM_TOOL_SOFTWARE_GL=1`) to run the 3D page on
+Qt's bundled Mesa software renderer. It is slower, but it does not need a desktop OpenGL driver.
+
 The firmware upgrade page needs `pyusb` + `libusb-package` (installed by `requirements.txt`).
 On Linux add the DFU udev rule shown in [Firmware upgrade](#firmware-upgrade-usb-dfu); on Windows
 install ST's WinUSB driver for the DFU device.

@@ -214,6 +214,10 @@ venv、从同级 `litearm-python`（或 `-SdkSrc`）装 SDK、跑离线测试，
 USB CDC 驱动；端口列表为空时装 STM32 VCP 驱动。夹爪仅 Linux，不进 Windows 包；DFU（WinUSB）
 与 3D OpenGL 的 Windows 验收分别留在 #19 / #17。
 
+Windows 上 3D 视口黑屏（远程桌面 / 虚拟显示器常见）时，把 `config.yaml` 的
+`scene_software_gl` 设为 `true`（或设 `LITEARM_TOOL_SOFTWARE_GL=1`），3D 页会改用 Qt 自带的
+Mesa 软件渲染：帧率低一些，但不需要桌面 OpenGL 驱动。
+
 固件升级页需要 `pyusb` + `libusb-package`（`requirements.txt` 已包含）。Linux 上按
 [固件升级](#固件升级usb-dfu) 里的 udev 规则配置；Windows 上给 DFU 设备安装 ST 的 WinUSB
 驱动。

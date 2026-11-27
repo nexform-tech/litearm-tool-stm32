@@ -23,7 +23,7 @@ _RANGES = {
 }
 
 #: 布尔字段（`true`/`false`）；与数值字段分开校验。
-_BOOLS = {"scene_lod"}
+_BOOLS = {"scene_lod", "scene_software_gl"}
 
 
 @dataclass
@@ -40,6 +40,7 @@ class Settings:
     pose_confirm_rot: float = 0.30        # movep 姿态幅度确认阈值 (rad)
     scene_msaa: int = 0                   # 3D 视图 MSAA 采样数 (0=关闭，软件渲染更流畅)
     scene_lod: bool = True                # 3D 用 LOD 网格（约 45k 三角形）
+    scene_software_gl: bool = False       # Windows: 强制 Qt 自带的 Mesa 软件 GL
 
     @classmethod
     def load(cls, path=None) -> "Settings":

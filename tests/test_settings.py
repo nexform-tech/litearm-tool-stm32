@@ -50,3 +50,10 @@ def test_scene_lod_rejects_non_bool(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text("scene_lod: 1\n", encoding="utf-8")
     assert settings.Settings.load(str(cfg)).scene_lod is True
+
+
+def test_scene_software_gl_defaults_off_and_parses_bool(tmp_path):
+    assert settings.Settings.load(None).scene_software_gl is False
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("scene_software_gl: true\n", encoding="utf-8")
+    assert settings.Settings.load(str(cfg)).scene_software_gl is True

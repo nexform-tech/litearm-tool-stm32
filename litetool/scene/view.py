@@ -6,6 +6,9 @@
 ⚠ Linux 上 PyOpenGL 默认选 EGL 时找不到 Qt 的 GLX context（实测报
 `Attempt to retrieve context when no valid context`）。`litetool.app` 会在
 Qt 之前设 `PYOPENGL_PLATFORM=glx`；单独跑本模块时也要设。
+
+Windows 的软件 GL 后备见 `gl_backend.py`：必须在 import pyqtgraph.opengl
+之前调用，否则 PyOpenGL 已经绑到系统 `opengl32.dll` 上。
 """
 from __future__ import annotations
 
@@ -17,11 +20,16 @@ from PyQt5.QtCore import QTimer
 from PyQt5.QtGui import QMatrix4x4, QVector3D
 from PyQt5.QtWidgets import QSizePolicy
 
-import pyqtgraph.opengl as gl
-from OpenGL import GL
-from pyqtgraph.opengl.shaders import FragmentShader, ShaderProgram, VertexShader
+from litetool.scene.gl_backend import prepare_software_gl
 
-from litetool.scene.urdf_model import UrdfModel
+prepare_software_gl()
+
+import pyqtgraph.opengl as gl  # noqa: E402
+from OpenGL import GL  # noqa: E402
+from pyqtgraph.opengl.shaders import (FragmentShader, ShaderProgram,  # noqa: E402
+                                      VertexShader)
+
+from litetool.scene.urdf_model import UrdfModel  # noqa: E402
 
 #: 与 tool 深色界面一致的克制配色；末位是 ee/工具强调色。
 PALETTE = (

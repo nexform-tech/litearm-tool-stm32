@@ -5,8 +5,9 @@ This document maps the capabilities of `litearm-studio` (GitHub `main`, 2026-11-
 the remaining work. It is the deliverable for issue #15 and the capability/migration boundary
 required by planning#18.
 
-Status is as of **2026-11-27**, after the first implementation pass (PR #21–#29). All of them
-except #17 have merged; #17 remains a draft pending target-GPU, Windows and real-arm acceptance.
+Status is as of **2026-11-27**, after the implementation pass through PR #36. All implementation
+and packaging PRs are merged. Remaining work is the English UI (#12), joint zeroing (#20), and
+hardware acceptance on a real arm, gripper, DFU board and Windows CDC.
 
 # Studio → tool capability matrix
 
@@ -24,7 +25,7 @@ except #17 have merged; #17 remains a draft pending target-GPU, Windows and real
 | Cartesian absolute | `movep` | `get_tcp` / `ik` / `move_p` | Delivered |
 | Cartesian jog / straight line / stop | Base/tool jog, `movel`, controlled stop, takeover | Jog + `movel` + controlled stop + explicit `movej` takeover | Delivered, PR #25 |
 | Zero-G hand guiding | Yes | Yes, SDK keep-alive, exit-to-hold | Delivered |
-| LiteGrip gripper | Page, telemetry, calibration, settings (Linux only) | Page + owner thread, telemetry, calibration, zero-torque stop | Delivered, PR #28 (Linux only; hardware acceptance pending) |
+| LiteGrip gripper | Page, telemetry, calibration, settings (Linux only) | Page + owner thread, telemetry, calibration, zero-torque stop, CAN channel enumeration | Delivered, PR #28/#34 (Linux only; hardware acceptance pending) |
 | Activation | Page + service client | Same contract, stdlib client | Delivered, PR #18 |
 | USB DFU firmware upgrade | Page + DfuSe engine | DfuSe engine copied verbatim, tool adapter | Delivered, PR #19 (real-board acceptance pending) |
 | Parameters / feed-forward | Per-joint gains and limits | Full catalog, 0x26/0x27/0x28, ff_mask, import/export, flash | Delivered, deeper than studio |
@@ -32,13 +33,14 @@ except #17 have merged; #17 remains a draft pending target-GPU, Windows and real
 | Diagnostics | Partial | KIN_BENCH, reset reason, link counters, diagnostics bundle | Delivered, deeper than studio |
 | Fault detail | Basic | Per-axis reason + action, 0x51 on demand, event history | Delivered, deeper than studio |
 | 300 Hz control-tick capture | No (20 Hz browser telemetry) | Firmware capture, preview, raw + parsed CSV | Delivered, including CSV, PR #22 |
-| 3D digital twin | Yes | URDF/STL, FK, 60 Hz smoothed render, LOD | Draft, PR #17 (target GPU / Windows / real-arm acceptance pending) |
+| 3D digital twin | Yes | URDF/STL, FK, 60 Hz smoothed render, LOD; Windows Mesa fallback | Delivered, PR #17 (target-GPU 60 FPS / real-arm acceptance pending) |
 | Structured logs | JSONL + web viewer | JSONL, redaction, PyQt viewer, restart history | Delivered, PR #23 |
 | CSV export | Browser telemetry export | Plot window + capture samples | Delivered, PR #22 |
-| Single instance / fake device | Daemon lock + `--fake` | Single-instance lock delivered in PR #21; fake device in draft PR #17 | Partially delivered; #17 pending |
+| Single instance / fake device | Daemon lock + `--fake` | Single-instance lock and `--fake` demo mode | Delivered, PR #21 + #33 |
 | Chinese / English UI | Yes | Chinese only | Not started, issue #12 |
-| Light / dark theme | Yes | Dark only | Not started; no issue |
-| Windows build | Yes (exe) | PyInstaller onedir script; offline build verified on the host Windows | Delivered, PR #29 (real CDC/DFU/OpenGL pending) |
+| Light / dark theme | Yes | Dark only | Not migrated; add on request |
+| Windows build | Yes (exe) | PyInstaller onedir; tag releases build Linux and Windows bundles | Delivered, PR #29/#35/#36 (real CDC/DFU acceptance pending; Windows/OpenGL verified, including software-GL fallback) |
+| Release artifacts | Studio desktop build | Every tag attaches Linux tar.gz + `.deb` + Windows zip with `.sha256` sidecars | Delivered, PR #35/#36 |
 | Joint zero-offset calibration | Not a studio feature (`zeroJoints` = firmware home) | None | New scope, issue #20; firmware command IDs unassigned |
 
 ## Migration boundaries
@@ -66,34 +68,19 @@ except #17 have merged; #17 remains a draft pending target-GPU, Windows and real
 | Studio web i18n stack | Not ported; issue #12 uses Qt translation or a string table. |
 | Theme toggle | Not ported for now; add only on request. |
 
-## Remaining work and order
+## Remaining work
 
-The stages are ordered by dependency and risk. Issue numbers are in `litearm-tool-stm32` unless
-stated otherwise.
+All capabilities in the map are delivered except the rows marked otherwise. What is left:
 
-| Stage | Issue | Depends on | Exit criteria |
+| Item | Issue | Depends on | Exit criteria |
 | --- | --- | --- | --- |
-| M0 | #13 single instance + fake device | — | Second launch focuses the first window; `--fake` runs without a port |
-| M0 | #10 structured logs | — | JSONL on disk, filterable page, restart history |
-| M0 | #11 CSV export | — | Plot window and capture samples export with units |
-| M0 | #15 this document | — | Capability map and boundaries accepted |
-| M1 | #6 link recovery | — | Replug/port change recovers without restoring the unlock |
-| M1 | #5 Cartesian jog + `movel` + stop | #6; firmware `LITEARM_CART_PLAN` | Bench and real-arm acceptance |
-| M1 | #4 ready pose (sliders declined) | — | One-click ready pose; numeric inputs stay. PR #27 |
-| M2 | #8 activation | Activation service + unactivated arm | Unactivated → activated → enable |
-| M2 | #9 DFU | #8 for branch stacking; real board | Success, cancel, unplug runs |
-| M2 | #16 3D digital twin | Target GPU and Windows | 60 FPS at 1080p; ≤10 MB packaging delta |
-| M2 | #7 LiteGrip gripper | `litegrip` SDK + CAN adapter | Read/write/calibrate with telemetry. PR #28 |
-| M3 | #12 Chinese/English UI | M1/M2 strings stable | Language switch without restart |
-| M3 | #14 Windows packaging | M1/M2 features | Frozen build starts and connects on Windows. Offline build delivered in PR #29; real CDC/DFU/OpenGL pending |
-| M3 | #20 joint zeroing | Firmware command IDs and persistence | Manual zero + auto approach on hardware |
+| Chinese/English UI | #12 | Stable strings | Language switch without restart |
+| Joint zero-offset calibration | #20 | Firmware command IDs and persistence | Manual zero + auto approach on hardware |
+| Hardware acceptance | #5, #7, #9, #14, #16 | Real arm, gripper CAN adapter, DFU board, Windows host | Cartesian/jog, gripper, DFU success/cancel/unplug, Windows CDC/DFU; 3D at 60 FPS on target GPU |
 
-Issue #3 (3D spike) reached a positive conclusion: `pyqtgraph.opengl` plus PyOpenGL works in the
-tool's PyQt5 stack. The implementation is tracked by #16; do not open a separate 3D track.
-
-The first implementation pass (PR #21–#29) has merged, except #17, which remains a draft pending
-hardware. Single instance and fake mode are split across #21 and #17; ready pose is #27; gripper is
-#28; Windows packaging is #29.
+The implementation pass (PR #21–#36) is merged. Fake mode was split from the 3D work into #33; the
+release pipeline (#35) builds Linux and Windows bundles on every tag; #36 fixed the Windows
+PowerShell BOM. Issues #3 and #16 are delivered by #17 — do not open a second 3D track.
 
 ## Acceptance mapping (planning#18)
 
@@ -101,5 +88,5 @@ hardware. Single instance and fake mode are split across #21 and #17; ready pose
 | --- | --- |
 | Core flows: connect, control, state/plot, logs, settings | Capability map above; pages and tests in this repository |
 | Reuse transport, protocol, state chain; key behavior tested | Single-owner `SdkWorker`; offline suites for the state hook, safety gates, logs and jog math |
-| Packaged build starts and connects on the target platform | Linux PyInstaller onedir; on-hardware checklist; Windows is issue #14 |
+| Packaged build starts and connects on the target platform | Every tag builds the Linux tar.gz/.deb and the Windows zip with checksums (PR #35); real CDC/DFU acceptance remains |
 | Capability comparison and migration boundaries documented | This document |

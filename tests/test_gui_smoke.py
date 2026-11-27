@@ -44,6 +44,16 @@ def test_nav_has_three_groups_and_all_pages_registered():
     w.close()
 
 
+def test_activate_raises_an_existing_window():
+    """第二个实例启动时走这里：窗口已隐藏/最小化也要能重新显示。"""
+    w = _win()
+    w.show()
+    w.hide()
+    w.activate()
+    assert w.isVisible()
+    w.close()
+
+
 def test_tick_with_full_state_touches_every_page():
     """一帧真实形状的状态喂进去，各页都不该抛异常。"""
     w = _win()

@@ -162,12 +162,17 @@ bench are detected from the status-frame length.
 
 Configuration lives in [config.yaml](config.yaml) (interaction settings only, no limits).
 
+**Single instance only.** A second launch does not open the serial port; it brings the running
+window to the front and exits. The lock is a local socket (`QLocalServer`), so a crash is cleaned
+up by the next launch. The second process shows a short message explaining why it is exiting.
+
 ## Code organization
 
 ```text
 main.py                 Entry point (thin shell, forwards to litetool.app:main)
 litetool/
   app.py                Launch entry (`python3 -m litetool` / the `litearm-tool` command)
+  instance.py           Single-instance lock (local socket; second launch focuses the window)
   sdk_worker.py         ★ the only thread that owns pa.Arm + task queue + state hook
   params_io.py          Parameter read/write shape layer over pa.Arm (pages want (ok, code))
   diagnostics.py        Error-code text / diagnostics bundle / link-counter summary

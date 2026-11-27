@@ -12,6 +12,9 @@ from PyQt5.QtWidgets import (QCheckBox, QComboBox, QGridLayout, QLabel,
 from litetool.gui.pages.common import (JointRow, LockBanner, group, hint, note,
                                        row, spin)
 
+#: 就绪姿态（与 studio 同名常量）。按当前轴数裁剪，缺的补 0。
+READY_POSE = (0.0, 0.5, 0.0, -1.0, 0.0, 0.6, 0.0)
+
 
 class JointPage(QWidget):
     movej = pyqtSignal(list, float)                                  # qs, speed
@@ -36,6 +39,11 @@ class JointPage(QWidget):
         self.mj_speed = spin(0.01, settings.speed_max_ui, settings.default_speed, 0.05)
         self.btn_mj = QPushButton("下发 movej")
         self.btn_mj.clicked.connect(self._emit_mj)
+        self.btn_ready = QPushButton("就绪姿态")
+        self.btn_ready.setToolTip(
+            "把目标填成就绪姿态 [0, 0.5, 0, -1, 0, 0.6, 0]（按轴数裁剪/补 0）\n"
+            "并立即下发 movej。仍走运动解锁与 Δq 确认。")
+        self.btn_ready.clicked.connect(self._emit_ready)
         self.sup_cb = QCheckBox("接管在途运动")
         self.sup_cb.setToolTip(
             "勾选后直接写一条 movej 旁路帧：固件会作废在途的笛卡尔规划（点动/直线），\n"
@@ -46,7 +54,7 @@ class JointPage(QWidget):
         g_mj = group("move_j —— 关节轨迹（绝对角 rad，固件 S 曲线自完成 + 到位静止保持）",
                      self.mj_row,
                      row(QLabel("速度倍率 (0..1)"), self.mj_speed,
-                         self.sup_cb, self.btn_mj))
+                         self.btn_ready, self.sup_cb, self.btn_mj))
 
         # ---------------- move_js ----------------
         self.js_q = JointRow()
@@ -145,7 +153,7 @@ class JointPage(QWidget):
             can_move=self._armed and not self._fault_blocked,
             fault_blocked=self._fault_blocked)
         can = ready and not self._busy
-        for b in (self.btn_js, self.btn_mm, self.btn_ma):
+        for b in (self.btn_ready, self.btn_js, self.btn_mm, self.btn_ma):
             b.setEnabled(can and self._n > 0)
         # 接管是**在忙的时候**才用得上的入口：勾了接管，movej 按钮就不能被忙态禁用。
         self.sup_cb.setEnabled(ready)
@@ -161,6 +169,12 @@ class JointPage(QWidget):
             sp.setEnabled(True)
 
     # ---------------- 取值 ----------------
+    def _emit_ready(self):
+        target = [READY_POSE[i] if i < len(READY_POSE) else 0.0
+                  for i in range(self._n)]
+        self.mj_row.set_value(target)      # 让操作员看见将要下发的目标
+        self.movej.emit(target, self.mj_speed.value())
+
     def _emit_mj(self):
         qs, speed = self.mj_row.value(), self.mj_speed.value()
         if self.sup_cb.isChecked():

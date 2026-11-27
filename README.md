@@ -42,12 +42,13 @@ three navigation groups on the left + a collapsible log at the bottom.
 
 | Group | Page | What it does |
 | --- | --- | --- |
-| Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot) |
-| | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes |
+| Monitor | **Overview** | Per-joint state table + 100 Hz three-pane linked plot (the old "Monitor" and "Plot" pages merged; one click enlarges the plot; CSV export of the selected joints with units, temperatures and drive error codes) |
+| | **Capture** | Firmware 300 Hz control-tick capture: record / progress / read-back preview / export raw bytes / export the parsed samples as CSV |
+| | **Logs** | Structured JSONL: live view / filter by level, category and text / raw-record detail / history read-back across restarts / export JSONL |
 | | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
 | Operate | **Machine** | Enable / disable / reset / clear faults / home / global speed / park / read state / reset reason |
-| | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all` |
-| | **Cartesian** | Read TCP / `ik` solve / `move_p` / `movel` (straight line) / base- or tool-frame jog (hold to run, release to stop) / controlled stop / explicit `movej` takeover |
+| | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all`; one-click ready pose `[0, 0.5, 0, -1, 0, 0.6, 0]` (trimmed/padded to the axis count); explicit `movej` takeover |
+| | **Cartesian** | Read TCP / `ik` solve / `move_p` / `movel` (straight line) / base- or tool-frame jog (hold to run, release to stop) / controlled stop |
 | | **Zero-G** | Hand-guiding (keep-alive is maintained by the SDK background thread; this tool sends no heartbeat frames) |
 | Tuning | **Parameters** | Joint parameters and the 0x26/0x27/0x28 feed-forward family: read back / edit and send / ff_mask / batch import-export / persist to flash / factory reset |
 | | **Tuning guide** | Formulas and symbol mapping, read-before-you-start notes, symptom→parameter quick table, expandable per-parameter details |
@@ -172,13 +173,29 @@ bench are detected from the status-frame length.
 
 Configuration lives in [config.yaml](config.yaml) (interaction settings only, no limits).
 
+**Single instance only.** A second launch does not open the serial port; it brings the running
+window to the front and exits. The lock is a local socket (`QLocalServer`), so a crash is cleaned
+up by the next launch. The second process shows a short message explaining why it is exiting.
+
+**Link recovery.** If the status stream goes silent or raises a transport error, the tool declares
+the link offline and retries automatically: the last port first, then every enumerated candidate,
+with exponential backoff (0.5 s → 5 s). Commands still queued from the old link are dropped, and
+the motion unlock is never restored. Clicking **Disconnect** stops the retries — a deliberate user
+action is not overridden by auto-reconnect.
+
+Structured logs go to `$XDG_STATE_HOME/litearm-tool/tool.jsonl` (`~/.local/state/...` by default;
+`%LOCALAPPDATA%\litearm-tool\Logs` on Windows), 5 MB per file with five rotated backups.
+`LITEARM_TOOL_LOG_DIR` overrides the directory. The **Logs** page reads the current file and its
+backups, so history survives a restart; diagnostics bundles carry the path, not the contents.
+
 ## Code organization
 
 ```text
 main.py                 Entry point (thin shell, forwards to litetool.app:main)
 litetool/
   app.py                Launch entry (`python3 -m litetool` / the `litearm-tool` command)
-  sdk_worker.py         ★ the only thread that owns pa.Arm + task queue + state hook
+  instance.py           Single-instance lock (local socket; second launch focuses the window)
+  sdk_worker.py         ★ the only thread that owns pa.Arm + task queue + state hook + link recovery
   params_io.py          Parameter read/write shape layer over pa.Arm (pages want (ok, code))
   diagnostics.py        Error-code text / diagnostics bundle / link-counter summary
   model_io.py           HYY model and parameter import/export
@@ -191,6 +208,8 @@ litetool/
   tuning_guide.py       Tuning-guide content (formulas / symbol mapping / symptom table)
   firmware_defaults.py  Parses firmware defaults.c (source of truth for presets/ and consistency checks)
   settings.py           config.yaml merge (type + range validation)
+  csv_export.py         CSV writer for the plot window and 300 Hz capture (units in headers)
+  obs.py                Structured logging (JSONL, OpenTelemetry field names, redaction)
   gui/
     bridge.py           Cross-thread Qt signal bridge (log / task result / online state)
     widgets.py          Log panel / persistent status strip / joint table / banner / left navigation
@@ -201,6 +220,7 @@ litetool/
       zerog_page.py     Zero-G        params_page.py   Parameters
       guide_page.py     Tuning guide  diag_page.py     Diagnostics
       installation_page.py  Installation direction
+      log_page.py       Structured log viewer
       common.py         Shared pose/joint input widgets
       plot_pane.py      Three-pane linked plot component
     main_window.py      Main-window assembly + command gate (Δq / unlock / emergency flows)
@@ -216,7 +236,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 445 passed (all offline, no hardware required)
+python3 -m pytest          # 491 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -244,6 +264,7 @@ python3 -m pytest          # 445 passed (all offline, no hardware required)
    - [ ] Choose the port in the top bar → connect → the status dot turns green "● Online" and the firmware version appears
    - [ ] The persistent status strip shows mode=INIT, frame rate ≈ 100 Hz, seq increasing with no jumps (dropped frames ≈ 0)
    - [ ] The overview table shows q/dq/tau/temperature/err per joint; unplug the serial cable → red "● Offline", all command buttons disabled
+   - [ ] After the unplug the top bar shows `● Reconnecting (n)`; replug → it reconnects and stays motion-locked; any command queued before the unplug was dropped
    - [ ] Press the emergency stop while disconnected → it must clearly say "emergency stop NOT sent", never "disabled"
 2. **Plot**: the overview scrolls with the state; the J1–J7 channel checkboxes switch traces; "Freeze" pauses and "Clear" redraws; [Enlarge plot] collapses the state table. **Send one `movej` and confirm the plot keeps updating during the motion** (state hook).
 3. **Basic control** (the magnets will engage; support the arm):
@@ -253,6 +274,7 @@ python3 -m pytest          # 445 passed (all offline, no hardware required)
 4. **Motion commands** (start slow, sp=0.1):
    - [ ] `move_j` to current + 0.1 rad → small motion, arrives
    - [ ] `move_j` with a delta > 0.5 rad → Δq confirmation; cancelling sends nothing
+   - [ ] [Ready pose] fills the target with `[0, 0.5, 0, -1, 0, 0.6, 0]` and sends it through the same confirmation
    - [ ] Cartesian page [Read current TCP pose] returns a value; [Solve IK] returns 7 numbers; a small `move_p` arrives
    - [ ] Hold a jog direction for ~1 s → several small steps; release → the arm stops and holds; [Stop jog] also holds
    - [ ] `movel` a 10 mm straight line → arrives; the page refreshes TCP after the motion

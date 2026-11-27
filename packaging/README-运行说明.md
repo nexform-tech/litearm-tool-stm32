@@ -2,9 +2,14 @@
 
 这是 **litearm-tool-stm32** 的免安装版本：解压即用，**目标机不需要装 Python，也不需要装任何依赖**。
 
-> 本文档针对 **Linux 免安装包**。Windows 包用 `packaging\build-windows.ps1` 打出，
-> 解压后双击 `litearm-tool.exe`；Windows 10/11 自带 USB CDC 驱动，端口列表为空时装
-> STM32 VCP 驱动。夹爪仅 Linux，不在 Windows 包里。
+> 本文档针对 **Linux 免安装包（tar.gz）**。Ubuntu / Debian 用户优先用 release 里的
+> `.deb`：它把程序装到 `/opt`、注册桌面项，并用 udev 的 `uaccess` 授权机械臂 CDC 与
+> DFU 设备 —— 不用加 `dialout` 组，也不用重新登录。下面的 tar.gz 用法适用于其它发行版
+> 或不想装包的情况。
+>
+> Windows 包用 `packaging\build-windows.ps1` 打出，解压后双击 `litearm-tool.exe`；
+> Windows 10/11 自带 USB CDC 驱动，端口列表为空时装 STM32 VCP 驱动。夹爪仅 Linux，
+> 不在 Windows 包里。
 
 ---
 

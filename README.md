@@ -256,6 +256,19 @@ The firmware upgrade page needs `pyusb` + `libusb-package` (installed by `requir
 On Linux add the DFU udev rule shown in [Firmware upgrade](#firmware-upgrade-usb-dfu); on Windows
 install ST's WinUSB driver for the DFU device.
 
+**Release artifacts.** On every new tag the release workflow builds and attaches:
+
+- `litearm-tool-stm32-<version>-linux-x86_64.tar.gz` — the portable onedir bundle;
+- `litearm-tool-stm32_<version>_amd64.deb` — the same bundle under `/opt`, plus a desktop entry and
+  a udev rule that grants the logged-in desktop user access (`uaccess`) to the arm CDC port and the
+  STM32 DFU bootloader, so there is no `dialout` group and no re-login;
+- `litearm-tool-stm32-<version>-windows-x86_64.zip` — the onedir bundle;
+- a `.sha256` sidecar for each artifact.
+
+The package job runs the offline suite before freezing, then installs and starts the `.deb` on the
+build host. The archive is built on Ubuntu 22.04, so its glibc floor is 2.35; the `.deb` declares
+that floor.
+
 ## Code organization
 
 ```text
@@ -315,7 +328,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 619 passed (all offline, no hardware required)
+python3 -m pytest          # 621 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |

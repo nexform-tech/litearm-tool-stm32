@@ -217,6 +217,18 @@ USB CDC 驱动；端口列表为空时装 STM32 VCP 驱动。夹爪仅 Linux，�
 [固件升级](#固件升级usb-dfu) 里的 udev 规则配置；Windows 上给 DFU 设备安装 ST 的 WinUSB
 驱动。
 
+**发布产物。** 每次新 tag 的 release 工作流会构建并附上：
+
+- `litearm-tool-stm32-<版本>-linux-x86_64.tar.gz` —— 便携的 onedir 包；
+- `litearm-tool-stm32_<版本>_amd64.deb` —— 同一份 bundle 装到 `/opt`，外加桌面项和一条 udev
+  规则：机械臂 CDC 与 STM32 DFU bootloader 都用 `uaccess` 授权给桌面用户，不用加 `dialout`、
+  不用重新登录；
+- `litearm-tool-stm32-<版本>-windows-x86_64.zip` —— Windows onedir 包；
+- 每个产物一个 `.sha256` 旁文件。
+
+打包 job 先跑离线测试再冻结，然后在构建机上安装并启动 `.deb` 做冒烟。Linux 包在 Ubuntu
+22.04 上构建，glibc 下限 2.35，`.deb` 里声明了这个下限。
+
 ## 代码组织
 
 ```text
@@ -275,7 +287,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 619 passed（全部离线，无需硬件）
+python3 -m pytest          # 621 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |

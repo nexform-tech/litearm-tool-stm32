@@ -382,3 +382,34 @@ def test_full_upgrade_through_mainwindow_and_the_real_worker():
     assert w.worker.online is True
     w.worker.close()
     w.close()
+
+
+def test_closing_during_an_upgrade_requires_confirmation(monkeypatch):
+    """升级中的退出守卫必须真的挂在 closeEvent 上（曾经被同名方法覆盖成死代码）。"""
+    from PyQt5.QtWidgets import QMessageBox
+
+    _app()
+    w = MainWindow(settings_mod.Settings.load(None))
+    try:
+        w.pages["firmware"].is_running = lambda: True
+        monkeypatch.setattr(
+            QMessageBox, "warning",
+            staticmethod(lambda *a, **k: QMessageBox.No))
+
+        class Event:
+            def __init__(self):
+                self.ignored = False
+
+            def ignore(self):
+                self.ignored = True
+
+            def accept(self):
+                self.ignored = False
+
+        ev = Event()
+        w.closeEvent(ev)
+        assert ev.ignored, "升级中退出必须先确认，不能直接关窗"
+    finally:
+        w.pages["firmware"].is_running = lambda: False
+        w.worker.close()
+        w.close()

@@ -287,20 +287,6 @@ class MainWindow(QMainWindow):
             # 进页面时顺手重探一次 DFU（板子可能在别处插上/复位了）。
             self.pages["firmware"].refresh_status()
 
-    def closeEvent(self, event):
-        """升级烧到一半时退出，板子可能停在 bootloader —— 必须让人看见再决定。"""
-        fw = self.pages.get("firmware")
-        if fw is not None and fw.is_running():
-            reply = QMessageBox.warning(
-                self, "固件升级进行中",
-                "固件正在烧录/升级。现在退出会中断升级，可能让板子停在 "
-                "bootloader 或导致变砖。\n\n确定要退出吗？",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            if reply != QMessageBox.Yes:
-                event.ignore()
-                return
-        event.accept()
-
     def _on_guide(self, key: str):
         self.nav.select("guide")
         self._on_nav("guide")
@@ -945,6 +931,19 @@ class MainWindow(QMainWindow):
 
     # ================= 关闭 =================
     def closeEvent(self, ev):  # noqa: N802 - Qt 命名
+        # 升级烧到一半时退出，板子可能停在 bootloader —— 必须让人看见再决定。
+        # ⚠ 这段必须留在**这一个** closeEvent 里：Python 的类体里后定义的同名方法会
+        #   覆盖前一个；曾经把它写在前面，结果守卫是死代码。
+        fw = self.pages.get("firmware")
+        if fw is not None and fw.is_running():
+            reply = QMessageBox.warning(
+                self, "固件升级进行中",
+                "固件正在烧录/升级。现在退出会中断升级，可能让板子停在 "
+                "bootloader 或导致变砖。\n\n确定要退出吗？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                ev.ignore()
+                return
         self._timer.stop()
         self._ptimer.stop()
         try:

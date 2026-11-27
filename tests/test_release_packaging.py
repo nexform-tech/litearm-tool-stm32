@@ -28,6 +28,12 @@ def test_checksums_writes_one_sidecar_per_artifact(tmp_path):
         hashlib.sha256(b"beta").hexdigest()
 
 
+def test_windows_build_script_keeps_a_utf8_bom():
+    """Windows PowerShell 5.1 reads BOM-less UTF-8 as ANSI; this script has Chinese."""
+    data = (ROOT / "packaging" / "build-windows.ps1").read_bytes()
+    assert data.startswith(b"\xef\xbb\xbf")
+
+
 @pytest.mark.skipif(shutil.which("dpkg-deb") is None,
                     reason="dpkg-deb is only present on Debian/Ubuntu hosts")
 def test_deb_contains_the_launcher_desktop_entry_and_udev_rule(tmp_path):

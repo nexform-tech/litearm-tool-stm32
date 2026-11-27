@@ -1,4 +1,4 @@
-# Windows 打包脚本 —— 与 build.sh 同一条流水线（干净 venv + 测试闸门 + PyInstaller onedir）。
+﻿# Windows 打包脚本 —— 与 build.sh 同一条流水线（干净 venv + 测试闸门 + PyInstaller onedir）。
 #
 # 用法（在仓库根目录）：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1

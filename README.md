@@ -237,11 +237,13 @@ backups, so history survives a restart; diagnostics bundles carry the path, not 
 
 **LiteGrip (optional, Linux only).** Install `requirements-gripper.txt`, bring up SocketCAN at
 1 Mbit/s (`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`), then use the
-**Gripper** page. On Windows or without `litegrip-python` the page stays visible but disabled and
-states why. Channel / CAN ID / MST ID take effect on reconnect; calibration decides travel and
-direction, and the SDK refuses motion until one is loaded. The stop button sends a zero-torque
-frame and disables the motor while an action is in flight (so a running grasp stops), not an
-emergency stop for the arm.
+**Gripper** page. The channel drop-down lists the kernel's CAN interfaces
+(`/sys/class/net/*/type` = `ARPHRD_CAN` 280) and still accepts a typed name that is not listed.
+On Windows or without `litegrip-python` the page stays visible but disabled and states why.
+Channel / CAN ID / MST ID take effect on reconnect; calibration decides travel and direction, and
+the SDK refuses motion until one is loaded. The stop button sends a zero-torque frame and disables
+the motor while an action is in flight (so a running grasp stops), not an emergency stop for the
+arm.
 
 **Windows build.** Run `powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1`
 from the repository root. It creates a clean venv, installs `litearm-python` from the sibling
@@ -313,7 +315,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 614 passed (all offline, no hardware required)
+python3 -m pytest          # 619 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |

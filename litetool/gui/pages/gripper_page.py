@@ -14,7 +14,7 @@ from PyQt5.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
                              QMessageBox, QPlainTextEdit, QPushButton,
                              QVBoxLayout, QWidget)
 
-from litetool.gripper import GripperWorker
+from litetool.gripper import GripperWorker, list_channels
 from litetool.gui.pages.common import group, hint, note, row, spin
 from litetool.gui.widgets import mono_label
 
@@ -32,8 +32,16 @@ class GripperPage(QWidget):
         self._avail, self._why = self._worker.available()
 
         # ---------------- 连接 / 身份 ----------------
-        self.channel = QLineEdit("can0")
-        self.channel.setFixedWidth(90)
+        # 通道默认从内核枚举（/sys/class/net/type == 280）；枚举不到时仍保留 can0，
+        # 也允许手动输入（vcan0、驱动改了名字的 can3 等）。
+        self.channel = QComboBox()
+        self.channel.setEditable(True)
+        self.channel.setInsertPolicy(QComboBox.NoInsert)
+        self.channel.setFixedWidth(110)
+        self.channel.setToolTip("内核枚举到的 CAN 接口；也可以手动输入未列出的名字")
+        self.btn_channels = QPushButton("刷新")
+        self.btn_channels.setToolTip("重新枚举 /sys/class/net 里的 CAN 接口")
+        self.btn_channels.clicked.connect(self._refresh_channels)
         self.can_id = spin(1, 127, 8, 1, decimals=0)
         self.mst_id = spin(0, 127, 0, 1, decimals=0)
         self.mst_id.setToolTip("0 = 自动探测；非 0 时作为状态帧的 master ID")
@@ -52,7 +60,7 @@ class GripperPage(QWidget):
 
         g_conn = group(
             "连接与身份（更改通道 / CAN ID / MST ID 后需断开重连）",
-            row(QLabel("通道"), self.channel,
+            row(QLabel("通道"), self.channel, self.btn_channels,
                 QLabel("CAN ID"), self.can_id,
                 QLabel("MST ID"), self.mst_id,
                 QLabel("安装"), self.mount,
@@ -147,6 +155,7 @@ class GripperPage(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(TICK_MS)
+        self._refresh_channels()
         self._refresh()
 
     # ---------------- 外部 ----------------
@@ -166,12 +175,32 @@ class GripperPage(QWidget):
             self._log_fn(str(msg))
 
     # ---------------- 连接 ----------------
+    def _refresh_channels(self):
+        """重新枚举 CAN 接口；保留用户已经选/手填的通道。
+
+        枚举为空时保留 can0 作为可见的兜底 —— 机器没起 CAN 时，操作员至少能看到
+        默认值，而不是一个空下拉框。
+        """
+        cur = self.channel.currentText().strip()
+        found = list_channels()
+        self.channel.blockSignals(True)
+        self.channel.clear()
+        for name in found:
+            self.channel.addItem(name)
+        if cur and cur not in found:
+            self.channel.addItem(cur)
+        if self.channel.count() == 0:
+            self.channel.addItem("can0")
+        idx = self.channel.findText(cur) if cur else 0
+        self.channel.setCurrentIndex(idx if idx >= 0 else 0)
+        self.channel.blockSignals(False)
+
     def _toggle_connect(self):
         if self._worker.online:
             self._worker.close()
             self._refresh()
             return
-        top = self.channel.text().strip() or "can0"
+        top = self.channel.currentText().strip() or "can0"
         try:
             self._worker.open(
                 channel=top,
@@ -313,8 +342,8 @@ class GripperPage(QWidget):
         self.btn_stop.setEnabled(online)      # 停止永远比其它动作可达
         self.force.setEnabled(True)
         self.hold.setEnabled(True)
-        for w in (self.channel, self.can_id, self.mst_id, self.mount,
-                  self.calib_path, self.btn_browse):
+        for w in (self.channel, self.btn_channels, self.can_id, self.mst_id,
+                  self.mount, self.calib_path, self.btn_browse):
             w.setEnabled(not online)          # 身份改动要求重新连接
         if not self._avail:
             self.conn_lbl.setText(f"● 不可用 — {self._why}")

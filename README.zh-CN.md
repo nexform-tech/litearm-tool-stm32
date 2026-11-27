@@ -37,12 +37,12 @@ GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 
 
 | 分组 | 页面 | 干什么 |
 | --- | --- | --- |
-| 监视 | **总览** | 逐关节状态表 + 100Hz 三段联动曲线（原「监控」「曲线」两页合并，可一键放大曲线） |
-| | **采集** | 固件 300Hz 控制拍采集：录制 / 查进度 / 读回预览 / 导出原始字节 |
+| 监视 | **总览** | 逐关节状态表 + 100Hz 三段联动曲线（原「监控」「曲线」两页合并，可一键放大曲线；可把勾选关节导出为带单位、温度与驱动错误码的 CSV） |
+| | **采集** | 固件 300Hz 控制拍采集：录制 / 查进度 / 读回预览 / 导出原始字节 / 导出解析 CSV |
 | | **日志** | 结构化 JSONL：实时视图 / 按级别、类别、文本筛选 / 原始记录详情 / 重启后历史回读 / 导出 JSONL |
 | | **故障** | 按轴故障原因（`flags` bit11 为真时按需查一次 `0x51`）+ flags + `drop_hold`；7 轴一屏，原因/处置分列 |
 | 操作 | **整机** | 使能 / 失能 / 复位 / 清故障 / 回零 / 全局调速器 / park / 读状态 / 启动原因 |
-| | **关节** | `move_j` / `move_js` / `move_mit` 单关节 / `move_mit_all` 整臂 |
+| | **关节** | `move_j` / `move_js` / `move_mit` 单关节 / `move_mit_all` 整臂；一键就绪姿态 `[0, 0.5, 0, -1, 0, 0.6, 0]`（按轴数裁剪/补 0） |
 | | **笛卡尔** | 读 TCP / `ik` 求解 / `move_p` |
 | | **零重力** | 拖动示教（保活由 SDK 后台线程维持，本工具不发心跳帧） |
 | 参数 | **参数表** | 关节级参数与 0x26/0x27/0x28 前馈族：读回 / 编辑下发 / ff_mask / 批量导入导出 / 固化 Flash / 恢复出厂 |
@@ -141,6 +141,10 @@ python3 main.py                       # 普通用户即可（串口在 dialout �
 
 配置见 [config.yaml](config.yaml)（仅交互层参数，不含限位）。
 
+**同一时间只允许一个实例。** 第二次启动不会打开串口，而是把已在运行的窗口提到前台后退出；
+锁是本地套接字（`QLocalServer`），上次崩溃留下的陈旧锁会在下次启动时自动清理。第二个
+进程会弹一条简短提示说明退出原因。
+
 结构化日志写到 `$XDG_STATE_HOME/litearm-tool/tool.jsonl`（默认 `~/.local/state/...`；
 Windows 是 `%LOCALAPPDATA%\litearm-tool\Logs`），单文件 5 MB、保留 5 份轮转备份；
 `LITEARM_TOOL_LOG_DIR` 可改目录。「日志」页读当前文件与备份，所以重启后历史仍在；
@@ -152,6 +156,7 @@ Windows 是 `%LOCALAPPDATA%\litearm-tool\Logs`），单文件 5 MB、保留 5 �
 main.py                 入口（薄壳, 转调 litetool.app:main）
 litetool/
   app.py                启动入口（`python3 -m litetool` / `litearm-tool` 命令共用）
+  instance.py           单实例锁（本地套接字；第二次启动只把已有窗口提到前台）
   sdk_worker.py         ★ 唯一持有 pa.Arm 的线程 + 任务队列 + 状态钩子
   params_io.py          在 pa.Arm 之上的参数读写形状层（页面要 (ok, code)）
   diagnostics.py        错误码文案 / 诊断包 / 链路计数汇总
@@ -164,6 +169,7 @@ litetool/
   tuning_guide.py       调参指南内容（公式/符号映射/症状速查）
   firmware_defaults.py  解析固件 defaults.c（presets/ 生成与一致性断言的真源）
   settings.py           config.yaml 合并（类型 + 区间校验）
+  csv_export.py         曲线窗口 / 300Hz 采集的 CSV 写出（列名带单位）
   obs.py                结构化日志（JSONL、OpenTelemetry 字段名、脱敏）
   gui/
     bridge.py           跨线程 Qt 信号桥（日志 / 任务结果 / 在线态）
@@ -190,7 +196,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 444 passed（全部离线，无需硬件）
+python3 -m pytest          # 464 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |
@@ -228,6 +234,7 @@ python3 -m pytest          # 444 passed（全部离线，无需硬件）
 4. **运动下发**（低速起步，sp=0.1）：
    - [ ] move_j 目标=当前位置+0.1 rad → 下发到位，幅度小
    - [ ] move_j 目标与当前差 >0.5 rad → 弹 Δq 确认框；取消则不下发
+   - [ ] [就绪姿态] 把目标填成 `[0, 0.5, 0, -1, 0, 0.6, 0]` 并走同一条确认链路下发
    - [ ] 笛卡尔页 [读取当前末端位姿] 有值；[求解 IK] 返回 7 个数；move_p 小幅度到位
    - [ ] 关节页 move_mit 单帧单关节，幅度小
 5. **零重力**：进入后可用手拖动；按钮与状态条显示一致；退出后关节回到软限内；

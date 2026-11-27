@@ -44,6 +44,16 @@ def test_nav_has_three_groups_and_all_pages_registered():
     w.close()
 
 
+def test_activate_raises_an_existing_window():
+    """第二个实例启动时走这里：窗口已隐藏/最小化也要能重新显示。"""
+    w = _win()
+    w.show()
+    w.hide()
+    w.activate()
+    assert w.isVisible()
+    w.close()
+
+
 def test_log_page_is_wired_to_main_window_logs():
     w = _win()
     assert w.pages["log"].table.rowCount() >= 1, "启动那行 INFO 应进入日志页"

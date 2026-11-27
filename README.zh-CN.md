@@ -174,8 +174,11 @@ SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到�
 pip install -e ../litearm-python     # 交互层依赖（>= 2.4.0）
 pip install -r requirements.txt
 python3 main.py                       # 普通用户即可（串口在 dialout 组则无需 root）
+python3 main.py --fake                # 无硬件演示：SDK 假传输，自动接上假设备
 python3 main.py --activation-url https://act.nexform.tech   # 指定激活服务（默认即生产地址）
 ```
+
+`--fake` 不碰真实串口，适合演示、培训和没有硬件时的 UI 开发；假固件不能用来判断真实运动或安全边界。
 
 启动后：顶栏选串口 → 连接 → 顶栏显示固件版本（如 `Litearm1.12.3-7J`）。
 连接时会校验固件版本约定（最低 1.5.0）。总览页随 100Hz 主动上报自动刷新；
@@ -198,8 +201,9 @@ Windows 是 `%LOCALAPPDATA%\litearm-tool\Logs`），单文件 5 MB、保留 5 �
 
 **LiteGrip（可选，仅 Linux）。** 安装 `requirements-gripper.txt`，把 SocketCAN 以 1 Mbit/s
 拉起（`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`），再进
-「夹爪」页。Windows 或未安装 `litegrip-python` 时页面保留但禁用连接并写明原因。通道 /
-CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。停止按钮发
+「夹爪」页。通道下拉列出内核枚举到的 CAN 接口（`/sys/class/net/*/type` = `ARPHRD_CAN` 280），
+也允许手填未列出的名字。Windows 或未安装 `litegrip-python` 时页面保留但禁用连接并写明原因。
+通道 / CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。停止按钮发
 零力矩帧，动作在途时并失能电机以中止，不是机械臂急停。
 
 **Windows 打包。** 在仓库根目录运行
@@ -283,7 +287,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 614 passed（全部离线，无需硬件）
+python3 -m pytest          # 621 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |

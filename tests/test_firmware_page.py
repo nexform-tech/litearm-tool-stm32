@@ -190,8 +190,11 @@ def test_engine_unavailable_is_named_before_any_hardware_action():
     assert "不可用" in page.engine_lbl.text()
 
     # 即使绕过按钮直接点，控制器预检也会在碰硬件之前拒绝。
+    # ⚠ 这个路径是同步的（`UpgradeController.start` 在预检失败时直接调
+    # `on_result`，没有起线程），所以**不要**在这里跑 `QTest.qWait`：
+    # CI 的 PyQt5-Qt5 5.15.19 + offscreen 下，处理结果后挂起的 `_poll`
+    # 单次定时器会在事件循环里把进程打崩（SIGSEGV），而断言本来就不需要它。
     page._on_start()
-    QTest.qWait(50)
     assert page._result is not None
     assert page._result.reason == "engine_unavailable"
     assert "引擎" in page.result_lbl.text()

@@ -20,6 +20,7 @@ import litearm as pa
 
 from litetool import checks
 from litetool import obs
+from litetool import pose_math
 from litetool.diagnostics import build_diag_package, save_diag_package
 from litetool import ports as ports_mod
 from litetool.gui.bridge import GuiBridge
@@ -84,9 +85,6 @@ class MainWindow(QMainWindow):
 
         self._log("[INFO] LiteArm Tool STM32 —— 交互层经 litearm；"
                   "硬防护权威仍在固件")
-        if self.slog.file_error:
-            # 不能装作日志已经落盘 —— 用户要据此决定要不要先修目录/磁盘。
-            self._log(f"[WARN] 结构化日志无法写入（仅内存保留）: {self.slog.file_error}")
 
     # ================= 界面 =================
     def _build_ui(self):
@@ -253,12 +251,17 @@ class MainWindow(QMainWindow):
         self.pages["fault"].cmd.connect(self._on_ctrl_cmd)
         self.pages["fault"].diag_req.connect(self._copy_diagnostics)
         j.movej.connect(self._on_movej)
+        j.movej_takeover.connect(
+            lambda qs, sp: self._on_movej(qs, sp, supersede=True))
         j.move_js.connect(self._on_move_js)
         j.mit_one.connect(self._on_mit_one)
         j.mit_all.connect(self._on_mit_all)
         c.tcp_req.connect(self._on_get_tcp)
         c.ik_req.connect(self._on_ik)
         c.movep.connect(self._on_movep)
+        c.movel.connect(self._on_movel)
+        c.jog_step.connect(self._on_jog_step)
+        c.stop_req.connect(self._on_stop_jog)
         z.zg.connect(self._on_zero_g)
         self.pages["diag"].bench_req.connect(self._on_bench)
         self.pages["params"].set_log(
@@ -325,8 +328,10 @@ class MainWindow(QMainWindow):
     def _on_task(self, res, cb):
         if res is None:
             return
+        superseded = isinstance(getattr(res, "error", None),
+                                getattr(pa, "MotionSupersededError", ()))
         err = None
-        if not res.ok:
+        if not res.ok and not superseded:
             try:
                 err = pa.describe_exc(res.error)
                 self._last_error = err
@@ -334,9 +339,14 @@ class MainWindow(QMainWindow):
                 self.err_btn.setVisible(True)
             except Exception:  # noqa: BLE001 - 老 SDK 无 describe_exc 时降级
                 self._last_error = None
-        self._log(f"[{'OK' if res.ok else 'ERR'}] {res.text}",
-                  category="command",
-                  event="command.ok" if res.ok else "command.failed",
+        if res.ok:
+            event, text = "command.ok", f"[OK] {res.text}"
+        elif superseded:
+            # 被新的运动接管不是故障：规划按预期作废，别把红框留给用户。
+            event, text = "command.superseded", f"[WARN] {res.text}（已被新的运动接管）"
+        else:
+            event, text = "command.failed", f"[ERR] {res.text}"
+        self._log(text, category="command", event=event,
                   fields={"name": res.name, "ok": bool(res.ok),
                           "code": getattr(err, "code", None),
                           "title": getattr(err, "title", None)})
@@ -439,6 +449,10 @@ class MainWindow(QMainWindow):
         # 导出上下文跟着连接走；断线后保留最后已知的固件版本（已读回的数据仍可导出）。
         self.pages["overview"].set_context(self.worker.firmware)
         self.pages["capture"].set_firmware(self.worker.firmware)
+        # 笛卡尔规划的固件能力（connect 时探测）：点动/movel 的按钮门控。
+        self.pages["cart"].set_cart_supported(
+            self.worker.cart_supported if onl else None,
+            self.worker.cart_probe_silent if onl else False)
         self._apply_busy()
 
     # ================= 运动解锁（全局一把） =================
@@ -761,12 +775,23 @@ class MainWindow(QMainWindow):
         plan = checks.plan_motion(cur, targets, self._settings.confirm_threshold)
         return (not plan.needs_confirm) or self._confirm_motion(plan)
 
-    def _on_movej(self, qs, speed):
+    def _on_movej(self, qs, speed, supersede: bool = False):
         if self._motion_denied("movej"):
             return
         st = self.worker.state
         if not self._delta_ok("movej", st.q if st is not None else None, qs):
             return
+        if supersede and self.worker.busy:
+            # 旁路写帧：在途的 move_l(wait=True) 会把所有者线程占住，排队等于等它走完。
+            ok, why = self.worker.takeover_movej(qs, speed)
+            if ok:
+                self._log(f"[WARN] 接管 movej 已发出（sp={speed:.2f}）—— "
+                          "固件会作废在途点动/直线规划")
+            else:
+                self._log(f"[ERR] 接管 movej 未发出: {why}")
+            return
+        if supersede:
+            self._log("[INFO] 当前没有在途运动，按普通 movej 下发")
         self._submit(f"movej sp={speed:.2f}",
                      lambda arm: arm.movej(qs, speed), self._after_move)
 
@@ -863,6 +888,83 @@ class MainWindow(QMainWindow):
                 return
         self._submit(f"movep sp={speed:.2f}",
                      lambda arm: arm.move_p(pose, speed), self._after_move)
+
+    # ================= 笛卡尔直线 / 点动 =================
+    def _on_movel(self, pose, speed):
+        if self._motion_denied("movel"):
+            return
+        cur = self.pages["cart"]._tcp
+        if cur is None:
+            self._log("[INFO] 尚无当前位姿基线，先读一次 TCP 再判幅度")
+            self._submit("读 TCP（movel 前置）", lambda arm: arm.get_tcp().value,
+                         lambda res: self._movel_after_tcp(res, pose, speed))
+            return
+        self._movel_confirm_and_send(pose, speed, cur)
+
+    def _movel_after_tcp(self, res, pose, speed):
+        if not res.ok or res.value is None:
+            self._log(f"[WARN] 拒绝 movel — 读不到当前 TCP，无法判断幅度"
+                      f"（{res.error if not res.ok else '固件无应答'}）")
+            return
+        self.pages["cart"].show_tcp(res.value)
+        self._movel_confirm_and_send(pose, speed, res.value)
+
+    def _movel_confirm_and_send(self, pose, speed, cur):
+        plan = checks.plan_pose(cur, pose, self._settings.pose_confirm_pos,
+                                self._settings.pose_confirm_rot)
+        if plan.needs_confirm:
+            if QMessageBox.warning(
+                    self, "确认位姿幅度",
+                    f"movel 目标与当前位姿：\n\n{plan.summary()}\n\n确认下发？",
+                    QMessageBox.Ok | QMessageBox.Cancel,
+                    QMessageBox.Cancel) != QMessageBox.Ok:
+                return
+        self._submit(f"movel sp={speed:.2f}",
+                     lambda arm: arm.move_l(pose, speed), self._after_movel)
+
+    def _after_movel(self, res):
+        if not res.ok:
+            return
+        plan = res.value
+        settled = bool(getattr(plan, "settled", True))
+        err = float(getattr(plan, "settle_err_rad", 0.0) or 0.0)
+        if settled:
+            self._log("[OK] movel 到位")
+        else:
+            self._log(f"[WARN] movel 规划完成但未停在目标"
+                      f"（settled=False，settle_err={err:.3f} rad）")
+        # 运动结束后把真实落点读回来 —— 别让页面停在"计划目标"上。
+        self._submit("读 TCP（movel 后）", lambda arm: arm.get_tcp().value,
+                     lambda r: self.pages["cart"].show_tcp(r.value if r.ok else None))
+
+    def _on_jog_step(self, axis: str, kind: str, amount: float, frame: str,
+                     speed: float, gen: int):
+        """点动的一步：读实测 TCP → 算一小步 → move_l。"""
+        if self._motion_denied(f"点动 {axis}"):
+            self.pages["cart"].jog_result(gen, None)
+            return
+
+        def fn(arm):
+            tcp = arm.get_tcp().value
+            if tcp is None:
+                raise pa.InvalidCommandError("读不到当前 TCP，点动中止")
+            target = pose_math.jog_pose(tcp, axis, kind, amount, frame)
+            return tcp, target, arm.move_l(target, speed)
+
+        self._submit(f"点动 {axis}", fn,
+                     lambda res: self.pages["cart"].jog_result(gen, res))
+
+    def _on_stop_jog(self):
+        """受控停止：旁路写 movej 到当前实测关节角。
+
+        停止**不经过运动闸门**（和急停一样是降风险方向）；但链路断开时 worker
+        会拒绝并给出原因。
+        """
+        ok, why = self.worker.stop_jog_now()
+        if ok:
+            self._log("[WARN] 受控停止帧已发出 —— 在途点动/直线规划将被固件作废")
+        else:
+            self._log(f"[ERR] 受控停止未发出: {why}")
 
     # ================= 零重力 =================
     def _on_zero_g(self, on: bool):

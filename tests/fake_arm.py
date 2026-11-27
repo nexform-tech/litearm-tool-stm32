@@ -255,6 +255,14 @@ class _FakeModel:
         return _msg(g)
 
 
+class _FakeCartPlan:
+    """`move_l` 的返回值形状（真 SDK 是 `litearm.cart.CartPlan`）。"""
+
+    ok = True
+    settled = True
+    settle_err_rad = 0.0
+
+
 class FakeArm:
     """实现的正是本工具用到的 SDK 面。"""
 
@@ -272,6 +280,9 @@ class FakeArm:
         #: 真固件的判据是 `ctrl_is_armed() = enabled || enable_pending`, 替身无法表达
         #: `enable_pending` 的窗口 (SDK 也不上报它), 故只跟踪 `enabled`。
         self.enabled = False
+        #: 固件笛卡尔规划能力 —— 真 SDK 在 connect() 里探测并缓存在同名私有字段。
+        self._cart_supported = True
+        self._cart_probe_silent = False
         #: 模型状态机 (见 _FakeModel)
         self.model = _FakeModel(self)
         self.closed = False
@@ -383,6 +394,11 @@ class FakeArm:
         self.calls.append(("move_p", (list(pose), speed)))
         self._maybe_raise()
         return self.get_state(refresh=True).value
+
+    def move_l(self, pose, speed=1.0, wait=True):
+        self.calls.append(("move_l", (list(pose), speed, wait)))
+        self._maybe_raise()
+        return _FakeCartPlan()
 
     def home(self, *, timeout=None):
         self.calls.append(("home", timeout))

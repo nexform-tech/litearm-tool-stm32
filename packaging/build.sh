@@ -60,8 +60,8 @@ VPY="$BUILD_VENV/bin/python"
 say "2/6 装 SDK (非可编辑) + 运行期依赖 + PyInstaller"
 "$VPY" -m pip install -q --upgrade pip
 "$VPY" -m pip install -q "$SDK_SRC"
-"$VPY" -m pip install -q "PyQt5>=5.15" "pyqtgraph>=0.13" "numpy>=1.21" \
-                           "PyYAML>=6.0" "pyserial>=3.5" \
+"$VPY" -m pip install -q "PyQt5>=5.15" "pyqtgraph>=0.13" "PyOpenGL>=3.1" \
+                           "numpy>=1.21" "PyYAML>=6.0" "pyserial>=3.5" \
                            "pyusb>=1.2" "libusb-package>=1.0" pyinstaller
 "$VPY" - <<'PY'
 import sys

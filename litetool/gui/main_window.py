@@ -19,16 +19,21 @@ from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame,
 import litearm as pa
 
 from litetool import checks
+from litetool import obs
+from litetool import pose_math
 from litetool.diagnostics import build_diag_package, save_diag_package
 from litetool import ports as ports_mod
 from litetool.gui.bridge import GuiBridge
 from litetool.gui.pages.capture_page import CapturePage
+from litetool.gui.pages.activation_page import ActivationPage
 from litetool.gui.pages.cart_page import CartPage
 from litetool.gui.pages.diag_page import DiagPage
 from litetool.gui.pages.fault_page import FaultPage
 from litetool.gui.pages.guide_page import TuningGuidePage
+from litetool.gui.pages.gripper_page import GripperPage
 from litetool.gui.pages.installation_page import InstallationPage
 from litetool.gui.pages.joint_page import JointPage
+from litetool.gui.pages.log_page import LogPage
 from litetool.gui.pages.machine_page import MachinePage
 from litetool.gui.pages.overview_page import OverviewPage
 from litetool.gui.pages.params_page import ParamsPage
@@ -43,7 +48,7 @@ ONLINE_TEXT = "● 在线"
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, settings, parent=None):
+    def __init__(self, settings, parent=None, *, log_dir=None):
         super().__init__(parent)
         self._settings = settings
         self._armed = False
@@ -56,12 +61,15 @@ class MainWindow(QMainWindow):
         self._last_fault_bits = 0           # 上次查询时的 joint_fault 位图
         self._fault_query_inflight = False  # 防止同一故障重复查询
         self._fault_detail = None           # 最近一次 0x51 应答
+        # 结构化日志先于 worker：连接期日志也要落盘（worker 的回调会走到 _log）。
+        self.slog = obs.StructuredLogger(log_dir)
 
         self.bridge = GuiBridge()
         self.worker = SdkWorker(
-            log=lambda m: self.bridge.sig_log.emit(m),
+            log=self._log_from_worker,
             on_online=lambda ok, why: self.bridge.sig_online.emit(ok, why),
             on_task=lambda res: self.bridge.sig_task.emit(res, None),
+            on_reconnect=lambda n, why: self.bridge.sig_reconnect.emit(n, why),
             plot_window_s=settings.plot_window_s,
         )
 
@@ -146,6 +154,8 @@ class MainWindow(QMainWindow):
         self._add_page("overview", "总览", "状态表 + 100Hz 曲线",
                        OverviewPage(self._settings))
         self._add_page("capture", "采集", "固件 300Hz 控制拍采集与导出", CapturePage())
+        self._add_page("log", "日志", "结构化 JSONL：实时/筛选/历史回读/导出",
+                       LogPage(self.slog))
         self._add_page("machine", "整机", "使能/复位/清故障/回零/限速/park",
                        MachinePage())
         self._add_page("fault", "故障", "当前故障/原因/处置/事件历史/诊断包",
@@ -155,6 +165,9 @@ class MainWindow(QMainWindow):
         self._add_page("cart", "笛卡尔", "get_tcp / ik / move_p",
                        CartPage(self._settings))
         self._add_page("zerog", "零重力", "拖动示教（保活由 SDK 维持）", ZeroGPage())
+        self._add_page("gripper", "夹爪",
+                       "LiteGrip（仅 Linux）：连接/使能/开合/抓取/标定",
+                       GripperPage(self._settings))
         self._add_page("params", "参数表", "关节/前馈参数读写与批量导入导出",
                        ParamsPage())
         self._add_page("guide", "调参指南", "公式 / 症状速查 / 逐参数详解",
@@ -163,6 +176,9 @@ class MainWindow(QMainWindow):
         self._add_page("install", "安装方向",
                        "gravity 向量 (0x28 item6) —— 正装/侧装/倒装",
                        InstallationPage())
+        self._add_page("activation", "授权",
+                       "读取 UID / 在线激活（0x2F / 0x3F）",
+                       ActivationPage())
         self.nav.select("overview")
 
         body = QWidget()
@@ -210,11 +226,11 @@ class MainWindow(QMainWindow):
         """当前显示页面（`stack.currentWidget()` 是外壳 QScrollArea）。"""
         return self.stack.currentWidget().widget()
 
-    _GROUPS = {"监视": ("overview", "capture"),
-               "操作": ("machine", "fault", "joint", "cart", "zerog"),
+    _GROUPS = {"监视": ("overview", "capture", "log"),
+               "操作": ("machine", "fault", "joint", "cart", "zerog", "gripper"),
                # ⚠ 新页 key 必须登记在这里: `_group_for` 用的是无默认值的 next(),
                # 漏登记会在 __init__ 期间抛 StopIteration -> 崩启动。
-               "参数": ("params", "install", "guide", "diag")}
+               "参数": ("params", "install", "activation", "guide", "diag")}
 
     def _group_for(self, key: str):
         title = next(t for t, keys in self._GROUPS.items() if key in keys)
@@ -227,8 +243,10 @@ class MainWindow(QMainWindow):
     def _wire(self):
         self.nav.navigated.connect(self._on_nav)
         self.bridge.sig_log.connect(self.log_panel.append_line)
+        self.bridge.sig_log_record.connect(self.pages["log"].append)
         self.bridge.sig_task.connect(self._on_task)
         self.bridge.sig_online.connect(self._on_online)
+        self.bridge.sig_reconnect.connect(self._on_reconnect)
 
         m, j, c, z = (self.pages["machine"], self.pages["joint"],
                       self.pages["cart"], self.pages["zerog"])
@@ -241,20 +259,30 @@ class MainWindow(QMainWindow):
         self.pages["fault"].cmd.connect(self._on_ctrl_cmd)
         self.pages["fault"].diag_req.connect(self._copy_diagnostics)
         j.movej.connect(self._on_movej)
+        j.movej_takeover.connect(
+            lambda qs, sp: self._on_movej(qs, sp, supersede=True))
         j.move_js.connect(self._on_move_js)
         j.mit_one.connect(self._on_mit_one)
         j.mit_all.connect(self._on_mit_all)
         c.tcp_req.connect(self._on_get_tcp)
         c.ik_req.connect(self._on_ik)
         c.movep.connect(self._on_movep)
+        c.movel.connect(self._on_movel)
+        c.jog_step.connect(self._on_jog_step)
+        c.stop_req.connect(self._on_stop_jog)
         z.zg.connect(self._on_zero_g)
         self.pages["diag"].bench_req.connect(self._on_bench)
-        self.pages["params"].set_log(self._log)
+        self.pages["params"].set_log(
+            lambda m: self._log(m, category="parameter"))
         self.pages["params"].set_submit(self._submit)
         self.pages["params"].show_guide.connect(self._on_guide)
         self.pages["capture"].set_submit(self._submit)
-        self.pages["install"].set_log(self._log)
+        self.pages["install"].set_log(
+            lambda m: self._log(m, category="installation"))
         self.pages["install"].set_submit(self._submit)
+        self.pages["gripper"].set_log(self._log)
+        self.pages["activation"].set_log(self._log)
+        self.pages["activation"].set_submit(self._submit)
         self.nav.navigated.connect(self._on_page_changed)
 
     def _on_nav(self, key: str):
@@ -272,11 +300,36 @@ class MainWindow(QMainWindow):
         self.pages["guide"].reveal(key)
 
     # ================= 日志 / 任务 =================
-    def _log(self, msg: str):
-        self._log_tail.append(str(msg))
+    _LEVEL_PREFIX = (("[TRACE]", "TRACE"), ("[DEBUG]", "DEBUG"),
+                     ("[INFO]", "INFO"), ("[OK]", "INFO"),
+                     ("[WARN]", "WARN"), ("[ERR]", "ERROR"), ("[FATAL]", "FATAL"))
+
+    def _log(self, msg: str, *, category: str = "app", event=None, fields=None):
+        """一行日志同时进：底部面板、结构化 JSONL、日志页实时视图。"""
+        text = str(msg)
+        sev = "INFO"
+        for prefix, level in self._LEVEL_PREFIX:
+            if text.startswith(prefix):
+                sev = level
+                break
+        rec = self.slog.record(sev, text, category=category, event=event,
+                               fields=fields)
+        self._log_tail.append(text)
         if len(self._log_tail) > 200:
             del self._log_tail[:-200]
-        self.bridge.sig_log.emit(msg)
+        self.bridge.sig_log_record.emit(rec)
+        self.bridge.sig_log.emit(text)
+
+    def _log_from_worker(self, msg: str):
+        """SDK 所有者线程的日志 —— 只做分类，不碰任何控件。"""
+        text = str(msg)
+        if text.startswith("[OK] 已连接"):
+            event = "session.connect.succeeded"
+        elif text.startswith("[ERR] 离线") or text.startswith("[WARN] 链路"):
+            event = "session.link.lost"
+        else:
+            event = "session.log"
+        self._log(text, category="session", event=event)
 
     def _submit(self, name: str, fn, on_done=None):
         """把 `fn(arm)` 投到 SDK 所有者线程；`on_done(TaskResult)` 回到 GUI 主线程。"""
@@ -286,14 +339,28 @@ class MainWindow(QMainWindow):
     def _on_task(self, res, cb):
         if res is None:
             return
-        self._log(f"[{'OK' if res.ok else 'ERR'}] {res.text}")
-        if not res.ok:
+        superseded = isinstance(getattr(res, "error", None),
+                                getattr(pa, "MotionSupersededError", ()))
+        err = None
+        if not res.ok and not superseded:
             try:
-                self._last_error = pa.describe_exc(res.error)
-                self.err_btn.setText(f"[{self._last_error.code}] {self._last_error.title}")
+                err = pa.describe_exc(res.error)
+                self._last_error = err
+                self.err_btn.setText(f"[{err.code}] {err.title}")
                 self.err_btn.setVisible(True)
             except Exception:  # noqa: BLE001 - 老 SDK 无 describe_exc 时降级
                 self._last_error = None
+        if res.ok:
+            event, text = "command.ok", f"[OK] {res.text}"
+        elif superseded:
+            # 被新的运动接管不是故障：规划按预期作废，别把红框留给用户。
+            event, text = "command.superseded", f"[WARN] {res.text}（已被新的运动接管）"
+        else:
+            event, text = "command.failed", f"[ERR] {res.text}"
+        self._log(text, category="command", event=event,
+                  fields={"name": res.name, "ok": bool(res.ok),
+                          "code": getattr(err, "code", None),
+                          "title": getattr(err, "title", None)})
         if cb is not None:
             cb(res)
         self._apply_busy()
@@ -308,14 +375,17 @@ class MainWindow(QMainWindow):
                 error_text=self._last_error,
                 drops=self.worker.drops,
                 log_tail=self._log_tail,
+                log_path=str(self.slog.path),
             )
             path = save_diag_package(pkg)
             import json
             QApplication.clipboard().setText(
                 json.dumps(pkg, ensure_ascii=False, indent=2))
-            self._log(f"[OK] 诊断包已复制并保存: {path}")
+            self._log(f"[OK] 诊断包已复制并保存: {path}",
+                      category="diagnostics", event="diagnostics.saved")
         except Exception as e:  # noqa: BLE001 - 导出失败不能拖垮界面
-            self._log(f"[ERR] 诊断包导出失败: {e}")
+            self._log(f"[ERR] 诊断包导出失败: {e}",
+                      category="diagnostics", event="diagnostics.failed")
 
     def _after_simple(self, res):
         pass
@@ -350,7 +420,8 @@ class MainWindow(QMainWindow):
         try:
             self.worker.open(port)
         except Exception as e:  # noqa: BLE001 - SDK 的连接期异常都在这提示
-            self._log(f"[ERR] 连接失败: {e}")
+            self._log(f"[ERR] 连接失败: {e}", category="session",
+                      event="session.connect.failed", fields={"reason": str(e)})
             QMessageBox.critical(self, "连接失败", str(e))
             self._apply_online(False, str(e))
         finally:
@@ -359,9 +430,18 @@ class MainWindow(QMainWindow):
     def _disconnect(self):
         self.worker.close()
         self._apply_online(False, "已断开")
+        self._log("[INFO] 已断开（用户操作）", category="session",
+                  event="session.disconnected", fields={"reason": "用户断开"})
 
     def _on_online(self, ok: bool, why: str):
         self._apply_online(ok, why)
+
+    def _on_reconnect(self, attempt: int, why: str):
+        """自动重连的每次尝试 —— 顶栏必须说"正在重连"，不能只留一个"离线"。"""
+        self.dot.setText(f"● 重连中({attempt})")
+        self.dot.setStyleSheet("color:#ffd166;font-weight:bold;")
+        self.fw_lbl.setText("固件: —")
+        self._log(f"[WARN] {why}")
 
     def _apply_online(self, onl: bool, why: str = ""):
         self._connected = onl
@@ -374,9 +454,18 @@ class MainWindow(QMainWindow):
             self.strip.reset()
             # 断线必须回到锁定态 —— 否则重连后第一下手就是未确认的运动
             self._relock("链路断开")
+        # 授权页连上即自动读一次 —— 先把固件版本喂进去，旧固件才能直接提示"升级固件"。
+        self.pages["activation"].set_firmware(self.worker.firmware)
         for page in self.pages.values():
             if hasattr(page, "set_online"):
                 page.set_online(onl)
+        # 导出上下文跟着连接走；断线后保留最后已知的固件版本（已读回的数据仍可导出）。
+        self.pages["overview"].set_context(self.worker.firmware)
+        self.pages["capture"].set_firmware(self.worker.firmware)
+        # 笛卡尔规划的固件能力（connect 时探测）：点动/movel 的按钮门控。
+        self.pages["cart"].set_cart_supported(
+            self.worker.cart_supported if onl else None,
+            self.worker.cart_probe_silent if onl else False)
         self._apply_busy()
 
     # ================= 运动解锁（全局一把） =================
@@ -441,17 +530,25 @@ class MainWindow(QMainWindow):
         zg_err = self.worker.stop_zero_g_now()
         self._relock("急停")
         if dropped:
-            self._log(f"[WARN] 急停：已丢弃 {dropped} 条排队中的命令")
+            self._log(f"[WARN] 急停：已丢弃 {dropped} 条排队中的命令",
+                      category="command", event="command.emergency_stop",
+                      fields={"sent": bool(ok), "dropped": int(dropped)})
         if zg_err:
-            self._log(f"[WARN] 急停：零重力会话未能正常收尾（{zg_err}）")
+            self._log(f"[WARN] 急停：零重力会话未能正常收尾（{zg_err}）",
+                      category="command", event="command.emergency_stop",
+                      fields={"sent": bool(ok), "zero_g_error": str(zg_err)})
         if ok:
             self.estop_lbl.setText("急停帧已发出 — 请目视确认臂已停止")
             self.estop_lbl.setStyleSheet("color:#ffd166;font-weight:bold;")
-            self._log("[WARN] 急停帧已发出 —— 请目视确认臂已停止（帧发出≠固件已执行）")
+            self._log("[WARN] 急停帧已发出 —— 请目视确认臂已停止（帧发出≠固件已执行）",
+                      category="command", event="command.emergency_stop",
+                      fields={"sent": True, "dropped": int(dropped)})
         else:
             self.estop_lbl.setText("⚠ 急停未发出 — 请立即用硬件急停/断电")
             self.estop_lbl.setStyleSheet("color:#ff6b6b;font-weight:bold;")
-            self._log(f"[ERR] 急停未发出（{why}）—— 请立即用硬件急停/断电")
+            self._log(f"[ERR] 急停未发出（{why}）—— 请立即用硬件急停/断电",
+                      category="command", event="command.emergency_stop",
+                      fields={"sent": False, "dropped": int(dropped), "reason": str(why)})
 
     # ================= 周期刷新 =================
     def _tick(self):
@@ -473,6 +570,8 @@ class MainWindow(QMainWindow):
         # （安装方向页的"须先失能"硬拦依赖它 —— 旧快照会拿过期的 enabled 放行）
         self.pages["params"].update_from(st)
         self.pages["install"].update_from(st)
+        self.pages["activation"].update_from(st)
+        self.pages["activation"].set_firmware(self.worker.firmware)
         if st is not None:
             self.pages["cart"].set_seed_q(st.q)
             self.pages["joint"].fill_from(st)
@@ -488,6 +587,9 @@ class MainWindow(QMainWindow):
             except Exception:  # noqa: BLE001
                 title = f"原因 {r}"
             self.pages["fault"].add_event(f"J{a + 1} {title}")
+            self._log(f"[WARN] 故障 J{a + 1} {title}", category="fault",
+                      event="fault.detected",
+                      fields={"joint": int(a) + 1, "reason": int(r)})
         self._fault_snapshot = cur
         self.pages["diag"].set_metrics(
             drops=drops, fps=fps,
@@ -688,12 +790,23 @@ class MainWindow(QMainWindow):
         plan = checks.plan_motion(cur, targets, self._settings.confirm_threshold)
         return (not plan.needs_confirm) or self._confirm_motion(plan)
 
-    def _on_movej(self, qs, speed):
+    def _on_movej(self, qs, speed, supersede: bool = False):
         if self._motion_denied("movej"):
             return
         st = self.worker.state
         if not self._delta_ok("movej", st.q if st is not None else None, qs):
             return
+        if supersede and self.worker.busy:
+            # 旁路写帧：在途的 move_l(wait=True) 会把所有者线程占住，排队等于等它走完。
+            ok, why = self.worker.takeover_movej(qs, speed)
+            if ok:
+                self._log(f"[WARN] 接管 movej 已发出（sp={speed:.2f}）—— "
+                          "固件会作废在途点动/直线规划")
+            else:
+                self._log(f"[ERR] 接管 movej 未发出: {why}")
+            return
+        if supersede:
+            self._log("[INFO] 当前没有在途运动，按普通 movej 下发")
         self._submit(f"movej sp={speed:.2f}",
                      lambda arm: arm.movej(qs, speed), self._after_move)
 
@@ -791,6 +904,83 @@ class MainWindow(QMainWindow):
         self._submit(f"movep sp={speed:.2f}",
                      lambda arm: arm.move_p(pose, speed), self._after_move)
 
+    # ================= 笛卡尔直线 / 点动 =================
+    def _on_movel(self, pose, speed):
+        if self._motion_denied("movel"):
+            return
+        cur = self.pages["cart"]._tcp
+        if cur is None:
+            self._log("[INFO] 尚无当前位姿基线，先读一次 TCP 再判幅度")
+            self._submit("读 TCP（movel 前置）", lambda arm: arm.get_tcp().value,
+                         lambda res: self._movel_after_tcp(res, pose, speed))
+            return
+        self._movel_confirm_and_send(pose, speed, cur)
+
+    def _movel_after_tcp(self, res, pose, speed):
+        if not res.ok or res.value is None:
+            self._log(f"[WARN] 拒绝 movel — 读不到当前 TCP，无法判断幅度"
+                      f"（{res.error if not res.ok else '固件无应答'}）")
+            return
+        self.pages["cart"].show_tcp(res.value)
+        self._movel_confirm_and_send(pose, speed, res.value)
+
+    def _movel_confirm_and_send(self, pose, speed, cur):
+        plan = checks.plan_pose(cur, pose, self._settings.pose_confirm_pos,
+                                self._settings.pose_confirm_rot)
+        if plan.needs_confirm:
+            if QMessageBox.warning(
+                    self, "确认位姿幅度",
+                    f"movel 目标与当前位姿：\n\n{plan.summary()}\n\n确认下发？",
+                    QMessageBox.Ok | QMessageBox.Cancel,
+                    QMessageBox.Cancel) != QMessageBox.Ok:
+                return
+        self._submit(f"movel sp={speed:.2f}",
+                     lambda arm: arm.move_l(pose, speed), self._after_movel)
+
+    def _after_movel(self, res):
+        if not res.ok:
+            return
+        plan = res.value
+        settled = bool(getattr(plan, "settled", True))
+        err = float(getattr(plan, "settle_err_rad", 0.0) or 0.0)
+        if settled:
+            self._log("[OK] movel 到位")
+        else:
+            self._log(f"[WARN] movel 规划完成但未停在目标"
+                      f"（settled=False，settle_err={err:.3f} rad）")
+        # 运动结束后把真实落点读回来 —— 别让页面停在"计划目标"上。
+        self._submit("读 TCP（movel 后）", lambda arm: arm.get_tcp().value,
+                     lambda r: self.pages["cart"].show_tcp(r.value if r.ok else None))
+
+    def _on_jog_step(self, axis: str, kind: str, amount: float, frame: str,
+                     speed: float, gen: int):
+        """点动的一步：读实测 TCP → 算一小步 → move_l。"""
+        if self._motion_denied(f"点动 {axis}"):
+            self.pages["cart"].jog_result(gen, None)
+            return
+
+        def fn(arm):
+            tcp = arm.get_tcp().value
+            if tcp is None:
+                raise pa.InvalidCommandError("读不到当前 TCP，点动中止")
+            target = pose_math.jog_pose(tcp, axis, kind, amount, frame)
+            return tcp, target, arm.move_l(target, speed)
+
+        self._submit(f"点动 {axis}", fn,
+                     lambda res: self.pages["cart"].jog_result(gen, res))
+
+    def _on_stop_jog(self):
+        """受控停止：旁路写 movej 到当前实测关节角。
+
+        停止**不经过运动闸门**（和急停一样是降风险方向）；但链路断开时 worker
+        会拒绝并给出原因。
+        """
+        ok, why = self.worker.stop_jog_now()
+        if ok:
+            self._log("[WARN] 受控停止帧已发出 —— 在途点动/直线规划将被固件作废")
+        else:
+            self._log(f"[ERR] 受控停止未发出: {why}")
+
     # ================= 零重力 =================
     def _on_zero_g(self, on: bool):
         period = self.pages["zerog"].period_value()
@@ -821,12 +1011,26 @@ class MainWindow(QMainWindow):
                 self.pages["diag"].set_bench_error(str(res.error))
         self._submit("KIN_BENCH", lambda arm: arm.diag.kin_bench().value, done)
 
+    # ================= 窗口 =================
+    def activate(self):
+        """把已有窗口提到前台 —— 第二个实例启动时由单实例锁调用。"""
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     # ================= 关闭 =================
     def closeEvent(self, ev):  # noqa: N802 - Qt 命名
         self._timer.stop()
         self._ptimer.stop()
         try:
+            self.pages["gripper"].shutdown()
+        except Exception:  # noqa: BLE001 - 退出不该被夹爪卡住
+            pass
+        try:
             self.worker.close()
         except Exception:  # noqa: BLE001 - 退出不该被链路故障卡住
             pass
+        self.slog.close()
         super().closeEvent(ev)

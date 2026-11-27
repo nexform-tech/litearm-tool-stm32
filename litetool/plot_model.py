@@ -20,6 +20,12 @@ class PlotModel:
         self._q: list = []
         self._dq: list = []
         self._tau: list = []
+        # 导出用：温度 / 驱动状态码 / 断轴位图。曲线本身不画它们，但现场分析
+        # 恰恰常看这几列（超温、err=13 超时保护、某轴断轴），所以一并按窗口保留。
+        self._t_mos: list = []
+        self._t_coil: list = []
+        self._err: list = []
+        self._fault: list = []
         #: 最近若干次 push 的时刻 —— 用来算**实测**帧率（固件推多快，不是轮询多快）
         self._recent = collections.deque(maxlen=200)
 
@@ -30,6 +36,10 @@ class PlotModel:
             self._q.clear()
             self._dq.clear()
             self._tau.clear()
+            self._t_mos.clear()
+            self._t_coil.clear()
+            self._err.clear()
+            self._fault.clear()
             self._recent.clear()
 
     def push(self, st):
@@ -40,9 +50,14 @@ class PlotModel:
                 self._t0 = now
             t = now - self._t0
             self._times.append(t)
-            self._q.append([j.q for j in st.joints])
-            self._dq.append([j.dq for j in st.joints])
-            self._tau.append([j.tau for j in st.joints])
+            joints = st.joints
+            self._q.append([j.q for j in joints])
+            self._dq.append([j.dq for j in joints])
+            self._tau.append([j.tau for j in joints])
+            self._t_mos.append([getattr(j, "t_mos", 0.0) for j in joints])
+            self._t_coil.append([getattr(j, "t_coil", 0.0) for j in joints])
+            self._err.append([getattr(j, "err", 0) for j in joints])
+            self._fault.append(int(getattr(st, "joint_fault", 0) or 0))
             self._recent.append(now)
             # 剪除窗口外旧样本（每样本只被删一次, 摊还 O(1)）
             cutoff = t - self._window
@@ -51,6 +66,10 @@ class PlotModel:
                 del self._q[0]
                 del self._dq[0]
                 del self._tau[0]
+                del self._t_mos[0]
+                del self._t_coil[0]
+                del self._err[0]
+                del self._fault[0]
 
     def rate(self) -> float:
         """最近一段窗口的实测状态帧率 (Hz)。样本不足时返回 0。"""
@@ -70,3 +89,17 @@ class PlotModel:
         """返回 (times, q, dq, tau) 的浅拷贝快照；q/dq/tau 为 [样本][关节] 列表。"""
         with self._lock:
             return (list(self._times), list(self._q), list(self._dq), list(self._tau))
+
+    def snapshot_full(self) -> dict:
+        """导出用的完整快照（含温度/错误码/断轴位图），字段与 `csv_export` 对齐。"""
+        with self._lock:
+            return {
+                "times": list(self._times),
+                "q": list(self._q),
+                "dq": list(self._dq),
+                "tau": list(self._tau),
+                "t_mos": list(self._t_mos),
+                "t_coil": list(self._t_coil),
+                "err": list(self._err),
+                "fault": list(self._fault),
+            }

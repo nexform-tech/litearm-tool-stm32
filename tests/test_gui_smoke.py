@@ -15,8 +15,8 @@ pytest.importorskip("numpy")
 from litetool import settings as settings_mod                 # noqa: E402
 from tests.fake_arm import make_state                         # noqa: E402
 
-PAGE_KEYS = ("overview", "capture", "machine", "fault", "joint", "cart",
-             "zerog", "params", "install", "guide", "diag")
+PAGE_KEYS = ("overview", "capture", "log", "machine", "fault", "joint", "cart",
+             "zerog", "gripper", "params", "install", "activation", "guide", "diag")
 
 
 def _win():
@@ -41,6 +41,23 @@ def test_nav_has_three_groups_and_all_pages_registered():
     assert w.stack.count() == len(PAGE_KEYS)
     for key in PAGE_KEYS:
         assert key in w.pages, f"缺页面 {key}"
+    w.close()
+
+
+def test_activate_raises_an_existing_window():
+    """第二个实例启动时走这里：窗口已隐藏/最小化也要能重新显示。"""
+    w = _win()
+    w.show()
+    w.hide()
+    w.activate()
+    assert w.isVisible()
+    w.close()
+
+
+def test_log_page_is_wired_to_main_window_logs():
+    w = _win()
+    assert w.pages["log"].table.rowCount() >= 1, "启动那行 INFO 应进入日志页"
+    assert w.pages["log"].slog is w.slog
     w.close()
 
 
@@ -151,4 +168,26 @@ def test_plot_legend_hidden_until_there_are_curves():
     w.worker.model.push(make_state(n=1))
     ov.refresh_plot(w.worker.model)
     assert any(lg.isVisible() for lg in ov.plot._legends.values())
+    w.close()
+
+
+def test_activation_auto_read_uses_firmware_version():
+    """连上自动读授权记录时，固件版本要已经喂进页面 —— 旧固件才能直接说"升级"。"""
+    import litearm as pa
+    from PyQt5.QtTest import QTest
+
+    from tests.fake_arm import FakeArm
+
+    class OldFirmwareArm(FakeArm):
+        def license(self):
+            raise pa.MotionTimeoutError("no answer")
+
+    w = _win()
+    w.worker._factory = lambda port: OldFirmwareArm(firmware="Litearm1.5.3-7J")
+    w.worker.open("fake")
+    w._apply_online(True, "fake")
+    QTest.qWait(400)
+    hint = w.pages["activation"].record_hint.text()
+    assert "升级固件" in hint and "1.8.0" in hint, hint
+    w.worker.close()
     w.close()

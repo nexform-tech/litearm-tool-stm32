@@ -66,6 +66,18 @@ def test_save_writes_file(tmp_path):
         assert SCHEMA in f.read()
 
 
+def test_log_path_is_attached_and_sanitized(tmp_path):
+    pkg = build_diag_package(
+        firmware="x", n_joints=7, state=None,
+        log_path="/home/llx/.local/state/litearm-tool/tool.jsonl")
+    assert pkg["log"]["path"] == "~/.local/state/litearm-tool/tool.jsonl"
+
+
+def test_log_path_is_none_when_not_given():
+    pkg = build_diag_package(firmware="x", n_joints=7, state=None)
+    assert pkg["log"] is None
+
+
 def test_task_result_text_contains_code():
     e = pa.CommandRejectedError("x", cmd=0x2B, code=0x02)
     r = TaskResult("参数写入", False, error=e)

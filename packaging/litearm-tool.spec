@@ -25,7 +25,14 @@
 """
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_all
+
 ROOT = Path(SPECPATH).parent          # SPECPATH = <repo>/packaging
+
+# 固件升级 (USB DFU)：`libusb-package` 把 libusb 放在包目录里，PyInstaller 不会
+# 自动跟进去；不显式收进来的话，打出来的包在 Windows 上会“枚举不到 DFU 设备”。
+# `collect_all` 与 studio 的打包脚本同一口径（datas + binaries + hiddenimports）。
+LIBUSB_DATAS, LIBUSB_BINARIES, LIBUSB_HIDDEN = collect_all("libusb_package")
 
 # ---- 排除: 本工具确定用不到的 (只列"确定没用"的, 宁可留大也不漏) ----
 EXCLUDES = [
@@ -58,12 +65,16 @@ except Exception:
 a = Analysis(
     [str(ROOT / "litetool" / "__main__.py")],   # `python3 -m litetool` 的入口
     pathex=[str(ROOT)],                          # 让 litetool 从**工作树**里取
-    binaries=_grip_bins,
-    datas=[(str(ROOT / "config.yaml"), ".")] + _grip_datas,    # 随包基线 (找不到同级那份时兜底)
+    binaries=_grip_bins + LIBUSB_BINARIES,
+    datas=[(str(ROOT / "config.yaml"), ".")] + _grip_datas + LIBUSB_DATAS,    # 随包基线 (找不到同级那份时兜底)
     hiddenimports=[
         # 串口枚举靠 pyserial 的运行时后端, 静态分析看不到
         "serial.tools.list_ports",
         *_grip_hidden,
+        # 固件升级：pyusb 的后端是运行期才 import 的；libusb_package 在
+        # `engine._load_backend()` 里也是延迟 import。
+        "usb", "usb.core", "usb.util", "usb.backend.libusb1", "libusb_package",
+        *LIBUSB_HIDDEN,
     ],
     hookspath=[],
     runtime_hooks=[],

@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame,
 import litearm as pa
 
 from litetool import checks
+from litetool import dfu
 from litetool import obs
 from litetool import pose_math
 from litetool.diagnostics import build_diag_package, save_diag_package
@@ -29,6 +30,7 @@ from litetool.gui.pages.activation_page import ActivationPage
 from litetool.gui.pages.cart_page import CartPage
 from litetool.gui.pages.diag_page import DiagPage
 from litetool.gui.pages.fault_page import FaultPage
+from litetool.gui.pages.firmware_page import FirmwarePage
 from litetool.gui.pages.guide_page import TuningGuidePage
 from litetool.gui.pages.gripper_page import GripperPage
 from litetool.gui.pages.installation_page import InstallationPage
@@ -55,6 +57,8 @@ class MainWindow(QMainWindow):
         self._fault_blocked = False
         self._n = 0
         self._connected = False
+        self._upgrading = False          # 固件升级中：连接/解锁一律禁用
+        self._last_port: str | None = None
         self._log_tail: list = []       # 诊断包用：最近 200 行
         self._last_error = None         # 最近一次失败（SDK ErrorText）
         self._fault_snapshot: set = set()   # 已记录过的 (轴, 原因)，用于事件去重
@@ -179,6 +183,9 @@ class MainWindow(QMainWindow):
         self._add_page("activation", "授权",
                        "读取 UID / 在线激活（0x2F / 0x3F）",
                        ActivationPage())
+        self._add_page("firmware", "固件升级",
+                       "USB DFU (0483:DF11) —— 选镜像 / 烧录 / 回读校验",
+                       FirmwarePage())
         self.nav.select("overview")
 
         body = QWidget()
@@ -230,7 +237,7 @@ class MainWindow(QMainWindow):
                "操作": ("machine", "fault", "joint", "cart", "zerog", "gripper"),
                # ⚠ 新页 key 必须登记在这里: `_group_for` 用的是无默认值的 next(),
                # 漏登记会在 __init__ 期间抛 StopIteration -> 崩启动。
-               "参数": ("params", "install", "activation", "guide", "diag")}
+               "参数": ("params", "install", "activation", "firmware", "guide", "diag")}
 
     def _group_for(self, key: str):
         title = next(t for t, keys in self._GROUPS.items() if key in keys)
@@ -283,6 +290,11 @@ class MainWindow(QMainWindow):
         self.pages["gripper"].set_log(self._log)
         self.pages["activation"].set_log(self._log)
         self.pages["activation"].set_submit(self._submit)
+        fw = self.pages["firmware"]
+        fw.set_log(self._log)
+        fw.set_worker(self.worker)
+        fw.set_upgrading_cb(self._set_upgrading)
+        fw.reconnect_requested.connect(self._reconnect_after_upgrade)
         self.nav.navigated.connect(self._on_page_changed)
 
     def _on_nav(self, key: str):
@@ -293,6 +305,9 @@ class MainWindow(QMainWindow):
     def _on_page_changed(self, key: str):
         if key == "overview":
             self.pages["overview"].clear_plot()
+        elif key == "firmware":
+            # 进页面时顺手重探一次 DFU（板子可能在别处插上/复位了）。
+            self.pages["firmware"].refresh_status()
 
     def _on_guide(self, key: str):
         self.nav.select("guide")
@@ -417,15 +432,27 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "无可选串口", "未发现串口设备，请检查 USB 连接。")
             return
         self.btn_conn.setEnabled(False)
+        self._last_port = port
         try:
             self.worker.open(port)
         except Exception as e:  # noqa: BLE001 - SDK 的连接期异常都在这提示
             self._log(f"[ERR] 连接失败: {e}", category="session",
                       event="session.connect.failed", fields={"reason": str(e)})
-            QMessageBox.critical(self, "连接失败", str(e))
+            hint = ""
+            try:
+                # 板子停在 ROM bootloader 里时没有应用态 CDC —— "连接"永远失败。
+                # 这句话是 issue #152 的落点：不说清，操作员会去换线、换口、重装驱动，
+                # 而它只想被烧一次。
+                if dfu.engine.available() and dfu.engine.find_device() is not None:
+                    hint = ("\n\n检测到一块停在 bootloader (DFU) 里的控制器：它没有"
+                            "应用态可连，「连接」不会成功。请到「参数 → 固件升级」"
+                            "直接烧录，或断电重新上电。")
+            except Exception:  # noqa: BLE001 - 连接失败提示不该再炸一次
+                hint = ""
+            QMessageBox.critical(self, "连接失败", f"{e}{hint}")
             self._apply_online(False, str(e))
         finally:
-            self.btn_conn.setEnabled(True)
+            self.btn_conn.setEnabled(not self._upgrading)
 
     def _disconnect(self):
         self.worker.close()
@@ -434,6 +461,11 @@ class MainWindow(QMainWindow):
                   event="session.disconnected", fields={"reason": "用户断开"})
 
     def _on_online(self, ok: bool, why: str):
+        # 升级期间我们自己会 close 掉 worker（设备交出 CDC）。那条离线信号如果
+        # 比重连成功后的在线信号**晚**到，会把界面从"已接回"拉回离线 —— 所以要丢掉
+        # 这种过期的 False（判据是 worker 此刻确实在线）。
+        if self._upgrading and not ok and self.worker.online:
+            return
         self._apply_online(ok, why)
 
     def _on_reconnect(self, attempt: int, why: str):
@@ -446,16 +478,27 @@ class MainWindow(QMainWindow):
     def _apply_online(self, onl: bool, why: str = ""):
         self._connected = onl
         self.btn_conn.setText("断开" if onl else "连接")
-        self.dot.setText(ONLINE_TEXT if onl else OFFLINE_TEXT)
-        self.dot.setStyleSheet(
-            f"color:{'#6fdd8b' if onl else '#b0b0b0'};font-weight:bold;")
-        self.fw_lbl.setText(f"固件: {self.worker.firmware}" if onl else "固件: —")
+        if self._upgrading:
+            self.btn_conn.setText("连接")
+            self.btn_conn.setEnabled(False)
+            self.unlock_cb.setEnabled(False)
+            self.dot.setText("● 升级中")
+            self.dot.setStyleSheet("color:#ffd166;font-weight:bold;")
+            self.fw_lbl.setText("固件: 升级中")
+        else:
+            self.btn_conn.setEnabled(True)
+            self.unlock_cb.setEnabled(True)
+            self.dot.setText(ONLINE_TEXT if onl else OFFLINE_TEXT)
+            self.dot.setStyleSheet(
+                f"color:{'#6fdd8b' if onl else '#b0b0b0'};font-weight:bold;")
+            self.fw_lbl.setText(f"固件: {self.worker.firmware}" if onl else "固件: —")
         if not onl:
             self.strip.reset()
             # 断线必须回到锁定态 —— 否则重连后第一下手就是未确认的运动
             self._relock("链路断开")
         # 授权页连上即自动读一次 —— 先把固件版本喂进去，旧固件才能直接提示"升级固件"。
         self.pages["activation"].set_firmware(self.worker.firmware)
+        self.pages["firmware"].set_link_info(self._last_port or "", self.worker.firmware)
         for page in self.pages.values():
             if hasattr(page, "set_online"):
                 page.set_online(onl)
@@ -467,6 +510,61 @@ class MainWindow(QMainWindow):
             self.worker.cart_supported if onl else None,
             self.worker.cart_probe_silent if onl else False)
         self._apply_busy()
+
+    # ================= 固件升级（USB DFU） =================
+    def _set_upgrading(self, active: bool):
+        """升级期间锁死连接/解锁入口 —— 设备在 bootloader 里，普通命令一律不可达。"""
+        active = bool(active)
+        self._upgrading = active
+        if active:
+            self.btn_conn.setEnabled(False)
+            self.unlock_cb.setEnabled(False)
+            self._relock("固件升级")
+            self.btn_conn.setText("连接")
+            self.dot.setText("● 升级中")
+            self.dot.setStyleSheet("color:#ffd166;font-weight:bold;")
+            self.fw_lbl.setText("固件: 升级中")
+            self._log("[INFO] 固件升级期间：连接/解锁已禁用，升级结束后自动恢复")
+        else:
+            self.unlock_cb.setEnabled(True)
+            self._apply_online(self.worker.online, "升级结束")
+
+    def _upgrade_candidates(self, hint: str | None) -> list:
+        """升级后重连候选：上次的端口 → 板载 CDC。端口名重枚举后会变，所以必须发现。"""
+        out: list = []
+        if hint:
+            out.append(hint)
+        try:
+            for row in ports_mod.find_ports():
+                if row.get("_ours") and row["device"] not in out:
+                    out.append(row["device"])
+        except Exception:  # noqa: BLE001 - 枚举失败不该让重连直接放弃
+            pass
+        return out
+
+    def _reconnect_after_upgrade(self, hint: str):
+        """由升级线程通过信号请求，在 GUI 线程上真正重连 —— 保证 online 信号有顺序。"""
+        fw = self.pages["firmware"]
+        try:
+            self.worker.close()
+        except Exception as e:  # noqa: BLE001
+            self._log(f"[WARN] 升级重连前关闭串口失败: {e}")
+        last = ""
+        for port in self._upgrade_candidates(hint or self._last_port):
+            try:
+                self._last_port = port
+                self.worker.open(port)
+            except Exception as e:  # noqa: BLE001 - 设备还没回来是预期结局
+                last = f"{port}: {type(e).__name__}: {e}"
+                self._log(f"[WARN] 升级后重连失败 {last}")
+                continue
+            self._refresh_ports()
+            fw.reconnect_finished(True, port, self.worker.firmware, "")
+            self._log(f"[OK] 升级后已重新连接: {port} · {self.worker.firmware}")
+            return
+        fw.reconnect_finished(False, "", "",
+                              last or "没有发现 STM32 CDC 设备")
+        self._log(f"[ERR] 升级后重连失败: {last or '没有发现 STM32 CDC 设备'}")
 
     # ================= 运动解锁（全局一把） =================
     def _on_unlock(self, checked: bool):
@@ -1022,6 +1120,17 @@ class MainWindow(QMainWindow):
 
     # ================= 关闭 =================
     def closeEvent(self, ev):  # noqa: N802 - Qt 命名
+        # 升级烧到一半时退出，板子可能停在 bootloader —— 必须让人看见再决定。
+        fw = self.pages.get("firmware")
+        if fw is not None and fw.is_running():
+            reply = QMessageBox.warning(
+                self, "固件升级进行中",
+                "固件正在烧录/升级。现在退出会中断升级，可能让板子停在 "
+                "bootloader 或导致变砖。\n\n确定要退出吗？",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                ev.ignore()
+                return
         self._timer.stop()
         self._ptimer.stop()
         try:

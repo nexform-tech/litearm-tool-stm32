@@ -8,3 +8,8 @@ PyQt5>=5.15
 pyqtgraph>=0.13
 numpy>=1.21
 PyYAML>=6.0
+
+# 固件升级 (USB DFU) —— 烧录引擎只用 Python + pyusb；
+# `libusb-package` 自带 libusb DLL，Windows 上不能省（见 litetool/dfu/engine.py）。
+pyusb>=1.2
+libusb-package>=1.0

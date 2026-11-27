@@ -4,9 +4,11 @@
 
 LiteArm 运控固件（`litearm-stm32`，STM32H723）的桌面上位机工具。
 
-**交互层一律经 [`litearm-python`](https://github.com/nexform-tech/litearm-python) 完成** ——
+**应用层交互一律经 [`litearm-python`](https://github.com/nexform-tech/litearm-python) 完成** ——
 本工具不再自带协议实现，只做界面、意图层安全与调参台账。传输走板载复合 USB 的 CDC 口
-（gs_usb + CDC VCP，VID:PID `1d50:606f` → `/dev/ttyACM0`）。
+（gs_usb + CDC VCP，VID:PID `1d50:606f` → `/dev/ttyACM0`）。**唯一的例外**是固件升级页：
+STM32 ROM bootloader 是另一个 USB DFU 设备（`0483:DF11`），由 pyusb 直接驱动（见
+[固件升级](#固件升级usb-dfu)）—— 它不是应用层命令，SDK 里也没有对应 API。
 
 要求 `litearm-python >= 2.4.0`（固件 1.12.3 的故障详情按需查询）。
 
@@ -50,6 +52,7 @@ GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 
 | | **调参指南** | 公式与符号映射、读前须知、"症状→建议参数"速查、可展开逐参数详解 |
 | | **诊断** | `KIN_BENCH` 自检、启动复位原因、链路计数（CRC / 队满 / CAN 失败 / 控制拍超预算）、错误码文案、诊断包 |
 | | **授权** | 读设备授权记录（UID / 状态 / 客户号 / 签发日）；未激活设备可在线提交注册信息激活（`0x2F` / `0x3F`） |
+| | **固件升级** | USB DFU（`0483:DF11`）：选镜像并校验（版本 / 大小 / 地址范围 / SHA / 空洞），失能后进 ROM bootloader —— 或直接从已停在 bootloader 的板子起跑 —— 烧录并读回校验，进度 / 取消 / 结果 |
 
 ## 覆盖：SDK 公开面 → UI 入口
 
@@ -87,6 +90,7 @@ SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到�
 | `params.set_joint_param` / `set_joint_limits` | 参数表页逐关节下发（限位写成组整发） |
 | `params.reset_factory` | 参数表页 [恢复出厂] |
 | `license` / `activate` | 授权页（读 UID/状态；未激活时在线提交注册信息并回读确认） |
+| `enter_dfu` | 固件升级页（失能 → 进 ROM bootloader；DfuSe 引擎在 `litetool/dfu/`，不在 SDK 里） |
 | `log.start` / `stop` / `reader` / `capture` / `dump` | 采集页 |
 | `LogReader.total` / `wait_for` / `read_all` / `iter_chunks` / `samples` | 采集页 查进度 / 读回预览 / 采集全程 |
 | `diag.kin_bench` | 诊断页 [运行 KIN_BENCH 自检] |
@@ -137,6 +141,33 @@ SDK 侧是否还在；`tests/test_pages_sdk.py` 会盯住 UI 是否真的接到�
    不说"已停止"。[接管在途运动] 勾选后写一条 `movej` 旁路帧，作废在途笛卡尔规划；
    若在途的是另一条 `movej`，SDK 仍要等原目标收尾（固件已改道），日志会如实说明。
 
+## 固件升级（USB DFU）
+
+**固件升级**页通过 STM32 ROM bootloader（`0483:DF11`）烧录 `.hex` / `.bin`。烧录引擎逐字
+复用 studio 的 DfuSe 实现（`litetool/dfu/engine.py`；时序来自上游 `dfu-flash`，不许在这里
+重写）。
+
+- **两条合法起点**：连着应用态时先失能，再发 `CMD_ENTER_DFU (0x15)` 进 bootloader；
+  板子已经停在 bootloader 里时没有应用态会话（连不上是正常的），页面检测到 `0483:DF11`
+  就直接烧 —— 这是"救援"路径，页面上会明确说是哪一种。
+- **安全**：升级会先失能 —— 电机会松开，有重力负载的臂会下垂，先确认已放稳/有支撑。
+  软件急停对停在 bootloader 的板子无效，只能靠硬件急停/断电。许可证扇区与出厂标定扇区
+  （`0x080C0000..0x08100000`）不会被触碰：覆盖该区的镜像在任何硬件动作之前就被拒绝。
+- **镜像准入**：摘要显示版本、大小、地址范围、格式、空洞、SHA-256；不在 `0x08000000`、
+  超过 1MB Flash、覆盖受保护扇区的镜像不允许开始。
+- **进度与取消**：相位 + 字节 + 明细可见；取消在相位之间与等待类相位生效。烧录相位开始后
+  取消不再中止（擦一半比烧完更糟），结果/摘要会说明这一点。
+- **依赖**：`pyusb` + `libusb-package`（都在 `requirements.txt`，PyInstaller 也会收进去）。
+  Windows 上 DFU 设备还需要 ST 的 WinUSB 驱动。Linux 上加一条 udev 规则并重新插拔：
+  ```bash
+  echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", MODE="0666"' \
+    | sudo tee /etc/udev/rules.d/49-litearm-dfu.rules
+  sudo udevadm control --reload-rules && sudo udevadm trigger
+  ```
+- **真机验收**：离线测试覆盖引擎、镜像判据与整条流水线（假件）；成功/取消/拔线仍须真板
+  验证（见下面的真机验收清单）；引擎的擦除忙时长下界、读回校验、失败擦回空白正是那几次
+  要验的保护。
+
 ## 使用
 
 ```bash
@@ -178,6 +209,10 @@ venv、从同级 `litearm-python`（或 `-SdkSrc`）装 SDK、跑离线测试，
 USB CDC 驱动；端口列表为空时装 STM32 VCP 驱动。夹爪仅 Linux，不进 Windows 包；DFU（WinUSB）
 与 3D OpenGL 的 Windows 验收分别留在 #19 / #17。
 
+固件升级页需要 `pyusb` + `libusb-package`（`requirements.txt` 已包含）。Linux 上按
+[固件升级](#固件升级usb-dfu) 里的 udev 规则配置；Windows 上给 DFU 设备安装 ST 的 WinUSB
+驱动。
+
 ## 代码组织
 
 ```text
@@ -203,6 +238,12 @@ litetool/
   obs.py                结构化日志（JSONL、OpenTelemetry 字段名、脱敏）
   activation.py         激活服务客户端（唯一出网点；凭据/注册信息校验）
   license_io.py         授权记录（0x2F/0x3F）的形状层 + 聚合错误 0x02 的回读判定
+  dfu/
+    engine.py           DfuSe 烧录引擎（逐字来自 studio / 上游 dfu-flash；只依赖 pyusb）
+    image.py            镜像离线解析与准入判据（基址 / 1MB 上界 / 受保护扇区）
+    job.py              升级流水线（失能 → 进 DFU → 烧录 → 复位 → 重连）
+    fake.py             离线测试/演示用的假 DFU 引擎
+    controller.py       tool 侧适配：SdkWorker + pyusb 引擎 + GUI 线程重连
   gui/
     bridge.py           跨线程 Qt 信号桥（日志 / 任务结果 / 在线态）
     widgets.py          日志面板 / 常驻状态条 / 关节表 / 横幅 / 左侧导航
@@ -215,6 +256,7 @@ litetool/
       guide_page.py     调参指南  diag_page.py     诊断
       installation_page.py 安装方向
       activation_page.py 授权（读 UID / 在线激活）
+      firmware_page.py 固件升级（USB DFU）
       common.py         pose/关节输入组等共用件
       plot_pane.py      三段联动曲线组件
     main_window.py      主窗口组装 + 命令收口（Δq 确认/解锁/急停流程）
@@ -229,7 +271,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 558 passed（全部离线，无需硬件）
+python3 -m pytest          # 612 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |
@@ -244,10 +286,14 @@ python3 -m pytest          # 558 passed（全部离线，无需硬件）
 | `test_fault_display.py` | 旧固件 `fault_reason` 为空时的回退 |
 | `test_fault_page.py` | 故障页布局与 7 轴一屏 |
 | `test_diagnostics.py` | 错误码文案与诊断包 |
-| `test_gui_smoke.py` | 构建与布局回归（导航 3 组 12 页、台架 1J、运动页默认锁定） |
+| `test_gui_smoke.py` | 构建与布局回归（导航 3 组 13 页、台架 1J、运动页默认锁定） |
 | `test_activation.py` | 激活客户端：凭据解析 / 注册信息校验 / 服务错误映射 / 内部通道令牌（含 studio 的配置路径覆盖）；**不出网** |
 | `test_activation_page.py` | 授权页：三态记录、失败重读/断线保留、同意书文案、提交门禁、使能拦截、0x02 与未确认回读、连上自动读取 |
 | `test_app_flags.py` | `--activation-url` 解析（空格/`=` 两种形态；缺值不能吞掉后面的 Qt 参数） |
+| `test_dfu_engine.py` | DfuSe 引擎（从 studio 搬入）：擦除忙时长下界、读回校验、失败擦回空白、受保护区 `skip` / `wipe` |
+| `test_dfu_image.py` | 镜像准入（基址 / 1MB / 受保护区 / HEX vs BIN）与假 hooks 的流水线相位 |
+| `test_dfu_controller.py` | tool 侧适配：失能/进 DFU 失败映射、`enter_dfu` 后放串口、udev 权限重试、开跑前闸门 |
+| `test_firmware_page.py` | 固件升级页（假引擎 + 假 SDK）：摘要、from-DFU 路径、完整流水线、失败、取消、重连 RPC |
 | `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | 意图层与纯数据层 |
 | `test_preset_sync.py` | `presets/` 与 `templates/` 逐字段比对固件 `defaults.c`（固件仓在场时生效，`LITEARM_FW_DIR` 可指定） |
 
@@ -293,6 +339,12 @@ python3 -m pytest          # 558 passed（全部离线，无需硬件）
    - [ ] 以 20N 抓取 3s → 保持住；[停止 / 释放] 中止在途抓取、把力矩拉到 0 并失能
    - [ ] [读取标定] 显示行程与安装方向；保存并重新加载标定文件
    - [ ] Windows（或未安装 `litegrip-python`）时页面写明平台限制并禁用连接
+12. **固件升级**（需测试镜像且臂有支撑）：
+   - [ ] 连着应用态：选镜像 → 摘要一致；开始 → 先失能、进 bootloader、显示相位 + 字节
+         进度，结束后带预期版本重新连上
+   - [ ] 在烧录相位之前取消 → 一个字节都不写，板子回到应用态
+   - [ ] 烧录中途拔线 → 结果说明失败；重新升级（页面会检测到仍停在 DFU 的板子）把它救回来
+   - [ ] 板子已经停在 bootloader：页面显示"DFU"与 USB 位置；不需要串口会话即可开始烧录
 
 ## 参数调参页（"参数表"页）
 

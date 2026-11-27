@@ -121,7 +121,27 @@ sudo ip link set can0 up
 
 ---
 
-## 七、日志 / 反馈问题
+## 七、固件升级（USB DFU）
+
+界面「参数 → 固件升级」可以通过 STM32 ROM bootloader（`0483:DF11`）烧录 `.hex` / `.bin`
+固件。包内已经带好 pyusb + libusb，**目标机不需要另装**。
+
+Linux 首次使用需要一条 udev 规则（否则 DFU 设备会报"权限不足"）：
+
+```bash
+echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="df11", MODE="0666"' \
+  | sudo tee /etc/udev/rules.d/49-litearm-dfu.rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Windows 上还需要给 DFU 设备安装 ST 的 WinUSB 驱动。
+
+> ⚠ 升级会先让机械臂**失能**（有重力负载会下垂，先放稳/支撑）；升级期间软件急停无效，
+> 只能靠硬件急停/断电。许可证与出厂标定所在的扇区不会被触碰。
+
+---
+
+## 八、日志 / 反馈问题
 
 界面右下角有日志面板，出错信息会带 `[ERR]` 前缀显示在那里。
 

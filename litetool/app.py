@@ -43,14 +43,30 @@ def config_path() -> str | None:
 
 
 def main(argv=None) -> int:
-    from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtWidgets import QApplication, QMessageBox
 
     from litetool.gui.main_window import MainWindow
+    from litetool.instance import InstanceGuard
     from litetool.settings import Settings
 
     settings = Settings.load(config_path())
     app = QApplication(list(sys.argv if argv is None else argv))
     app.setApplicationName("LiteArm Tool STM32")
+
+    # 串口只能有一个所有者：第二个实例不打开串口，只把已有窗口提到前台。
+    guard = InstanceGuard()
+    if not guard.acquire():
+        print("LiteArm Tool 已在运行，已切换到已有窗口。", file=sys.stderr)
+        QMessageBox.information(
+            None, "LiteArm Tool",
+            "已有实例在运行，已为你切换到该窗口。\n"
+            "同一时间只允许一个上位机占用串口。")
+        return 0
+    if guard.lock_error:
+        # 建不出锁不阻止启动，但必须留痕：否则用户会以为"单实例保护生效了"。
+        print(f"[WARN] 单实例锁不可用: {guard.lock_error}", file=sys.stderr)
+
     win = MainWindow(settings)
+    guard.activated.connect(win.activate)
     win.show()
     return app.exec_()

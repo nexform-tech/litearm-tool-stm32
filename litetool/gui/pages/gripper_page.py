@@ -72,8 +72,10 @@ class GripperPage(QWidget):
         self.hold = spin(0.5, 60.0, 3.0, 0.5)
         self.btn_grasp = QPushButton("抓取")
         self.btn_grasp.clicked.connect(self._on_grasp)
-        self.btn_stop = QPushButton("停止 / 释放（零力矩）")
-        self.btn_stop.setToolTip("旁路发零力矩帧；不排队等持力结束。不代替机械臂急停。")
+        self.btn_stop = QPushButton("停止 / 释放")
+        self.btn_stop.setToolTip(
+            "旁路发零力矩帧；若有动作在途，再失能电机以中止它（否则保力循环下一帧\n"
+            "就会把力矩写回来），并丢弃排队中的动作。不代替机械臂急停。")
         self.btn_stop.clicked.connect(self._on_stop)
         self.btn_refresh = QPushButton("刷新状态")
         self.btn_refresh.clicked.connect(lambda: self._act("刷新", self._worker.refresh))
@@ -86,7 +88,7 @@ class GripperPage(QWidget):
                 self.btn_grasp, self.btn_stop),
             row(self.btn_refresh),
             hint("⚠ 夹爪与机械臂共用现场空间：抓取前确认手指路径上没有人。"
-                 "「停止 / 释放」只发零力矩帧，不是机械臂急停。"),
+                 "「停止 / 释放」会发零力矩帧并中止在途动作，但不是机械臂急停。"),
         )
 
         # ---------------- 遥测 ----------------
@@ -215,8 +217,7 @@ class GripperPage(QWidget):
 
     def _on_stop(self):
         ok, why = self._worker.stop_now()
-        self._log(("[WARN] 夹爪零力矩帧已发出" if ok
-                   else f"[ERR] 夹爪停止未发出: {why}"))
+        self._log(("[WARN] 夹爪停止: " if ok else "[ERR] 夹爪停止未完整生效: ") + why)
 
     def _on_write_zero(self):
         if not self._worker.online:

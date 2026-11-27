@@ -72,6 +72,8 @@ class GripperWorker:
         self._stop = threading.Event()
         self._tasks: "queue.Queue[tuple]" = queue.Queue()
         self._busy = threading.Event()
+        #: 停止/释放请求落在**在途任务**上：任务返回后按"已中止"上报，而不是成功。
+        self._interrupted = threading.Event()
         self._lock = threading.Lock()
         self._state: Any = None
         self._online = False
@@ -183,19 +185,60 @@ class GripperWorker:
         self._tasks.put((name, fn, on_done))
 
     def stop_now(self) -> tuple:
-        """**旁路**急停/释放：零力矩帧，不排队等长 `grasp`。
+        """**旁路**停止/释放：零力矩帧，动作在途时再失能，并丢弃排队任务。
 
-        与机械臂的急停同一类通道：只写不读、不经过任务队列。`grasp` 正在
-        持力时，这一条会立刻把力矩拉到 0。
+        与机械臂的急停同一类通道：只写不读、不经过任务队列。但**一帧零力矩挡不住
+        正在跑的 `grasp` 保力循环** —— 它下一拍就会把力矩写回来。所以：
+
+        * 有动作在途（`_busy`）→ 补一次 `disable()`：SDK 的下一次 `send_mit_frame`
+          会因未使能直接失败，保力/行进循环随即退出，`_interrupt` 让这次任务按
+          "已中止"上报，而不是成功；
+        * 排队中的任务一律丢弃（语义同机械臂的 `drop_pending`）—— 用户按"停止"之后
+          不该再执行任何排队的抓取；
+        * 空闲时只发零力矩帧，不动使能态。
+
+        返回 `(ok, 说明)`；ok=False 表示停止没有完整生效，调用方必须如实提示。
         """
         grip = self._grip
         if grip is None:
             return False, "夹爪未连接"
+        busy = self._busy.is_set()
+        dropped = self.drop_pending("停止/释放")
+        if busy:
+            # 只标记在途任务；排队任务已经被丢掉，不会误伤下一条新任务。
+            self._interrupted.set()
         try:
             grip.stop()
         except Exception as e:  # noqa: BLE001 - 失败必须如实上报
             return False, str(e)
-        return True, "零力矩帧已发出"
+        if busy:
+            # 零力矩帧已经发出；失能失败必须说清楚 —— 在途动作可能还在继续。
+            try:
+                grip.disable()
+            except Exception as e:  # noqa: BLE001
+                return False, (f"零力矩帧已发出，但失能失败（在途动作可能继续）: {e}")
+            extra = " · 已失能并中止在途动作"
+        else:
+            extra = ""
+        if dropped:
+            extra += f" · 已丢弃 {dropped} 条排队任务"
+        return True, "零力矩帧已发出" + extra
+
+    def drop_pending(self, reason: str = "停止") -> int:
+        """丢掉尚未开始的夹爪任务，返回条数。每条都补一次失败回调。"""
+        n = 0
+        while True:
+            try:
+                name, _fn, on_done = self._tasks.get_nowait()
+            except queue.Empty:
+                return n
+            n += 1
+            res = GripperTaskResult(
+                name, False, error=RuntimeError(f"任务已被丢弃（{reason}）"))
+            try:
+                (on_done or self._on_task)(res)
+            except Exception:  # noqa: BLE001 - GUI 回调出错不能拖垮调用方
+                pass
 
     # ---- 常用动作（页面用） ----
     def enable(self, cb=None) -> None:
@@ -304,7 +347,14 @@ class GripperWorker:
             res = GripperTaskResult(name, False, error=e)
         finally:
             self._busy.clear()
-        if self._stop.is_set() and res.ok:
+        if self._interrupted.is_set():
+            # 这一条是在途任务，被 stop_now() 中止：不管底层返回什么，都按"已中止"
+            # 上报 —— 否则界面会把一次被打断的抓取显示成"完成"。
+            self._interrupted.clear()
+            detail = f"（{res.error}）" if not res.ok and res.error else ""
+            res = GripperTaskResult(
+                name, False, error=RuntimeError(f"已按停止/释放中止{detail}"))
+        elif self._stop.is_set() and res.ok:
             res = GripperTaskResult(name, False,
                                     error=RuntimeError("夹爪已断开"))
         self._log(f"[{'OK' if res.ok else 'ERR'}] {res.text}")

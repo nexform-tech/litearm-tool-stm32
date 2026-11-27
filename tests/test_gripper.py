@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -112,6 +113,65 @@ def test_worker_connects_polls_and_runs_actions():
         w.close()
     assert not w.online
     assert "disconnect" in grip.calls
+
+
+class BlockingGraspGrip(FakeGrip):
+    """保力循环直到失能才退出的假件 —— 用来验证"停止"真的能中止在途抓取。"""
+
+    def __init__(self, channel="can0", can_id=8, mst_id=None):
+        super().__init__(channel, can_id, mst_id)
+        self.grasp_started = threading.Event()
+        self.grasp_release = threading.Event()
+
+    def grasp(self, force_n=None, hold_s=0.0, **kw):
+        self.calls.append(("grasp", force_n, hold_s))
+        self.grasp_started.set()
+        self.grasp_release.wait(2.0)       # 只有 disable() 会放行
+        return "grasped"
+
+    def disable(self):
+        self.enabled = False
+        self.calls.append("disable")
+        self.grasp_release.set()
+
+    def stop(self):
+        self.stopped = True
+        self.calls.append("stop")
+
+
+def test_stop_during_a_grasp_disables_and_drops_queued_work():
+    """一帧零力矩压不住保力循环：必须失能 + 丢弃排队任务，且如实报"已中止"。"""
+    grip = BlockingGraspGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        running, queued = [], []
+        w.grasp(20.0, 30.0, cb=running.append)
+        assert grip.grasp_started.wait(1.0)
+
+        w.open_jaws(cb=queued.append)       # 排在抓取后面
+        ok, why = w.stop_now()
+        assert ok and "失能" in why, why
+        assert "disable" in grip.calls
+
+        assert wait_for(lambda: running), "在途抓取没有结束"
+        assert not running[0].ok and "中止" in str(running[0].error)
+        assert queued and not queued[0].ok and "丢弃" in str(queued[0].error)
+    finally:
+        w.close()
+
+
+def test_stop_when_idle_only_sends_zero_torque():
+    """空闲时只发零力矩帧，不改变使能态。"""
+    w, grip = _worker()
+    try:
+        w.open()
+        ok, why = w.stop_now()
+        assert ok and "失能" not in why
+        assert "disable" not in grip.calls
+    finally:
+        w.close()
+
 
 
 def test_calibration_summary_reports_travel_and_mount():

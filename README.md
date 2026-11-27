@@ -54,6 +54,7 @@ three navigation groups on the left + a collapsible log at the bottom.
 | Tuning | **Parameters** | Joint parameters and the 0x26/0x27/0x28 feed-forward family: read back / edit and send / ff_mask / batch import-export / persist to flash / factory reset |
 | | **Tuning guide** | Formulas and symbol mapping, read-before-you-start notes, symptom→parameter quick table, expandable per-parameter details |
 | | **Diagnostics** | `KIN_BENCH` self-test, reset reason, link counters (CRC / queue full / CAN failures / control-tick overruns), error-code text, diagnostics bundle |
+| | **Activation** | Read the device license record (UID / state / customer id / issue date); online registration to activate an unactivated arm (`0x2F` / `0x3F`) |
 
 ## Coverage: SDK public surface → UI entry
 
@@ -91,6 +92,7 @@ whether the UI is actually wired to it).
 | `params.get_joint_param` / `all_joint_params` | Parameters page [Refresh current] |
 | `params.set_joint_param` / `set_joint_limits` | Parameters page per-joint send (limits are sent as a pair) |
 | `params.reset_factory` | Parameters page [Factory reset] |
+| `license` / `activate` | Activation page (read UID/state; online registration with read-back when unactivated) |
 | `log.start` / `stop` / `reader` / `capture` / `dump` | Capture page |
 | `LogReader.total` / `wait_for` / `read_all` / `iter_chunks` / `samples` | Capture page progress / read-back preview / full capture |
 | `diag.kin_bench` | Diagnostics page [Run KIN_BENCH self-test] |
@@ -165,6 +167,7 @@ The tool covers only the operator-intent layer the firmware cannot enforce:
 pip install -e ../litearm-python     # interaction layer (>= 2.4.0)
 pip install -r requirements.txt
 python3 main.py                       # a normal user is enough if the port is in the dialout group
+python3 main.py --activation-url https://act.nexform.tech   # activation service (production by default)
 ```
 
 After launch: choose the port in the top bar → connect → the firmware version appears in the top
@@ -220,6 +223,8 @@ litetool/
   settings.py           config.yaml merge (type + range validation)
   csv_export.py         CSV writer for the plot window and 300 Hz capture (units in headers)
   obs.py                Structured logging (JSONL, OpenTelemetry field names, redaction)
+  activation.py         Activation-service client (the only outbound network point; license/registration checks)
+  license_io.py         License record (0x2F/0x3F) shape layer + read-back verdict for aggregated error 0x02
   gui/
     bridge.py           Cross-thread Qt signal bridge (log / task result / online state)
     widgets.py          Log panel / persistent status strip / joint table / banner / left navigation
@@ -231,7 +236,7 @@ litetool/
       gripper_page.py   Gripper       log_page.py      Logs
       guide_page.py     Tuning guide  diag_page.py     Diagnostics
       installation_page.py  Installation direction
-      log_page.py       Structured log viewer
+      activation_page.py    Activation (read UID / online activation)
       common.py         Shared pose/joint input widgets
       plot_pane.py      Three-pane linked plot component
     main_window.py      Main-window assembly + command gate (Δq / unlock / emergency flows)
@@ -247,7 +252,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 500 passed (all offline, no hardware required)
+python3 -m pytest          # 558 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -262,7 +267,10 @@ python3 -m pytest          # 500 passed (all offline, no hardware required)
 | `test_fault_display.py` | Fallback when an older firmware leaves `fault_reason` empty |
 | `test_fault_page.py` | Faults-page layout and all 7 axes on one screen |
 | `test_diagnostics.py` | Error-code text and the diagnostics bundle |
-| `test_gui_smoke.py` | Build and layout regression (3 navigation groups, 9 pages, 1J bench, motion pages locked by default) |
+| `test_gui_smoke.py` | Build and layout regression (3 navigation groups, 12 pages, 1J bench, motion pages locked by default) |
+| `test_activation.py` | Activation client: license parsing / registration validation / service-error mapping / internal channel token (incl. studio's config-path override); **no network** |
+| `test_activation_page.py` | Activation page: record states, stale record / disconnect, consent document, submit-button gating, enabled-device gate, 0x02 + unconfirmed read-back, connect auto-read |
+| `test_app_flags.py` | `--activation-url` parsing (space/`=` forms; a missing value must not swallow the next Qt argument) |
 | `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | Intent layer and pure data layer |
 | `test_preset_sync.py` | Field-by-field comparison of `presets/` and `templates/` against firmware `defaults.c` (runs when the firmware tree is present; `LITEARM_FW_DIR` can point to it) |
 

@@ -25,6 +25,7 @@ from litetool.diagnostics import build_diag_package, save_diag_package
 from litetool import ports as ports_mod
 from litetool.gui.bridge import GuiBridge
 from litetool.gui.pages.capture_page import CapturePage
+from litetool.gui.pages.activation_page import ActivationPage
 from litetool.gui.pages.cart_page import CartPage
 from litetool.gui.pages.diag_page import DiagPage
 from litetool.gui.pages.fault_page import FaultPage
@@ -175,6 +176,9 @@ class MainWindow(QMainWindow):
         self._add_page("install", "安装方向",
                        "gravity 向量 (0x28 item6) —— 正装/侧装/倒装",
                        InstallationPage())
+        self._add_page("activation", "授权",
+                       "读取 UID / 在线激活（0x2F / 0x3F）",
+                       ActivationPage())
         self.nav.select("overview")
 
         body = QWidget()
@@ -226,7 +230,7 @@ class MainWindow(QMainWindow):
                "操作": ("machine", "fault", "joint", "cart", "zerog", "gripper"),
                # ⚠ 新页 key 必须登记在这里: `_group_for` 用的是无默认值的 next(),
                # 漏登记会在 __init__ 期间抛 StopIteration -> 崩启动。
-               "参数": ("params", "install", "guide", "diag")}
+               "参数": ("params", "install", "activation", "guide", "diag")}
 
     def _group_for(self, key: str):
         title = next(t for t, keys in self._GROUPS.items() if key in keys)
@@ -277,6 +281,8 @@ class MainWindow(QMainWindow):
             lambda m: self._log(m, category="installation"))
         self.pages["install"].set_submit(self._submit)
         self.pages["gripper"].set_log(self._log)
+        self.pages["activation"].set_log(self._log)
+        self.pages["activation"].set_submit(self._submit)
         self.nav.navigated.connect(self._on_page_changed)
 
     def _on_nav(self, key: str):
@@ -448,6 +454,8 @@ class MainWindow(QMainWindow):
             self.strip.reset()
             # 断线必须回到锁定态 —— 否则重连后第一下手就是未确认的运动
             self._relock("链路断开")
+        # 授权页连上即自动读一次 —— 先把固件版本喂进去，旧固件才能直接提示"升级固件"。
+        self.pages["activation"].set_firmware(self.worker.firmware)
         for page in self.pages.values():
             if hasattr(page, "set_online"):
                 page.set_online(onl)
@@ -562,6 +570,8 @@ class MainWindow(QMainWindow):
         # （安装方向页的"须先失能"硬拦依赖它 —— 旧快照会拿过期的 enabled 放行）
         self.pages["params"].update_from(st)
         self.pages["install"].update_from(st)
+        self.pages["activation"].update_from(st)
+        self.pages["activation"].set_firmware(self.worker.firmware)
         if st is not None:
             self.pages["cart"].set_seed_q(st.q)
             self.pages["joint"].fill_from(st)

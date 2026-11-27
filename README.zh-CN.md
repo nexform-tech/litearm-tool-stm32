@@ -140,12 +140,17 @@ python3 main.py                       # 普通用户即可（串口在 dialout �
 
 配置见 [config.yaml](config.yaml)（仅交互层参数，不含限位）。
 
+**同一时间只允许一个实例。** 第二次启动不会打开串口，而是把已在运行的窗口提到前台后退出；
+锁是本地套接字（`QLocalServer`），上次崩溃留下的陈旧锁会在下次启动时自动清理。第二个
+进程会弹一条简短提示说明退出原因。
+
 ## 代码组织
 
 ```text
 main.py                 入口（薄壳, 转调 litetool.app:main）
 litetool/
   app.py                启动入口（`python3 -m litetool` / `litearm-tool` 命令共用）
+  instance.py           单实例锁（本地套接字；第二次启动只把已有窗口提到前台）
   sdk_worker.py         ★ 唯一持有 pa.Arm 的线程 + 任务队列 + 状态钩子
   params_io.py          在 pa.Arm 之上的参数读写形状层（页面要 (ok, code)）
   diagnostics.py        错误码文案 / 诊断包 / 链路计数汇总

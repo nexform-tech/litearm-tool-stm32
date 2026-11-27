@@ -821,6 +821,15 @@ class MainWindow(QMainWindow):
                 self.pages["diag"].set_bench_error(str(res.error))
         self._submit("KIN_BENCH", lambda arm: arm.diag.kin_bench().value, done)
 
+    # ================= 窗口 =================
+    def activate(self):
+        """把已有窗口提到前台 —— 第二个实例启动时由单实例锁调用。"""
+        if self.isMinimized():
+            self.showNormal()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     # ================= 关闭 =================
     def closeEvent(self, ev):  # noqa: N802 - Qt 命名
         self._timer.stop()

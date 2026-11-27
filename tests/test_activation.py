@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -185,7 +186,11 @@ def test_channel_token_env_wins_and_headers(monkeypatch):
 
 def test_channel_token_reads_tool_config_then_studio(tmp_path, monkeypatch):
     monkeypatch.delenv(activation.TOKEN_ENV, raising=False)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    # 代码按平台选根目录：Windows 是 %APPDATA%，其他平台是 XDG_CONFIG_HOME。
+    if sys.platform == "win32":
+        monkeypatch.setenv("APPDATA", str(tmp_path))
+    else:
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     (tmp_path / "litearm-studio").mkdir()
     (tmp_path / "litearm-studio" / "activation-channel.json").write_text(
         '{"token": "studio-tok"}', encoding="utf-8")

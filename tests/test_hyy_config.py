@@ -68,6 +68,11 @@ def test_fixture_sha_is_the_verified_one():
         "副本 sha 变了 —— 本文件里所有期望值都是针对 b423bf1ff35db041 标定的, 必须重新核对")
 
 
+def test_fixture_is_checked_out_with_lf():
+    """`.gitattributes` 必须锁住 LF；Windows checkout 的 CRLF 会改掉 fixture SHA。"""
+    assert b"\r\n" not in FIXTURE.read_bytes()
+
+
 def test_parse_basic_fields(cfg):
     assert cfg.sha256_16 == EXPECT_SHA16
     assert cfg.version == "13.0.0"

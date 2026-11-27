@@ -1,0 +1,3 @@
+# Tests hash this fixture byte-for-byte. Windows checkouts must not rewrite
+# its LF endings, or the SHA assertions in tests/test_hyy_config.py fail.
+tests/data/DeviceConfig.yaml text eol=lf

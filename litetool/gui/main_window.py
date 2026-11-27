@@ -27,6 +27,7 @@ from litetool.gui.pages.cart_page import CartPage
 from litetool.gui.pages.diag_page import DiagPage
 from litetool.gui.pages.fault_page import FaultPage
 from litetool.gui.pages.guide_page import TuningGuidePage
+from litetool.gui.pages.gripper_page import GripperPage
 from litetool.gui.pages.installation_page import InstallationPage
 from litetool.gui.pages.joint_page import JointPage
 from litetool.gui.pages.machine_page import MachinePage
@@ -155,6 +156,9 @@ class MainWindow(QMainWindow):
         self._add_page("cart", "笛卡尔", "get_tcp / ik / move_p",
                        CartPage(self._settings))
         self._add_page("zerog", "零重力", "拖动示教（保活由 SDK 维持）", ZeroGPage())
+        self._add_page("gripper", "夹爪",
+                       "LiteGrip（仅 Linux）：连接/使能/开合/抓取/标定",
+                       GripperPage(self._settings))
         self._add_page("params", "参数表", "关节/前馈参数读写与批量导入导出",
                        ParamsPage())
         self._add_page("guide", "调参指南", "公式 / 症状速查 / 逐参数详解",
@@ -211,7 +215,7 @@ class MainWindow(QMainWindow):
         return self.stack.currentWidget().widget()
 
     _GROUPS = {"监视": ("overview", "capture"),
-               "操作": ("machine", "fault", "joint", "cart", "zerog"),
+               "操作": ("machine", "fault", "joint", "cart", "zerog", "gripper"),
                # ⚠ 新页 key 必须登记在这里: `_group_for` 用的是无默认值的 next(),
                # 漏登记会在 __init__ 期间抛 StopIteration -> 崩启动。
                "参数": ("params", "install", "guide", "diag")}
@@ -255,6 +259,7 @@ class MainWindow(QMainWindow):
         self.pages["capture"].set_submit(self._submit)
         self.pages["install"].set_log(self._log)
         self.pages["install"].set_submit(self._submit)
+        self.pages["gripper"].set_log(self._log)
         self.nav.navigated.connect(self._on_page_changed)
 
     def _on_nav(self, key: str):
@@ -825,6 +830,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, ev):  # noqa: N802 - Qt 命名
         self._timer.stop()
         self._ptimer.stop()
+        try:
+            self.pages["gripper"].shutdown()
+        except Exception:  # noqa: BLE001 - 退出不该被夹爪卡住
+            pass
         try:
             self.worker.close()
         except Exception:  # noqa: BLE001 - 退出不该被链路故障卡住

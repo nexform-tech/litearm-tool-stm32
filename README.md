@@ -49,6 +49,7 @@ three navigation groups on the left + a collapsible log at the bottom.
 | | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all` |
 | | **Cartesian** | Read TCP / `ik` solve / `move_p` |
 | | **Zero-G** | Hand-guiding (keep-alive is maintained by the SDK background thread; this tool sends no heartbeat frames) |
+| | **Gripper** | LiteGrip (Linux only): connect / enable / open / close / grasp / zero-torque stop / telemetry / calibration / write zero |
 | Tuning | **Parameters** | Joint parameters and the 0x26/0x27/0x28 feed-forward family: read back / edit and send / ff_mask / batch import-export / persist to flash / factory reset |
 | | **Tuning guide** | Formulas and symbol mapping, read-before-you-start notes, symptom→parameter quick table, expandable per-parameter details |
 | | **Diagnostics** | `KIN_BENCH` self-test, reset reason, link counters (CRC / queue full / CAN failures / control-tick overruns), error-code text, diagnostics bundle |
@@ -162,6 +163,13 @@ bench are detected from the status-frame length.
 
 Configuration lives in [config.yaml](config.yaml) (interaction settings only, no limits).
 
+**LiteGrip (optional, Linux only).** Install `requirements-gripper.txt`, bring up SocketCAN at
+1 Mbit/s (`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`), then use the
+**Gripper** page. On Windows or without `litegrip-python` the page stays visible but disabled and
+states why. Channel / CAN ID / MST ID take effect on reconnect; calibration decides travel and
+direction, and the SDK refuses motion until one is loaded. The stop button sends a zero-torque
+frame, not an emergency stop for the arm.
+
 ## Code organization
 
 ```text
@@ -174,6 +182,7 @@ litetool/
   model_io.py           HYY model and parameter import/export
   hyy_config.py         HYY configuration parsing
   ports.py              Port enumeration (onboard CDC first)
+  gripper.py            LiteGrip worker (own thread, SocketCAN; Linux only)
   plot_model.py         Thread-safe state ring buffer (with measured frame rate)
   checks.py             Intent-layer confirmation (Δq / pose magnitude; the only "safety" module)
   param_catalog.py      Tuning catalog mirror + schema/diff/ff_mask + role/hint/detail
@@ -188,6 +197,7 @@ litetool/
       fault_page.py     Faults        machine_page.py  Machine
       joint_page.py     Joints        cart_page.py     Cartesian
       zerog_page.py     Zero-G        params_page.py   Parameters
+      gripper_page.py   Gripper       log_page.py      Logs
       guide_page.py     Tuning guide  diag_page.py     Diagnostics
       installation_page.py  Installation direction
       common.py         Shared pose/joint input widgets
@@ -205,7 +215,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 438 passed (all offline, no hardware required)
+python3 -m pytest          # 433 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -252,6 +262,11 @@ python3 -m pytest          # 438 passed (all offline, no hardware required)
 10. **Abnormal paths**:
    - [ ] Click other buttons rapidly while a command is running → "busy", no concurrent sends
    - [ ] Enter an extreme value for `move_j` → the log shows the firmware ERR rejection, the arm does not move
+11. **Gripper** (Linux, LiteGrip on `can0`):
+   - [ ] Connect → enable → open/close; telemetry shows fresh position, force and temperatures
+   - [ ] Grasp 20 N for 3 s → holds; [Stop / release] drops the torque immediately
+   - [ ] [Read calibration] shows travel and mount direction; save and reload a calibration file
+   - [ ] On Windows (or without `litegrip-python`) the page states the platform limit and disables connect
 
 ## Parameter tuning page
 
@@ -359,3 +374,6 @@ YAML, and the UI). Values follow firmware `params.c` and `flash_store.c apply_lo
 - The UI's firmware-error display is the command name + generic code meaning (`describe`); the
   per-command detail is in the SDK exception's `err_reason` message (the `str(e)` of
   `CommandRejectedError`).
+- Gripper support is Linux-only and needs `litegrip-python` plus a SocketCAN interface already up
+  at 1 Mbit/s. Changing channel / CAN ID / MST ID requires a reconnect. The zero-torque stop is
+  not a substitute for the arm's emergency stop, and the gripper link does not auto-reconnect.

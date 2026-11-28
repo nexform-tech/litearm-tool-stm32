@@ -2535,6 +2535,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '零力矩帧已发出，但失能失败（在途动作可能继续）: {err}': 'Zero-torque frame sent, but disable failed (in-flight motion may '
                                    'continue): {err}',
  '[WARN] 夹爪状态读取失败: {err}': '[WARN] Gripper status read failed: {err}',
+ '[WARN] 夹爪保活帧发送失败: {err}': '[WARN] Failed to send gripper keep-alive frame: {err}',
  '已按停止/释放中止{detail}': 'Aborted via Stop/Release{detail}',
  '固件无此命令（未实现）': 'Firmware does not support this command (not implemented)',
  '载荷过短（参数校验不通过，未执行）': 'Payload too short (parameter validation failed, not executed)',

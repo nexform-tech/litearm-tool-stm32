@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -25,6 +26,7 @@ class FakeGrip:
         self.connected = False
         self.enabled = False
         self.stopped = False
+        self.keepalives = 0
         self.calls = []
 
     def connect(self):
@@ -77,6 +79,11 @@ class FakeGrip:
     def refresh_status(self):
         self.calls.append("refresh_status")
         return True
+
+    def send_mit_frame(self, q=0.0, kp=0.0, kd=0.0, dq=0.0, tau=0.0):
+        self.calls.append(("send_mit_frame", q, kp, kd))
+        self.keepalives += 1
+        return self.enabled
 
     def stop(self):
         self.stopped = True
@@ -169,6 +176,49 @@ def test_stop_when_idle_only_sends_zero_torque():
         ok, why = w.stop_now()
         assert ok and "失能" not in why
         assert "disable" not in grip.calls
+    finally:
+        w.close()
+
+
+def test_idle_enabled_motor_gets_zero_torque_keepalive_frames():
+    """DM4310 在最后一帧控制帧后 ~100 ms 自锁 0x0D；空闲必须持续发保活帧。"""
+    w, grip = _worker()
+    try:
+        w.open()
+        enabled = []
+        w.enable(cb=enabled.append)
+        assert wait_for(lambda: enabled and enabled[0].ok and grip.enabled)
+        assert wait_for(lambda: grip.keepalives >= 3, timeout=1.0), \
+            "使能后空闲没有保活帧"
+        frames = [c for c in grip.calls if c[0] == "send_mit_frame"]
+        assert frames and all(c[1:] == (0.0, 0.0, 0.0) for c in frames)
+
+        disabled = []
+        w.disable(cb=disabled.append)
+        assert wait_for(lambda: disabled and disabled[0].ok and not grip.enabled)
+        time.sleep(0.15)
+        settled = grip.keepalives
+        time.sleep(0.15)
+        assert grip.keepalives == settled, "失能后仍在发保活帧"
+    finally:
+        w.close()
+
+
+class StopOnlyGrip(FakeGrip):
+    """没有 send_mit_frame 的旧接口：同样的一帧零力矩退回 stop()。"""
+
+    send_mit_frame = None
+
+
+def test_keepalive_falls_back_to_stop_on_an_older_sdk():
+    grip = StopOnlyGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        enabled = []
+        w.enable(cb=enabled.append)
+        assert wait_for(lambda: enabled and enabled[0].ok and grip.enabled)
+        assert wait_for(lambda: grip.calls.count("stop") >= 2, timeout=1.0)
     finally:
         w.close()
 

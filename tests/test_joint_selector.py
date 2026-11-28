@@ -11,9 +11,10 @@ import pytest
 pytest.importorskip("PyQt5")
 pytest.importorskip("pyqtgraph")
 
+from PyQt5.QtGui import QPalette
 from PyQt5.QtWidgets import QApplication
 
-from litetool.gui.joint_selector import JointSelector
+from litetool.gui.joint_selector import COLORS, JointSelector
 
 
 @pytest.fixture(scope="module")
@@ -31,7 +32,7 @@ def _samples(n_joints=7, ticks=5):
     return out
 
 
-def test_selector_builds_boxes_and_reports_selection(app):
+def test_selector_builds_native_boxes_with_colored_checks(app):
     sel = JointSelector()
     seen = []
     sel.changed.connect(lambda: seen.append(1))
@@ -43,7 +44,10 @@ def test_selector_builds_boxes_and_reports_selection(app):
         assert sel.selected() == list(range(7))
         for j, cb in enumerate(sel._boxes):
             assert cb.text() == f"J{j + 1}"
-            assert "color: #000000" in cb.styleSheet(), "文字应为黑色"
+            pal = cb.palette()
+            assert pal.color(QPalette.WindowText).name() == "#000000", "关节名应为黑色"
+            assert pal.color(QPalette.Text).name() == COLORS[j % len(COLORS)], \
+                "勾勾应为曲线色"
 
         sel.set_enabled(4, False)
         assert seen == [1], "一次开关只发一个 changed"

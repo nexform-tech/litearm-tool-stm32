@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtGui import QColor, QPalette
 from PyQt5.QtWidgets import QCheckBox, QHBoxLayout, QWidget
 
 from litetool.gui.i18n_ui import TrLabel
@@ -55,7 +56,12 @@ class JointSelector(QWidget):
         self._boxes = []
         for j in range(n):
             cb = QCheckBox(f"J{j + 1}")
-            cb.setStyleSheet("color: #000000;")     # 只改文字颜色，复选框保持原生
+            # 关节名黑色；勾勾用曲线颜色。Fusion 风格用 QPalette.Text 画勾勾，
+            # 文字用 WindowText —— 只改颜色，复选框的绘制样式保持原生。
+            pal = cb.palette()
+            pal.setColor(QPalette.WindowText, QColor("#000000"))
+            pal.setColor(QPalette.Text, QColor(COLORS[j % len(COLORS)]))
+            cb.setPalette(pal)
             cb.setChecked(default_first is None or j < default_first)
             cb.toggled.connect(self._emit_changed)
             self._row.addWidget(cb)

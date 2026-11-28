@@ -17,14 +17,13 @@ from PyQt5.QtWidgets import (QFileDialog, QLabel, QPushButton,
 
 from litetool import csv_export, i18n
 from litetool.gui.i18n_ui import TrButton, TrLabel, tr_tooltip
+from litetool.gui.joint_selector import COLORS, JointSelector
 from litetool.gui.pages.common import group, hint, note, row, spin
-from litetool.gui.plot_utils import add_fixed_legend
 from litetool.gui.widgets import mono_label
 
 CTRL_HZ = 300
 LOG_MAX_SAMPLES = 2400
-FIELD_TITLES = ("执行参考 q_ref (rad)", "执行速度 dq (rad/s)", "实测力矩 tau (Nm)")
-COLORS = ["#e8c547", "#e06c75", "#61afef", "#98c379", "#c678dd", "#56b6c2", "#d19a66"]
+FIELD_TITLES = ("参考位置", "执行速度", "实测力矩")
 
 
 class CapturePage(QWidget):
@@ -83,19 +82,24 @@ class CapturePage(QWidget):
         )
 
         # ---------------- 预览 ----------------
+        self.joints = JointSelector()
+        self.joints.changed.connect(self._apply_visibility)
         self.gw = pg.GraphicsLayoutWidget()
         self.plots = []
         for r in range(3):
             pi = self.gw.addPlot(row=r, col=0)
             pi.showGrid(x=True, y=True, alpha=0.2)
             pi.setLabel("left", i18n.tr(FIELD_TITLES[r]))
-            add_fixed_legend(pi, offset=(10, 10))
             if r:
                 pi.setXLink(self.plots[0])
             self.plots.append(pi)
         self.plots[-1].setLabel("bottom", i18n.tr("时间 (s)"))
-        self.curves: list = []
-        g_plot = group("预览（读回后绘制）", self.gw)
+        self.curves: dict = {}            # (field, joint) -> PlotDataItem
+        units = note("单位：rad / rad/s / N·m")
+        units.setWordWrap(False)          # 一行写完，别在关节行右边折成两行
+        g_plot = group("预览（读回后绘制）",
+                       row(self.joints, units),
+                       self.gw)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
@@ -243,15 +247,23 @@ class CapturePage(QWidget):
     def _draw(self, samples):
         for pi in self.plots:
             pi.clear()
-            add_fixed_legend(pi, offset=(10, 10))
-        self.curves = []
+        self.curves = {}
         if not samples:
+            self.joints.set_joints(0)
             return
         ticks = np.asarray([s.tick for s in samples], dtype=float)
         t = (ticks - ticks[0]) / CTRL_HZ
+        self.joints.set_joints(len(samples[0].q_ref))
         for f, attr in enumerate(("q_ref", "dq", "tau")):
             mat = np.asarray([getattr(s, attr) for s in samples], dtype=float)
             pi = self.plots[f]
             for j in range(mat.shape[1]):
-                pi.plot(t, mat[:, j], pen=pg.mkPen(COLORS[j % len(COLORS)], width=1.5),
-                        name=f"J{j + 1}")
+                self.curves[(f, j)] = pi.plot(
+                    t, mat[:, j], pen=pg.mkPen(COLORS[j % len(COLORS)], width=1.5))
+        self._apply_visibility()
+
+    def _apply_visibility(self):
+        """一个关节开关同时控制三张图；已读回的数据不会因此重绘。"""
+        enabled = self.joints.enabled()
+        for (_field, j), curve in self.curves.items():
+            curve.setVisible(j < len(enabled) and enabled[j])

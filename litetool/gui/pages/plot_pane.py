@@ -9,15 +9,13 @@ from typing import List
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt5.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
+from PyQt5.QtWidgets import (QFileDialog, QHBoxLayout, QLabel,
                              QMessageBox, QPushButton, QVBoxLayout, QWidget)
 
 from litetool import csv_export, i18n
-from litetool.gui.i18n_ui import TrButton, TrLabel, tr_tooltip
-from litetool.gui.plot_utils import add_fixed_legend
+from litetool.gui.i18n_ui import TrButton, tr_tooltip
+from litetool.gui.joint_selector import COLORS, JointSelector
 
-COLORS = ["#e8c547", "#e06c75", "#61afef", "#98c379", "#c678dd",
-          "#56b6c2", "#d19a66"]
 #: 轴标签要**短** —— 竖排文字比图高时会压到相邻子图的刻度上
 FIELD_TITLES = ["q (rad)", "dq (rad/s)", "tau (Nm)"]
 
@@ -27,15 +25,14 @@ class PlotPane(QWidget):
         super().__init__(parent)
         self._window = window_s
         self._n = 0
-        self._enabled: List[bool] = []
-        self._joint_boxes: List[QCheckBox] = []
         self.frozen = False
         self._model = None
         self._frozen_snapshot = None
         self._firmware = ""
 
         self.curves: dict = {}                    # (field, joint) -> PlotDataItem
-        self._legends: dict = {}                  # id(plot) -> LegendItem
+        self.joints = JointSelector()
+        self.joints.changed.connect(self._apply_visibility)
         self.gw = pg.GraphicsLayoutWidget()
         self.plots = []
         for r in range(3):
@@ -46,15 +43,12 @@ class PlotPane(QWidget):
             pi.getAxis("left").enableAutoSIPrefix(False)
             pi.getAxis("left").setWidth(56)     # 给刻度+标签留位，否则标签被截断
             pi.setXRange(-self._window, 0, padding=0)
-            self._add_legend(pi)
             self.plots.append(pi)
         for pi in self.plots[1:]:                 # 三图联动 x 轴
             pi.setXLink(self.plots[0])
 
         top = QHBoxLayout()
-        top.addWidget(TrLabel("关节:"))
-        self.box_row = QHBoxLayout()
-        top.addLayout(self.box_row)
+        top.addWidget(self.joints)
         top.addStretch(1)
         self.freeze_btn = TrButton("❚❚ 冻结")
         self.freeze_btn.setCheckable(True)
@@ -76,18 +70,6 @@ class PlotPane(QWidget):
         lay.addLayout(top)
         lay.addWidget(self.gw)
 
-    _LEGEND_KW = dict(brush=(40, 44, 52, 200), pen=pg.mkPen("#5a6673"),
-                      labelTextColor="#c8d2dc")
-
-    def _add_legend(self, pi):
-        """图例统一成暗底 —— 默认的半透明白底在深色画布上很跳。
-
-        没曲线时先藏起来：空图例会在黑画布上留一个空框子。
-        """
-        lg = add_fixed_legend(pi, offset=(10, 10), **self._LEGEND_KW)
-        lg.setVisible(bool(self.curves))
-        self._legends[id(pi)] = lg
-
     def _on_freeze(self, on: bool):
         self.frozen = on
         # 冻结时把窗口定格下来：之后模型继续滚动，导出的仍是用户眼前这一屏。
@@ -97,10 +79,9 @@ class PlotPane(QWidget):
 
     def clear_all(self):
         self._frozen_snapshot = None
-        self.curves.clear()               # 先清空，_add_legend 才知道该不该显示
+        self.curves.clear()
         for pi in self.plots:
-            pi.clear()                    # clear() 会把图例一起删掉
-            self._add_legend(pi)
+            pi.clear()
 
     def retranslate(self):
         self._on_freeze(self.frozen)
@@ -111,8 +92,7 @@ class PlotPane(QWidget):
 
     def selected_joints(self) -> List[int]:
         """曲线上勾选可见的关节（0 基）。"""
-        n = min(self._n, len(self._enabled))
-        return [j for j in range(n) if self._enabled[j]]
+        return self.joints.selected()
 
     def _on_export(self):
         if self.frozen:
@@ -151,24 +131,13 @@ class PlotPane(QWidget):
             return
         self._n = n
         self.clear_all()
-        while self.box_row.count():
-            item = self.box_row.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._joint_boxes = []
-        self._enabled = []
-        for j in range(n):
-            cb = QCheckBox(f"J{j + 1}")
-            default = j < 3 if n > 3 else True    # 默认高亮前 3 关节，避免过密
-            cb.setChecked(default)
-            cb.toggled.connect(lambda on, jj=j: self._set_enabled(jj, on))
-            self.box_row.addWidget(cb)
-            self._joint_boxes.append(cb)
-            self._enabled.append(default)
+        self.joints.set_joints(n, default_first=3)   # 默认前 3 关节，避免过密
 
-    def _set_enabled(self, j: int, on: bool):
-        if 0 <= j < len(self._enabled):
-            self._enabled[j] = on
+    def _apply_visibility(self):
+        """一次开关同步三张图；冻结时也立即生效（refresh 此时不再跑）。"""
+        enabled = self.joints.enabled()
+        for (_field, j), curve in self.curves.items():
+            curve.setVisible(j < len(enabled) and enabled[j])
 
     def refresh(self, model):
         self._model = model
@@ -179,6 +148,7 @@ class PlotPane(QWidget):
             return
         # 时间原点对齐"现在"(最新样本)，使窗口固定显示最近 window 秒
         x = np.asarray(times, dtype=float) - times[-1]
+        enabled = self.joints.enabled()
         for field, series in enumerate((q, dq, tau)):
             mat = np.asarray(series, dtype=float)      # (样本, 关节)
             pi = self.plots[field]
@@ -187,17 +157,14 @@ class PlotPane(QWidget):
                 key = (field, j)
                 curve = self.curves.get(key)
                 color = COLORS[j % len(COLORS)]
-                if not self._enabled[j]:
+                if j >= len(enabled) or not enabled[j]:
                     if curve is not None:
                         curve.setVisible(False)
                     continue
                 y = mat[:, j]
                 if curve is None:
-                    curve = pi.plot(x, y, pen=pg.mkPen(color, width=1.5), name=f"J{j + 1}")
+                    curve = pi.plot(x, y, pen=pg.mkPen(color, width=1.5))
                     self.curves[key] = curve
                 else:
                     curve.setData(x, y)
                     curve.setVisible(True)
-        for lg in self._legends.values():         # 有曲线了就把图例亮出来
-            if not lg.isVisible():
-                lg.setVisible(True)

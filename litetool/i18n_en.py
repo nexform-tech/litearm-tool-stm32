@@ -522,9 +522,9 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '写入授权失败：{text}': 'Activation write failed: {text}',
  '[ERR] 写入授权失败: {text}': '[ERR] Activation write failed: {text}',
  '[WARN] 复制 UID 失败: {err}': '[WARN] Copy UID failed: {err}',
- '执行参考 q_ref (rad)': 'q_ref (rad)',
- '执行速度 dq (rad/s)': 'dq (rad/s)',
- '实测力矩 tau (Nm)': 'tau (Nm)',
+ '参考位置': 'Reference position',
+ '执行速度': 'Execution velocity',
+ '实测力矩': 'Measured torque',
  '开始记录': 'Start recording',
  '停止/清空': 'Stop/Clear',
  '读回并预览': 'Read back and preview',
@@ -553,6 +553,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '录制': 'Recording',
  '时间 (s)': 'Time (s)',
  '预览（读回后绘制）': 'Preview (plotted after read-back)',
+ '单位：rad / rad/s / N·m': 'Units: rad / rad/s / N·m',
  '固件缓冲上限 {n} 拍（≈{secs:.1f}s @ {hz}Hz），记满自停。可导出原始字节，也可把最近一次读回的样本写成解析 CSV。': 'Firmware buffer holds up to {n} '
                                                                            'ticks (≈{secs:.1f}s @ {hz}Hz) '
                                                                            'and stops when full. You can '

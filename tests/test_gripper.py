@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
+from litetool import i18n
 from litetool.gripper import GripperTaskResult, GripperWorker
 from tests.fake_arm import wait_for
 
@@ -25,6 +27,7 @@ class FakeGrip:
         self.connected = False
         self.enabled = False
         self.stopped = False
+        self.keepalives = 0
         self.calls = []
 
     def connect(self):
@@ -49,23 +52,28 @@ class FakeGrip:
     def enable(self):
         self.enabled = True
         self.calls.append("enable")
+        return SimpleNamespace(ok=True, state=self.get_state(), tries=1)
 
     def disable(self):
         self.enabled = False
         self.calls.append("disable")
+        return True
 
     def open(self, speed=None, **kw):
         self.calls.append(("open", speed))
+        return SimpleNamespace(ok=True)
 
     def close(self, speed=None, **kw):
         self.calls.append(("close", speed))
+        return SimpleNamespace(ok=True)
 
     def grasp(self, force_n=None, hold_s=0.0, **kw):
         self.calls.append(("grasp", force_n, hold_s))
-        return "grasped"
+        return SimpleNamespace(ok=True)
 
     def write_zero(self):
         self.calls.append("write_zero")
+        return SimpleNamespace(ok=True)
 
     def zero(self):
         self.calls.append("zero")
@@ -77,6 +85,11 @@ class FakeGrip:
     def refresh_status(self):
         self.calls.append("refresh_status")
         return True
+
+    def send_mit_frame(self, q=0.0, kp=0.0, kd=0.0, dq=0.0, tau=0.0):
+        self.calls.append(("send_mit_frame", q, kp, kd))
+        self.keepalives += 1
+        return self.enabled
 
     def stop(self):
         self.stopped = True
@@ -173,6 +186,182 @@ def test_stop_when_idle_only_sends_zero_torque():
         w.close()
 
 
+def test_idle_enabled_motor_gets_zero_torque_keepalive_frames():
+    """DM4310 在最后一帧控制帧后 ~100 ms 自锁 0x0D；空闲必须持续发保活帧。"""
+    w, grip = _worker()
+    try:
+        w.open()
+        enabled = []
+        w.enable(cb=enabled.append)
+        assert wait_for(lambda: enabled and enabled[0].ok and grip.enabled)
+        assert wait_for(lambda: grip.keepalives >= 3, timeout=1.0), \
+            "使能后空闲没有保活帧"
+        frames = [c for c in grip.calls if c[0] == "send_mit_frame"]
+        assert frames and all(c[1:] == (0.0, 0.0, 0.0) for c in frames)
+
+        disabled = []
+        w.disable(cb=disabled.append)
+        assert wait_for(lambda: disabled and disabled[0].ok and not grip.enabled)
+        time.sleep(0.15)
+        settled = grip.keepalives
+        time.sleep(0.15)
+        assert grip.keepalives == settled, "失能后仍在发保活帧"
+    finally:
+        w.close()
+
+
+class StopOnlyGrip(FakeGrip):
+    """没有 send_mit_frame 的旧接口：同样的一帧零力矩退回 stop()。"""
+
+    send_mit_frame = None
+
+
+def test_keepalive_falls_back_to_stop_on_an_older_sdk():
+    grip = StopOnlyGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        enabled = []
+        w.enable(cb=enabled.append)
+        assert wait_for(lambda: enabled and enabled[0].ok and grip.enabled)
+        assert wait_for(lambda: grip.calls.count("stop") >= 2, timeout=1.0)
+    finally:
+        w.close()
+
+
+class FailedEnableGrip(FakeGrip):
+    """使能失败但正常返回 —— LiteGrip 1.x 不为此抛异常。"""
+
+    def enable(self):
+        self.calls.append("enable")
+        return SimpleNamespace(ok=False, state=self.get_state(), tries=3)
+
+
+class FalseReturningGrip(FakeGrip):
+    def disable(self):
+        self.enabled = False
+        self.calls.append("disable")
+        return False
+
+
+class PostTaskFaultGrip(FakeGrip):
+    """动作自身返回成功，但收尾时状态帧报通信丢失（0x0D）。"""
+
+    def __init__(self, channel="can0", can_id=8, mst_id=None):
+        super().__init__(channel, can_id, mst_id)
+        self.faulted = False
+
+    def open(self, speed=None, **kw):
+        self.calls.append(("open", speed))
+        self.faulted = True
+        return SimpleNamespace(ok=True)
+
+    def get_state(self, wait=True):
+        st = super().get_state(wait)
+        if self.faulted:
+            st.error_code = 13
+            st.is_enabled = False
+        return st
+
+
+def test_a_result_with_ok_false_is_reported_as_a_failed_task():
+    grip = FailedEnableGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        got = []
+        w.enable(cb=got.append)
+        assert wait_for(lambda: got)
+        assert not got[0].ok
+        assert "ok=False" in str(got[0].error)
+    finally:
+        w.close()
+
+
+def test_a_bare_false_return_is_reported_as_a_failed_task():
+    grip = FalseReturningGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        enabled = []
+        w.enable(cb=enabled.append)
+        assert wait_for(lambda: enabled and enabled[0].ok)
+        got = []
+        w.disable(cb=got.append)
+        assert wait_for(lambda: got)
+        assert not got[0].ok
+        assert "False" in str(got[0].error)
+    finally:
+        w.close()
+
+
+def test_a_fault_latched_after_the_task_is_reported_as_failed():
+    grip = PostTaskFaultGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        got = []
+        w.open_jaws(cb=got.append)
+        assert wait_for(lambda: got)
+        assert not got[0].ok
+        assert "13" in str(got[0].error)
+    finally:
+        w.close()
+
+
+class LegacyRefreshGrip(FakeGrip):
+    """安装路径上命中了一份没有 ``refresh_status`` 的同名模块。"""
+
+    refresh_status = None
+
+
+class NoKeepaliveGrip(FakeGrip):
+    """既没有 send_mit_frame 也没有 stop —— 使能后必锁 0x0D，页面必须拦住。"""
+
+    send_mit_frame = None
+    stop = None
+
+
+def test_refresh_reports_the_missing_sdk_api_instead_of_raising():
+    grip = LegacyRefreshGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        assert not w.supports("refresh_status")
+        assert w.can_keep_alive()
+        got = []
+        w.refresh(cb=got.append)
+        assert wait_for(lambda: got)
+        assert not got[0].ok
+        assert "refresh_status" in str(got[0].error)
+    finally:
+        w.close()
+
+
+def test_can_keep_alive_requires_one_of_the_two_frame_senders():
+    grip = NoKeepaliveGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        assert not w.can_keep_alive()
+    finally:
+        w.close()
+
+
+def test_task_text_keeps_the_action_name():
+    try:
+        i18n.set_language("zh")
+        assert GripperTaskResult("夹爪使能", True).text == "夹爪使能 完成"
+        assert (GripperTaskResult("夹爪抓取 20.0N/3.0s", True).text
+                == "夹爪抓取 20.0N/3.0s 完成")
+        i18n.set_language("en")
+        assert GripperTaskResult("夹爪使能", True).text == "Gripper enable complete"
+        assert "gripper task" in GripperTaskResult(
+            "夹爪抓取 20.0N/3.0s", True).text
+    finally:
+        i18n.set_language("zh")
+
+
 
 def test_calibration_summary_reports_travel_and_mount():
     w, _ = _worker()
@@ -227,6 +416,12 @@ class FakeWorker:
 
     def available(self):
         return self._available
+
+    def supports(self, name):
+        return True
+
+    def can_keep_alive(self):
+        return True
 
     def open(self, **kw):
         self.calls.append(("open", kw))
@@ -325,6 +520,39 @@ def test_page_reports_unavailable_platform(app):
         assert "Linux" in page.avail_banner.text()
         # 用户最先点的是灰按钮本身，它自己的 tooltip 也要说明原因。
         assert "Linux" in page.btn_conn.toolTip()
+    finally:
+        page.shutdown()
+
+
+class LegacyWorker(FakeWorker):
+    """自报 2.2.0 的运行时装载：没有新鲜度字段，也没有 refresh_status。"""
+
+    def __init__(self):
+        super().__init__()
+        self.state = SimpleNamespace(
+            position_mm=12.3, force_n=4.5, torque_nm=0.45,
+            temperature_mos=30, temperature_coil=31, error_code=1,
+            is_enabled=True)
+
+    def supports(self, name):
+        return False
+
+    def can_keep_alive(self):
+        return False
+
+
+def test_page_renders_an_old_snapshot_without_crashing_or_hiding_buttons(app):
+    worker = LegacyWorker()
+    worker.online = True
+    page = _page(worker)
+    try:
+        page._tick()                     # 旧实现在这里 AttributeError: data_age_s
+        assert page.pos_lbl.text() == "+12.30"
+        assert "不支持" in page.fresh_lbl.text()
+        assert not page.btn_refresh.isEnabled(), "缺少 refresh_status 时刷新不可用"
+        assert not page.btn_enable.isEnabled(), "发不出保活帧时必须拦住使能"
+        assert page.btn_stop.isEnabled(), "停止 / 释放永远可达"
+        assert "不兼容" in page.log_view.toPlainText()
     finally:
         page.shutdown()
 

@@ -34,6 +34,7 @@ class GripperPage(QWidget):
         self._worker = worker or GripperWorker(log=self._log)
         self._avail, self._why = self._worker.available()
         self._calib = None
+        self._sdk_warned = False
 
         # 不可用原因必须**顶在页头**：连接按钮灰掉时，用户只剩这一个解释入口
         # （见 issue #44 —— 原因原本只写在连接组底部的小灰字里，读起来像按钮坏了）。
@@ -374,30 +375,94 @@ class GripperPage(QWidget):
                     lb.setText("—")
         st = self._worker.state
         if st is not None:
-            self.pos_lbl.setText(f"{st.position_mm:+.2f}")
-            self.force_lbl.setText(f"{st.force_n:+.2f}")
-            self.tau_lbl.setText(f"{st.torque_nm:+.3f}")
-            self.temp_lbl.setText(f"{st.temperature_mos}/{st.temperature_coil}")
-            self.err_lbl.setText(str(st.error_code))
-            age = "—" if st.data_age_s is None else f"{st.data_age_s * 1000:.0f} ms"
-            self.fresh_lbl.setText(
-                i18n.tr("{state} · {age}",
-                        state=i18n.tr("新帧") if st.fresh else i18n.tr("缓存"),
-                        age=age))
+            self._render_state(st)
+        self._warn_sdk_gaps()
         self._refresh()
+
+    def _render_state(self, st) -> None:
+        """遥测行必须能在任何一版 ``litegrip`` 下渲染 —— 不能每 100 ms 抛一次。"""
+        try:
+            pos = f"{st.position_mm:+.2f}"
+            force = f"{st.force_n:+.2f}"
+            tau = f"{st.torque_nm:+.3f}"
+            temp = f"{st.temperature_mos}/{st.temperature_coil}"
+            err = str(st.error_code)
+        except (AttributeError, TypeError, ValueError):
+            for lb in (self.pos_lbl, self.force_lbl, self.tau_lbl,
+                       self.temp_lbl, self.err_lbl):
+                lb.setText("—")
+            self.fresh_lbl.setText(i18n.tr("不兼容的 litegrip-python"))
+            return
+        self.pos_lbl.setText(pos)
+        self.force_lbl.setText(force)
+        self.tau_lbl.setText(tau)
+        self.temp_lbl.setText(temp)
+        self.err_lbl.setText(err)
+        fresh = getattr(st, "fresh", None)
+        if fresh is None or not hasattr(st, "data_age_s"):
+            # 另一份同名模块（litearm-server 的运行时自报 2.2.0）没有这些字段。
+            self.fresh_lbl.setText(i18n.tr("不支持（litegrip-python 缺少数据新鲜度）"))
+            return
+        try:
+            age = ("—" if st.data_age_s is None
+                   else f"{float(st.data_age_s) * 1000:.0f} ms")
+        except (TypeError, ValueError):
+            age = "—"
+        self.fresh_lbl.setText(
+            i18n.tr("{state} · {age}",
+                    state=i18n.tr("新帧") if fresh else i18n.tr("缓存"),
+                    age=age))
+
+    def _sdk_gaps(self) -> list:
+        """当前安装缺失的夹爪能力 —— 页面据此降级并写明原因。"""
+        gaps = []
+        if self._worker.online:
+            if not self._worker.can_keep_alive():
+                gaps.append(i18n.tr("不能发送保活帧"))
+            if not self._worker.supports("refresh_status"):
+                gaps.append(i18n.tr("缺少 refresh_status()"))
+        st = self._worker.state
+        if st is not None and (getattr(st, "fresh", None) is None
+                               or not hasattr(st, "data_age_s")):
+            gaps.append(i18n.tr("状态快照缺少新鲜度字段"))
+        return gaps
+
+    def _warn_sdk_gaps(self) -> None:
+        """不兼容的安装只提醒一次 —— 每 100 ms 刷一条日志会把界面淹没。"""
+        if self._sdk_warned:
+            return
+        gaps = self._sdk_gaps()
+        if not gaps:
+            return
+        self._sdk_warned = True
+        self._log(i18n.tr(
+            "[WARN] 已安装的 litegrip-python 不兼容：{gaps}；请安装 PyPI 的 "
+            "litegrip-python>=1.3.1", gaps=", ".join(gaps)))
 
     def _refresh(self):
         online = bool(self._worker.online)
         enabled = bool(getattr(self._worker.state, "is_enabled", False)) if online else False
         can = online and not self._busy
+        has_refresh = online and self._worker.supports("refresh_status")
+        keepalive = online and self._worker.can_keep_alive()
         self.btn_conn.setEnabled(self._avail)
         self.btn_conn.setText(i18n.tr("断开") if online else i18n.tr("连接"))
-        self.btn_enable.setEnabled(can)
+        # 发不出保活帧时使能必然在 ~100 ms 后自锁 0x0D：按钮不能看起来可用。
+        self.btn_enable.setEnabled(can and keepalive)
         self.btn_enable.setText(i18n.tr("失能") if enabled else i18n.tr("使能"))
+        if online and not keepalive:
+            self.btn_enable.setToolTip(i18n.tr(
+                "已安装的 litegrip-python 不能发送保活帧，使能后约 100 ms 即报通信丢失"))
+        else:
+            self.btn_enable.setToolTip("")
         for b in (self.btn_open, self.btn_close, self.btn_grasp,
-                  self.btn_refresh, self.btn_calib, self.btn_load,
+                  self.btn_calib, self.btn_load,
                   self.btn_save, self.btn_zero):
             b.setEnabled(can)
+        self.btn_refresh.setEnabled(can and has_refresh)
+        self.btn_refresh.setToolTip(
+            "" if not online or has_refresh else i18n.tr(
+                "已安装的 litegrip-python 缺少 refresh_status()（需要 >=1.3.1）"))
         self.btn_stop.setEnabled(online)      # 停止永远比其它动作可达
         self.force.setEnabled(True)
         self.hold.setEnabled(True)

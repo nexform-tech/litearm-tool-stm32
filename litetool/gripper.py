@@ -4,6 +4,9 @@
 
 * GUI 只投任务、只读状态快照；所有 `LiteGrip` 调用都在夹爪线程上执行；
 * 空闲时按 `poll_s` 取状态（`get_state(wait=True)` 最多等 50 ms）；
+* 空闲且使能时按 `keepalive_s`（默认 20 ms）持续发零力矩 MIT 控制帧 —— DM4310
+  在最后一帧控制帧后约 100 ms 自锁通信丢失故障（`err=0x0D`），状态帧不能代替
+  控制帧；
 * 急停/释放走**旁路** `stop()`：零力矩帧，不排队等一条长 `grasp` 走完；
 * 仅 Linux：SDK 只支持 SocketCAN，Windows 明确不可用。
 
@@ -35,6 +38,11 @@ ARPHRD_CAN = 280
 #: enumeration can be tested against a fake tree instead of the test machine's
 #: real interfaces.
 SYS_CLASS_NET = "/sys/class/net"
+
+#: 空闲保活帧的间隔。DM4310 在最后一帧**控制帧**后约 100 ms 自锁通信丢失故障
+#: （`err = 0x0D`，见 litegrip-python 的 trajectory.py / gripper.py）；20 ms 留
+#: 5 倍余量。状态帧（`0xCC` 刷新）不是控制帧，救不了这个故障。
+KEEPALIVE_S = 0.02
 
 
 def list_channels(sys_class_net: str = SYS_CLASS_NET) -> list:
@@ -77,13 +85,53 @@ class GripperTaskResult:
 
     @property
     def text(self) -> str:
-        name = self.name if not i18n.has_chinese(self.name) else i18n.tr(self.name)
-        if i18n.has_chinese(name):
+        name = i18n.tr(self.name)
+        if i18n.language() == "en" and i18n.has_chinese(name):
+            # 动态标题（「夹爪抓取 20N/3s」）没有固定译文；英文界面用通用名，
+            # 不留中文。中文界面保留动作名 —— 以前这里把所有中文标题都折成
+            # 「夹爪任务」，日志因此分不出跑的是哪条动作。
             name = i18n.tr("夹爪任务")
         if self.ok:
             return i18n.tr("{name} 完成", name=name)
         return i18n.tr("{name} 失败: {err}", name=name,
                        err=i18n.safe_detail(self.error) or i18n.tr("未预期错误"))
+
+
+def _result_failure(value: Any) -> Optional[str]:
+    """SDK 用**返回值**报告失败时的说明；成功返回 ``None``。
+
+    LiteGrip 1.x 的 ``open`` / ``close`` / ``grasp`` / ``enable`` /
+    ``write_zero`` 返回带 ``ok`` 的结果对象，``refresh_status`` / ``disable``
+    返回裸 ``bool`` —— 普通失败都不抛异常。只看"没抛"会把失败记成完成。
+    """
+    ok = getattr(value, "ok", None)
+    if ok is False:
+        state = getattr(value, "state", None)
+        code = getattr(state, "error_code", None)
+        if code is not None:
+            return i18n.tr("SDK 返回 ok=False（err={code}）", code=code)
+        return i18n.tr("SDK 返回 ok=False")
+    if isinstance(value, bool) and not value:
+        return i18n.tr("SDK 返回 False")
+    return None
+
+
+def _state_fault_code(st: Any) -> Optional[int]:
+    """状态里的真实故障码（error_code ∉ {0=失能, 1=使能}）；无故障返回 None。"""
+    try:
+        code = int(getattr(st, "error_code", 0))
+    except (TypeError, ValueError):
+        return None
+    return code if code not in (0, 1) else None
+
+
+def _refresh_status(grip: Any) -> bool:
+    """任务形式的状态刷新：缺 API 时给出原因，而不是 ``AttributeError``。"""
+    fn = getattr(grip, "refresh_status", None)
+    if not callable(fn):
+        raise GripperUnavailable(i18n.tr(
+            "已安装的 litegrip-python 缺少 refresh_status()（需要 >=1.3.1）"))
+    return fn()
 
 
 def availability() -> tuple:
@@ -99,6 +147,14 @@ def availability() -> tuple:
     return True, ""
 
 
+def _state_enabled(st: Any) -> bool:
+    """状态快照是否表示"已使能"（旧版快照没有 ``is_enabled`` 时退回错误码）。"""
+    flag = getattr(st, "is_enabled", None)
+    if flag is not None:
+        return bool(flag)
+    return getattr(st, "error_code", 0) == 1
+
+
 class GripperWorker:
     """夹爪的所有者线程。GUI 只投任务、只读 `state`。"""
 
@@ -107,13 +163,16 @@ class GripperWorker:
                  on_state: Optional[Callable[[Any], None]] = None,
                  on_task: Optional[Callable[[GripperTaskResult], None]] = None,
                  on_online: Optional[Callable[[bool, str], None]] = None,
-                 poll_s: float = 0.1):
+                 poll_s: float = 0.1, keepalive_s: float = KEEPALIVE_S):
         self._factory = factory
         self._log = log if log is not None else (lambda m: None)
         self._on_state = on_state if on_state is not None else (lambda st: None)
         self._on_task = on_task if on_task is not None else (lambda r: None)
         self._on_online = on_online if on_online is not None else (lambda ok, why: None)
         self._poll_s = max(0.02, float(poll_s))
+        # 20 ms 的 5 倍余量是给 100 ms 故障窗留的；间隔再大就失去意义。
+        self._keepalive_s = min(0.05, max(0.005, float(keepalive_s)))
+        self._keepalive_warn_at = 0.0
 
         self._grip: Any = None
         self._thread: Optional[threading.Thread] = None
@@ -150,6 +209,20 @@ class GripperWorker:
     def grip(self) -> Any:
         """**仅供只读/无阻塞调用**（读缓存属性等）。写命令一律走 `submit()`。"""
         return self._grip
+
+    def supports(self, name: str) -> bool:
+        """已连接对象是否提供该方法 —— 用来适配安装路径上的不同 `litegrip`。
+
+        `PYTHONPATH` 上可能先命中另一份同名模块（litearm-server 自带的运行时
+        自报 2.2.0），它没有 `refresh_status` / 新鲜度字段。页面据此降级并写明
+        原因，而不是每个 tick 抛一次 `AttributeError`。
+        """
+        grip = self._grip
+        return grip is not None and callable(getattr(grip, name, None))
+
+    def can_keep_alive(self) -> bool:
+        """能否在空闲时发保活帧：`send_mit_frame`，或旧接口 `stop()`。"""
+        return self.supports("send_mit_frame") or self.supports("stop")
 
     def _make(self, *, channel: str, can_id: int, mst_id: Optional[int]) -> Any:
         if self._factory is not None:
@@ -330,7 +403,7 @@ class GripperWorker:
         self.submit(i18n.tr("加载标定"), fn, cb)
 
     def refresh(self, cb=None) -> None:
-        self.submit(i18n.tr("刷新夹爪状态"), lambda g: g.refresh_status(), cb)
+        self.submit(i18n.tr("刷新夹爪状态"), _refresh_status, cb)
 
     def calibration(self, cb=None) -> None:
         """读回当前标定的摘要（给页面显示行程/方向/是否已标定）。"""
@@ -348,15 +421,21 @@ class GripperWorker:
 
     # ================= 所有者线程 =================
     def _loop(self) -> None:
+        next_keepalive = 0.0
         while not self._stop.is_set():
             item = self._take()
             if item is not None:
                 self._run(*item)
                 self._publish_once()
+                next_keepalive = time.monotonic() + self._keepalive_s
                 continue
             grip = self._grip
             if grip is None:
                 return
+            enabled = _state_enabled(self.state)
+            if enabled and time.monotonic() >= next_keepalive:
+                self._keepalive(grip)
+                next_keepalive = time.monotonic() + self._keepalive_s
             try:
                 st = grip.get_state(wait=True)
             except Exception as e:  # noqa: BLE001 - 连续失败判离线
@@ -370,8 +449,34 @@ class GripperWorker:
                 with self._lock:
                     self._state = st
                 self._on_state(st)
-            if self._stop.wait(self._poll_s):
+                enabled = _state_enabled(st)
+            delay = self._poll_s
+            if enabled:
+                # 保活必须赶在 100 ms 故障窗之前；不能被 0.1 s 的轮询间隔拖后。
+                delay = min(delay, max(0.0, next_keepalive - time.monotonic()))
+            if self._stop.wait(delay):
                 return
+
+    def _keepalive(self, grip: Any) -> None:
+        """空闲时的一帧零力矩 MIT 控制帧 —— 正是压住通信丢失自锁的那一帧。
+
+        优先 `send_mit_frame`（新版接口）；没有它时退回 `stop()`，两者发的都是
+        ``q/kp/kd = 0`` 的控制帧。发送失败只记日志、不拖垮线程：下一次状态轮询
+        会把真实故障报上来。
+        """
+        send = getattr(grip, "send_mit_frame", None)
+        try:
+            if callable(send):
+                send(q=0.0, kp=0.0, kd=0.0)
+                return
+            stop = getattr(grip, "stop", None)
+            if callable(stop):
+                stop()
+        except Exception as e:  # noqa: BLE001 - 保活失败必须可见，但不能停线程
+            now = time.monotonic()
+            if now - self._keepalive_warn_at >= 1.0:
+                self._keepalive_warn_at = now
+                self._log(i18n.tr("[WARN] 夹爪保活帧发送失败: {err}", err=e))
 
     def _publish_once(self) -> None:
         grip = self._grip
@@ -393,13 +498,25 @@ class GripperWorker:
 
     def _run(self, name: str, fn, on_done) -> None:
         self._busy.set()
+        value = None
+        error: Optional[BaseException] = None
         try:
             value = fn(self._grip)
-            res = GripperTaskResult(name, True, value=value)
+            failure = _result_failure(value)
+            if failure is not None:
+                error = RuntimeError(failure)
+            else:
+                # 返回值说成功还不够：故障可能在动作收尾时刚刚锁存。
+                st = self._read_state_after_task()
+                code = _state_fault_code(st)
+                if code is not None:
+                    error = RuntimeError(i18n.tr(
+                        "任务后电机故障 err=0x{code:02X}（{code}）", code=code))
         except BaseException as e:  # noqa: BLE001 - 全部报给 GUI
-            res = GripperTaskResult(name, False, error=e)
+            error = e
         finally:
             self._busy.clear()
+        res = GripperTaskResult(name, error is None, value=value, error=error)
         if self._interrupted.is_set():
             # 这一条是在途任务，被 stop_now() 中止：不管底层返回什么，都按"已中止"
             # 上报 —— 否则界面会把一次被打断的抓取显示成"完成"。
@@ -416,6 +533,27 @@ class GripperWorker:
             (on_done or self._on_task)(res)
         except Exception:  # noqa: BLE001 - GUI 回调出错不能拖垮线程
             pass
+
+    def _read_state_after_task(self) -> Any:
+        """任务结束后取一帧最新状态：先 ``0xCC`` 刷新，再等状态帧。
+
+        动作返回时总线通常已经安静，直接 ``get_state`` 只会读到旧缓存；刷新请求
+        让电机说一次话（不驱动手指），随后固件立刻给出真实错误码。没有
+        ``refresh_status`` 的旧 SDK 退回普通读取，读不到就返回 None。
+        """
+        grip = self._grip
+        if grip is None:
+            return None
+        refresh = getattr(grip, "refresh_status", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:  # noqa: BLE001 - 状态读不到不能把成功的动作判失败
+                pass
+        try:
+            return grip.get_state(wait=True)
+        except Exception:  # noqa: BLE001
+            return None
 
     def _go_offline(self, why: str) -> None:
         grip, self._grip = self._grip, None

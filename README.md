@@ -40,7 +40,7 @@ hook cannot be attached, `_attach_state_hook()` **raises** instead of degrading 
 ## UI
 
 Top bar (port / connect / firmware version / motion unlock / ⛔ emergency stop) + a **persistent
-status strip** (mode / enabled / six safety flag lamps / seq / dropped frames / frame rate) +
+status strip** (mode / enabled / six safety flag lamps / dropped frames / frame rate) +
 three navigation groups on the left + a collapsible log at the bottom.
 
 | Group | Page | What it does |
@@ -404,7 +404,7 @@ python3 -m pytest          # 689 passed (all offline, no hardware required)
 
 1. **Read-only connection** (disabled, safe):
    - [ ] Choose the port in the top bar → connect → the status dot turns green "● Online" and the firmware version appears
-   - [ ] The persistent status strip shows mode=INIT, frame rate ≈ 100 Hz, seq increasing with no jumps (dropped frames ≈ 0)
+   - [ ] The persistent status strip shows mode=INIT, frame rate ≈ 100 Hz and dropped frames ≈ 0 (the raw seq is on the Machine page under [Read status GET_STATUS])
    - [ ] The overview table shows q/dq/tau/temperature/err per joint; unplug the serial cable → red "● Offline", all command buttons disabled
    - [ ] After the unplug the top bar shows `● Reconnecting (n)`; replug → it reconnects and stays motion-locked; any command queued before the unplug was dropped
    - [ ] Press the emergency stop while disconnected → it must clearly say "emergency stop NOT sent", never "disabled"

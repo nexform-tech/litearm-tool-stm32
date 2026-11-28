@@ -377,7 +377,18 @@ def test_status_strip_goes_blank_on_disconnect(win):
     win._apply_online(False, "拔线")
     win._tick()
     assert win.strip.mode_lbl.text() == "—", win.strip.mode_lbl.text()
-    assert win.strip.seq_val.text() == "—"
+    assert win.strip.drops_val.text() == "—"
+    assert win.strip.fps_val.text() == "—"
+
+
+def test_status_strip_shows_drops_and_fps_but_not_raw_seq(win):
+    """seq 只是帧序号；状态条显示它差分出的丢帧和帧率，原始值去整机页看。"""
+    st = make_state(mode=1, q=[0.5] * 7)
+    win.strip.update_from(st, drops=3, fps=99.6)
+    assert win.strip.drops_val.text() == "3"
+    assert win.strip.fps_val.text() == "100"
+    assert not hasattr(win.strip, "seq_val")
+    assert "seq" in win.strip.drops_val.toolTip()
 
 
 def test_fault_flag_cleared_on_disconnect(win):

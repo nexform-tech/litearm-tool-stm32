@@ -136,6 +136,16 @@ def tr(source: str, **fmt) -> str:
     target = _EN.get(source, source) if _language == "en" else source
     if not fmt:
         return target
+    if _language == "en":
+        # 下层异常对象常带中文；英文界面直接丢掉这类详情（调用方的英文
+        # 错误码/短码文案接管），避免日志和弹窗里冒出中文。
+        clean = {}
+        for key, value in fmt.items():
+            if isinstance(value, BaseException):
+                clean[key] = safe_detail(value) or _EN.get("未知错误", "unknown error")
+            else:
+                clean[key] = value
+        fmt = clean
     try:
         return target.format(**fmt)
     except (KeyError, IndexError, ValueError):

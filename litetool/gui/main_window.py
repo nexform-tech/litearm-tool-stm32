@@ -546,7 +546,8 @@ class MainWindow(QMainWindow):
                         "直接烧录，或断电重新上电。")
             except Exception:  # noqa: BLE001 - 连接失败提示不该再炸一次
                 hint = ""
-            QMessageBox.critical(self, i18n.tr("连接失败"), f"{e}{hint}")
+            QMessageBox.critical(self, i18n.tr("连接失败"),
+                                 f"{i18n.safe_detail(e) or i18n.tr('未知错误')}{hint}")
             self._apply_online(False, str(e))
         finally:
             self.btn_conn.setEnabled(not self._upgrading)

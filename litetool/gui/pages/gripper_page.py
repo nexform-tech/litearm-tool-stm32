@@ -218,7 +218,8 @@ class GripperPage(QWidget):
             )
         except Exception as e:  # noqa: BLE001 - 用户要看到原因
             self._log(i18n.tr("[ERR] 夹爪连接失败: {err}", err=e))
-            QMessageBox.critical(self, i18n.tr("夹爪连接失败"), str(e))
+            QMessageBox.critical(self, i18n.tr("夹爪连接失败"),
+                                 i18n.safe_detail(e) or i18n.tr("未知错误"))
         self._refresh()
 
     # ---------------- 动作 ----------------

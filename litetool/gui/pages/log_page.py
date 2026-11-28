@@ -247,7 +247,8 @@ class LogPage(QWidget):
         try:
             n = obs.export_jsonl(path, rows)
         except Exception as e:  # noqa: BLE001 - 导出失败不该拖垮界面
-            QMessageBox.warning(self, i18n.tr("导出失败"), str(e))
+            QMessageBox.warning(self, i18n.tr("导出失败"),
+                                i18n.safe_detail(e) or i18n.tr("未知错误"))
             return
         QMessageBox.information(self, i18n.tr("导出完成"),
                                 i18n.tr("已写出 {n} 条 → {path}", n=n, path=path))

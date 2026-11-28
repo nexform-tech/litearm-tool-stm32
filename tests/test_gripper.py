@@ -320,8 +320,56 @@ def test_page_reports_unavailable_platform(app):
     try:
         assert not page.btn_conn.isEnabled()
         assert "不可用" in page.conn_lbl.text()
+        # 原因必须顶在页头（issue #44）：小灰字在连接组底部，读起来像按钮坏了。
+        assert not page.avail_banner.isHidden()
+        assert "Linux" in page.avail_banner.text()
+        # 用户最先点的是灰按钮本身，它自己的 tooltip 也要说明原因。
+        assert "Linux" in page.btn_conn.toolTip()
     finally:
         page.shutdown()
+
+
+def test_page_hides_the_unavailable_banner_when_supported(app):
+    page = _page(FakeWorker())
+    try:
+        assert page.available
+        assert page.avail_banner.isHidden()
+        assert page.btn_conn.toolTip() == ""
+    finally:
+        page.shutdown()
+
+
+def test_page_retranslates_the_unavailable_banner(app):
+    from litetool import i18n
+
+    worker = FakeWorker(available=(False, "LiteGrip 仅支持 Linux（SocketCAN）"))
+    page = _page(worker)
+    try:
+        try:
+            i18n.set_language("en")
+            page.retranslate()
+            assert "unavailable" in page.avail_banner.text().lower()
+            assert "Linux" in page.avail_banner.text()
+            assert "Unavailable" in page.btn_conn.toolTip()
+        finally:
+            i18n.set_language("zh")
+    finally:
+        page.shutdown()
+
+
+def test_nav_marks_the_gripper_page_linux_only_when_unavailable(monkeypatch, app):
+    """Windows 包不含 litegrip：导航项就要写明限制，而不是等用户点进去猜。"""
+    from litetool import settings
+    from litetool.gui.main_window import MainWindow
+
+    monkeypatch.setattr("litetool.gripper.availability",
+                        lambda: (False, "LiteGrip 仅支持 Linux（SocketCAN）"))
+    window = MainWindow(settings.Settings.load(None))
+    try:
+        item = window.nav._items["gripper"]
+        assert "仅 Linux" in item.text(0), item.text(0)
+    finally:
+        window.close()
 
 
 def test_page_populates_the_channel_dropdown(monkeypatch, app):

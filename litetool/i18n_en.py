@@ -71,6 +71,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '零重力': 'Zero-G',
  '拖动示教（保活由 SDK 维持）': 'Drag teaching (keep-alive maintained by SDK)',
  '夹爪': 'Gripper',
+ '夹爪（仅 Linux）': 'Gripper (Linux only)',
  'LiteGrip（仅 Linux）：连接/使能/开合/抓取/标定': 'LiteGrip (Linux only): connect/enable/open-close/grasp/calibration',
  '参数表': 'Parameters',
  '关节/前馈参数读写与批量导入导出': 'Read/write joint and feedforward parameters, batch import/export',
@@ -2530,6 +2531,8 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '夹爪已连接 {channel}': 'Gripper connected {channel}',
  '夹爪已断开': 'Gripper disconnected',
  '夹爪未连接': 'Gripper not connected',
+ '夹爪不可用 — {why}。连接按钮已禁用。': 'Gripper unavailable — {why}. The connect button is disabled.',
+ '不可用：{why}': 'Unavailable: {why}',
  '零力矩帧已发出': 'Zero-torque frame sent',
  '[WARN] 夹爪断开出错: {err}': '[WARN] Error disconnecting gripper: {err}',
  '零力矩帧已发出，但失能失败（在途动作可能继续）: {err}': 'Zero-torque frame sent, but disable failed (in-flight motion may '

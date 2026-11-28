@@ -198,23 +198,25 @@ def test_plot_legend_hidden_until_there_are_curves():
 
 def test_activation_auto_read_uses_firmware_version():
     """连上自动读授权记录时，固件版本要已经喂进页面 —— 旧固件才能直接说"升级"。"""
-    import litearm as pa
-    from PyQt5.QtTest import QTest
+    from PyQt5.QtWidgets import QApplication
 
-    from tests.fake_arm import FakeArm
-
-    class OldFirmwareArm(FakeArm):
-        def license(self):
-            raise pa.MotionTimeoutError("no answer")
+    from litetool.sdk_worker import TaskResult
 
     w = _win()
-    w.worker._factory = lambda port: OldFirmwareArm(firmware="Litearm1.5.3-7J")
-    w.worker.open("fake")
+    w.worker._firmware = "Litearm1.5.3-7J"
+
+    def fake_submit(name, fn, on_done=None):
+        # 旧固件：0x2F 被 SDK 等成超时，read_record 回 supported=None；
+        # 页面用已经喂进来的固件版本把"升级固件"从"查链路"里分出来。
+        # 不启动所有者线程/不跑 qWait：Qt 5.15.19 offscreen 下那条路径会偶发段错误。
+        if on_done is not None:
+            on_done(TaskResult(name, True, value={"supported": None}))
+
+    w.worker.submit = fake_submit
     w._apply_online(True, "fake")
-    QTest.qWait(400)
+    QApplication.instance().processEvents()
     hint = w.pages["activation"].record_hint.text()
     assert "升级固件" in hint and "1.8.0" in hint, hint
-    w.worker.close()
     w.close()
 
 

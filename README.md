@@ -60,6 +60,17 @@ three navigation groups on the left + a collapsible log at the bottom.
 | | **Diagnostics** | `KIN_BENCH` self-test, reset reason, link counters (CRC / queue full / CAN failures / control-tick overruns), error-code text, diagnostics bundle |
 | | **Activation** | Read the device license record (UID / state / customer id / issue date); online registration to activate an unactivated arm (`0x2F` / `0x3F`) |
 | | **Firmware upgrade** | USB DFU (`0483:DF11`): pick and inspect an image (version / size / address range / SHA / holes), disarm and enter the ROM bootloader — or start from a board already sitting in it — flash with read-back verification, progress / cancel / result |
+| | **Settings** | Interface language: follow the system / 简体中文 / English; applies immediately without restart and is remembered per machine |
+
+### Interface language
+
+The UI ships in Simplified Chinese and English. Switch in **Settings → Language**; the change
+applies immediately (no restart) and is stored per machine with `QSettings`. The default follows
+the desktop language — on Linux that honours `LANGUAGE` before `LC_ALL`/`LANG`, so a Chinese
+desktop with an English terminal still starts in Chinese. `config.yaml`'s
+`language: auto | zh | en` sets the deployment default, a per-machine choice wins over it, and
+`--lang zh|en` overrides only the current run. SDK error-code text uses the same locale
+(`litearm.describe_*`).
 
 ## Coverage: SDK public surface → UI entry
 
@@ -209,6 +220,7 @@ pip install -r requirements.txt
 python3 main.py                       # a normal user is enough if the port is in the dialout group
 python3 main.py --fake                # no hardware: SDK fake transport, auto-connects
 python3 main.py --activation-url https://act.nexform.tech   # activation service (production by default)
+python3 main.py --lang en            # this run in English (does not change the saved choice)
 ```
 
 `--fake` never touches the serial port; it is for demos, training, and UI work without an arm.
@@ -293,8 +305,12 @@ litetool/
   pose_math.py          Jog pose math (base/tool frames, rpy ↔ rotation matrix)
   param_catalog.py      Tuning catalog mirror + schema/diff/ff_mask + role/hint/detail
   tuning_guide.py       Tuning-guide content (formulas / symbol mapping / symptom table)
+  tuning_guide_en.py     English tuning-guide content
+  i18n.py               UI language state, system detection, Chinese-source tr()
+  i18n_en.py            English string table (Chinese source text -> English)
+  param_catalog_en.py   English parameter labels / hints / details
   firmware_defaults.py  Parses firmware defaults.c (source of truth for presets/ and consistency checks)
-  settings.py           config.yaml merge (type + range validation)
+  settings.py           config.yaml merge (type + range validation, language default)
   csv_export.py         CSV writer for the plot window and 300 Hz capture (units in headers)
   obs.py                Structured logging (JSONL, OpenTelemetry field names, redaction)
   activation.py         Activation-service client (the only outbound network point; license/registration checks)
@@ -319,6 +335,7 @@ litetool/
       cart_page.py      Cartesian     zerog_page.py   Zero-G
       gripper_page.py   Gripper       log_page.py      Logs
       params_page.py    Parameters    guide_page.py   Tuning guide
+      settings_page.py  Settings
       diag_page.py      Diagnostics   installation_page.py  Installation direction
       activation_page.py    Activation (read UID / online activation)
       firmware_page.py      Firmware upgrade (USB DFU)
@@ -338,7 +355,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 640 passed (all offline, no hardware required)
+python3 -m pytest          # 688 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |

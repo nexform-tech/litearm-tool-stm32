@@ -13,6 +13,8 @@ from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtWidgets import (QCheckBox, QHBoxLayout, QLabel, QPushButton,
                              QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
 
+from litetool import i18n
+from litetool.gui.i18n_ui import TrButton, TrCheckBox, TrLabel
 from litetool.gui.widgets import Banner
 from litetool.scene.controller import JointSmoother
 
@@ -35,6 +37,8 @@ class ScenePage(QWidget):
         self._view = None
         self._smoother = None
         self._loading = False
+        self._placeholder_src = ("连接机械臂后显示 3D 模型", None)
+        self._banner_src = None
         self._timer = QTimer(self)
         self._timer.setInterval(RENDER_MS)
         self._timer.timeout.connect(self._render)
@@ -42,16 +46,16 @@ class ScenePage(QWidget):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
-        self.title = QLabel("3D 数字孪生")
+        self.title = TrLabel("3D 数字孪生")
         self.title.setStyleSheet("font-weight:bold;font-size:14px;")
-        self.status = QLabel("只读 · 等待连接")
+        self.status = QLabel(i18n.tr("只读 · 等待连接"))
         self.status.setStyleSheet("color:#8a97a4;font-size:12px;")
 
-        self.btn_iso = QPushButton("等轴")
-        self.btn_front = QPushButton("正视")
-        self.btn_side = QPushButton("侧视")
-        self.btn_tool = QPushButton("工具")
-        self.btn_reset = QPushButton("重置")
+        self.btn_iso = TrButton("等轴")
+        self.btn_front = TrButton("正视")
+        self.btn_side = TrButton("侧视")
+        self.btn_tool = TrButton("工具")
+        self.btn_reset = TrButton("重置")
         for b in (self.btn_iso, self.btn_front, self.btn_side,
                   self.btn_tool, self.btn_reset):
             b.setFixedHeight(26)
@@ -61,8 +65,8 @@ class ScenePage(QWidget):
         self.btn_tool.clicked.connect(lambda: self._camera("tool"))
         self.btn_reset.clicked.connect(self._reset_camera)
 
-        self.cb_grid = QCheckBox("网格")
-        self.cb_axes = QCheckBox("坐标轴")
+        self.cb_grid = TrCheckBox("网格")
+        self.cb_axes = TrCheckBox("坐标轴")
         self.cb_grid.setChecked(True)
         self.cb_axes.setChecked(True)
         self.cb_grid.toggled.connect(lambda on: self._toggle_grid(on))
@@ -82,7 +86,7 @@ class ScenePage(QWidget):
         self.banner = Banner()
         self.banner.setVisible(False)
 
-        self.placeholder = QLabel("连接机械臂后显示 3D 模型")
+        self.placeholder = QLabel(i18n.tr("连接机械臂后显示 3D 模型"))
         self.placeholder.setAlignment(Qt.AlignCenter)
         self.placeholder.setWordWrap(True)
         self.placeholder.setStyleSheet("color:#8a97a4;font-size:13px;")
@@ -130,7 +134,7 @@ class ScenePage(QWidget):
             elif self._n != 1:
                 self._clear_banner()
                 self._show_placeholder("未连接 — 连接机械臂后显示实时姿态")
-            self.status.setText("只读 · 离线")
+            self.status.setText(i18n.tr("只读 · 离线"))
             return
         if self._view is None and self.worker.state is None:
             self._set_info("已连接 — 等待状态帧")
@@ -161,7 +165,7 @@ class ScenePage(QWidget):
                 self._show_placeholder(
                     "台架 1J — 没有 7 轴 URDF 模型，3D 视图不适用。\n"
                     "请使用总览/关节页查看 1 轴状态。")
-                self.status.setText("只读 · 台架 1J")
+                self.status.setText(i18n.tr("只读 · 台架 1J"))
             elif n == 7:
                 if self._view is not None:
                     self.stack.setCurrentWidget(self.view_host)
@@ -234,7 +238,8 @@ class ScenePage(QWidget):
             model = load_default_model(lod=bool(getattr(self.settings, "scene_lod", True)))
         except Exception as e:  # noqa: BLE001 - 资产坏了显示空状态，不能拖垮主窗口
             self._loading = False
-            self._show_placeholder(f"3D 模型加载失败：{e}")
+            self._show_placeholder("3D 模型加载失败：{err}",
+                                   err=i18n.safe_detail(e))
             return
         if model is None:
             self._loading = False
@@ -247,7 +252,8 @@ class ScenePage(QWidget):
             view = SceneWidget(model)
         except Exception as e:  # noqa: BLE001 - 无 OpenGL/驱动异常时给可读提示
             self._loading = False
-            self._show_placeholder(f"3D 视图初始化失败（OpenGL）：{e}")
+            self._show_placeholder("3D 视图初始化失败（OpenGL）：{err}",
+                                   err=i18n.safe_detail(e))
             return
 
         self._model = model
@@ -268,8 +274,9 @@ class ScenePage(QWidget):
         if self._online:
             self._start()
 
-    def _show_placeholder(self, text: str):
-        self.placeholder.setText(text)
+    def _show_placeholder(self, source: str, **fmt):
+        self._placeholder_src = (source, fmt or None)
+        self.placeholder.setText(i18n.tr(source, **fmt))
         self.stack.setCurrentWidget(self.placeholder)
         self._set_buttons(False)
 
@@ -296,19 +303,32 @@ class ScenePage(QWidget):
         if self._view is not None:
             self._view.set_axes_visible(on)
 
-    def _set_banner(self, text: str):
-        self.banner.set_warn(text)
+    def _set_banner(self, source: str):
+        self._banner_src = ("warn", source)
+        self.banner.set_warn(i18n.tr(source))
         self.banner.setVisible(True)
 
-    def _set_info(self, text: str):
-        self.banner.set_ok(text)
+    def _set_info(self, source: str):
+        self._banner_src = ("ok", source)
+        self.banner.set_ok(i18n.tr(source))
         self.banner.setVisible(True)
 
     def _status_text(self) -> str:
         if self._view is not None:
-            return (f"只读 · {self._view.model.n_joints}J · "
-                    f"{self._view.triangle_count // 1000}k 三角形")
-        return "只读 · 在线，准备加载模型" if self._online else "只读 · 离线"
+            return i18n.tr("只读 · {n}J · {k}k 三角形",
+                           n=self._view.model.n_joints,
+                           k=self._view.triangle_count // 1000)
+        return (i18n.tr("只读 · 在线，准备加载模型") if self._online
+                else i18n.tr("只读 · 离线"))
 
     def _clear_banner(self):
+        self._banner_src = None
         self.banner.setVisible(False)
+
+    def retranslate(self):
+        self.status.setText(self._status_text())
+        source, fmt = self._placeholder_src
+        self.placeholder.setText(i18n.tr(source, **(fmt or {})))
+        if self._banner_src is not None:
+            kind, text = self._banner_src
+            (self.banner.set_warn if kind == "warn" else self.banner.set_ok)(i18n.tr(text))

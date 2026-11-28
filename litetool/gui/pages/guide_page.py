@@ -9,8 +9,10 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QFrame, QLabel, QScrollArea,
                              QTextBrowser, QToolButton, QVBoxLayout, QWidget)
 
+from litetool import i18n
 from litetool import param_catalog as C
 from litetool import tuning_guide as G
+from litetool.gui.i18n_ui import TrLabel, forget_tree
 
 # 分组: (组标题, [关节参数 key 列表])
 GROUPS = [
@@ -34,11 +36,12 @@ class _CollapsibleBox(QFrame):
 
     def __init__(self, title: str, content: QWidget, parent=None):
         super().__init__(parent)
+        self._source = title
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 2, 0, 2)
         lay.setSpacing(2)
         self.btn = QToolButton()
-        self.btn.setText(f"▸ {title}")
+        self.btn.setText("▸ " + i18n.tr(title))
         self.btn.setCheckable(True)
         self.btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.btn.setStyleSheet("QToolButton{border:none;font-weight:bold;"
@@ -58,15 +61,21 @@ class _CollapsibleBox(QFrame):
     def expand(self):
         if not self.btn.isChecked():
             self.btn.setChecked(True)
-            self.btn.setText("▾ " + self.btn.text()[2:])
+            self.btn.setText("▾ " + i18n.tr(self._source))
             self._content.setVisible(True)
+
+    def retranslate(self):
+        arrow = "▾ " if self.btn.isChecked() else "▸ "
+        self.btn.setText(arrow + i18n.tr(self._source))
 
 
 def _detail_label(title: str, role: str, hint: str, detail: str,
                   extra: str = "") -> QLabel:
-    txt = f"<b>{_plain(title)}</b><br><i>{_plain(role)}</i><br>{_plain(hint)}<br><br>{_plain(detail)}"
+    # 目录里的 role/hint/detail 已经按语言选好；这里不再二次翻译。
+    txt = (f"<b>{_plain(title)}</b><br><i>{_plain(role)}</i>"
+           f"<br>{_plain(hint)}<br><br>{_plain(detail)}")
     if extra:
-        txt += f"<br><span style='color:#666;'>{_plain(extra)}</span>"
+        txt += f"<br><span style='color:#666;'>{_plain(i18n.tr(extra))}</span>"
     lab = QLabel(txt)
     lab.setWordWrap(True)
     lab.setTextFormat(Qt.RichText)
@@ -91,6 +100,16 @@ class TuningGuidePage(QWidget):
         lay.setContentsMargins(2, 2, 2, 2)
         lay.setSpacing(6)
 
+        self._content = content
+        self._lay = lay
+        self._populate()
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+
+    def _populate(self) -> None:
+        lay = self._lay
+        self._key_widget = {}
+        self._collapsibles = {}
         # (1) 公式/须知/速查 (HTML)
         self.browser = QTextBrowser()
         self.browser.setHtml(G.build_guide_html())
@@ -99,9 +118,9 @@ class TuningGuidePage(QWidget):
         lay.addWidget(self.browser)
 
         # (2) 逐参数详解 —— 可收起/展开分组, 与参数页 tooltip 同源
-        head = QLabel("<h3>参数逐项详解</h3><span style='color:#666;'>"
-                      "内容与参数页悬停提示同源 (param_catalog role/hint/detail); "
-                      "点分组标题收起/展开。</span>")
+        head = TrLabel("<h3>参数逐项详解</h3><span style='color:#666;'>"
+                       "内容与参数页悬停提示同源 (param_catalog role/hint/detail); "
+                       "点分组标题收起/展开。</span>")
         head.setTextFormat(Qt.RichText)
         head.setWordWrap(True)
         lay.addWidget(head)
@@ -125,14 +144,27 @@ class TuningGuidePage(QWidget):
         lay.addWidget(self._collapsibles["ff"])
 
         lay.addStretch(1)
-        scroll.setWidget(content)
-        outer.addWidget(scroll)
+
+    def retranslate(self) -> None:
+        """整块重建 —— 详解文字来自目录表，逐条重译比改控件少错。"""
+        forget_tree(self._content)
+        while self._lay.count():
+            item = self._lay.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                # 先摘掉再延迟删除：deleteLater 要等事件循环，而启动时紧接着
+                # 就会重建；不摘掉会看到新旧两份标题叠在一起。
+                widget.setParent(None)
+                widget.deleteLater()
+        self._populate()
 
     # ---- 详解块构建 ----
     def _joint_block(self, key: str) -> QWidget:
         p = C.JOINT_BY_KEY[key]
-        extra = f"范围 {p.range_text()} · 写口 {_params_write_desc(p)}"
-        return self._mk_block(key, p.label, p.role, p.hint, p.detail, extra)
+        extra = i18n.tr("范围 {range} · 写口 {write}",
+                        range=p.range_text(), write=_params_write_desc(p))
+        return self._mk_block(key, p.label_text(), p.role_text(), p.hint_text(),
+                              p.detail_text(), extra)
 
     def _mk_block(self, key, title, role, hint, detail, extra="") -> QWidget:
         w = QWidget()
@@ -161,9 +193,9 @@ class TuningGuidePage(QWidget):
         v.setContentsMargins(8, 0, 0, 0)
         v.setSpacing(6)
         for gp in C.GLOBAL_PARAMS:
-            extra = f"范围 {gp.range_text()}"
-            v.addWidget(self._mk_block(gp.key, gp.label, gp.role, gp.hint,
-                                       gp.detail, extra))
+            extra = i18n.tr("范围 {range}", range=gp.range_text())
+            v.addWidget(self._mk_block(gp.key, gp.label_text(), gp.role_text(),
+                                       gp.hint_text(), gp.detail_text(), extra))
         return w
 
     def _build_ff_group(self) -> QWidget:
@@ -172,9 +204,10 @@ class TuningGuidePage(QWidget):
         v.setContentsMargins(8, 0, 0, 0)
         v.setSpacing(6)
         for i, (mask, name, label) in enumerate(C.FF_BITS):
-            detail = C.FF_BIT_DETAIL[i] if i < len(C.FF_BIT_DETAIL) else label
-            extra = f"ff_mask 位 bit{i} = 0x{mask:02X}"
-            v.addWidget(self._mk_block(name, f"{name} 位", label, "", detail, extra))
+            detail = C.ff_detail_text(i) if i < len(C.FF_BITS) else label
+            extra = i18n.tr("ff_mask 位 bit{bit} = 0x{mask:02X}", bit=i, mask=mask)
+            v.addWidget(self._mk_block(name, i18n.tr("{name} 位", name=name),
+                                       C.ff_label_text(i), "", detail, extra))
         return w
 
     # ---- reveal: 从参数页直达某参数详解 ----
@@ -204,7 +237,7 @@ class TuningGuidePage(QWidget):
 def _params_write_desc(p):
     """简短写口描述 (与 params_page._write_desc 同文案, 避免 import 循环)。"""
     if p.kind == "ctrl":
-        return "0x22 (kp/kd/tau_max 成组)"
+        return i18n.tr("0x22 (kp/kd/tau_max 成组)")
     if p.kind == "limits":
-        return "0x23 (q_min/q_max 成组)"
-    return f"0x26 item {p.item} (7 关节整组)"
+        return i18n.tr("0x23 (q_min/q_max 成组)")
+    return i18n.tr("0x26 item {item} (7 关节整组)", item=p.item)

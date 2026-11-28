@@ -38,9 +38,11 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (QLabel, QMessageBox, QPushButton, QVBoxLayout,
                              QWidget)
 
+from litetool import i18n
 from litetool import model_io as MIO
 from litetool import param_catalog as C
 from litetool import params_io as PIO
+from litetool.gui.i18n_ui import TrButton, TrLabel, tr_tooltip
 from litetool.gui.pages.common import group, hint, note, row, spin
 
 GRAVITY_ITEM = 6            # 0x28/0x2C 的 item6
@@ -121,12 +123,14 @@ class InstallationPage(QWidget):
         self._baseline = None           # 设备当前 gravity（[读当前] 后填）
         self._custom = False            # 向量被手改过 → rpy 显示"(自定义)"
         self._loading = False           # 程序性回填中，别触发联动
+        self._status_src = ("未连接 — 连接后可用", None)
+        self._dev = None                # (向量, 预设名) —— 设备当前行
 
         gp = C.GLOBAL_BY_KEY["gravity"]
         self._gp = gp
 
         # ---- 状态行 ----
-        self.status = QLabel("未连接 — 连接后可用")
+        self.status = QLabel(i18n.tr("未连接 — 连接后可用"))
         self.status.setStyleSheet("color:#61afef;")
         self.status.setWordWrap(True)
 
@@ -134,15 +138,16 @@ class InstallationPage(QWidget):
         self._preset_btns = {}
         btns = []
         for name, _rpy, vec in PRESETS:
-            b = QPushButton(name)
+            b = TrButton(name)
             b.setMinimumHeight(32)
-            b.setToolTip(f"写入 gravity = ({vec[0]:+.2f}, {vec[1]:+.2f}, {vec[2]:+.2f}) m/s²")
+            tr_tooltip(b, "写入 gravity = ({x:+.2f}, {y:+.2f}, {z:+.2f}) m/s²",
+                       x=vec[0], y=vec[1], z=vec[2])
             b.clicked.connect(lambda _=False, v=vec, r=_rpy: self._apply_preset(v, r))
             self._preset_btns[name] = b
             btns.append(b)
-        self.btn_custom = QPushButton("自定义")
+        self.btn_custom = TrButton("自定义")
         self.btn_custom.setMinimumHeight(32)
-        self.btn_custom.setToolTip("不选预设，直接用下面的 base_rpy 或 gravity 向量")
+        tr_tooltip(self.btn_custom, "不选预设，直接用下面的 base_rpy 或 gravity 向量")
         self.btn_custom.clicked.connect(self._on_custom)
         btns.append(self.btn_custom)
         g_preset = group("① 选择安装方向", row(*btns),
@@ -166,36 +171,40 @@ class InstallationPage(QWidget):
         self.lbl_mag.setMinimumWidth(190)
 
         g_vec = group(
-            f"② 安装姿态与向量（{gp.unit}）",
-            row(QLabel("base_rpy  roll"), self._rpy_spins[0],
-                QLabel("pitch"), self._rpy_spins[1],
-                QLabel("yaw"), self._rpy_spins[2], self.lbl_rpy_state),
-            row(QLabel("gravity   x"), self._g_spins[0],
-                QLabel("y"), self._g_spins[1],
-                QLabel("z"), self._g_spins[2], self.lbl_mag),
-            note(f"g = R(base_rpy)ᵀ·(0,0,-{G0})，与固件 kin.c 同式。改 rpy 会自动重算向量；"
-                 "直接改向量则 rpy 标为「(自定义)」（反向不唯一，不做反解）。"),
+            "② 安装姿态与向量（{unit}）",
+            row(TrLabel("base_rpy  roll"), self._rpy_spins[0],
+                TrLabel("pitch"), self._rpy_spins[1],
+                TrLabel("yaw"), self._rpy_spins[2], self.lbl_rpy_state),
+            row(TrLabel("gravity   x"), self._g_spins[0],
+                TrLabel("y"), self._g_spins[1],
+                TrLabel("z"), self._g_spins[2], self.lbl_mag),
+            note("g = R(base_rpy)ᵀ·(0,0,-{g0})，与固件 kin.c 同式。改 rpy 会自动重算向量；"
+                 "直接改向量则 rpy 标为「(自定义)」（反向不唯一，不做反解）。",
+                 g0=G0),
+            unit=gp.unit,
         )
 
         # ---- 设备当前 / 操作 ----
-        self.btn_read = QPushButton("读当前")
+        self.btn_read = TrButton("读当前")
         self.btn_read.setMinimumHeight(34)
-        self.btn_read.setToolTip("读 0x2C item6 三轴 —— 这是本页所有下发的前置（未读不许写）")
+        tr_tooltip(self.btn_read,
+                   "读 0x2C item6 三轴 —— 这是本页所有下发的前置（未读不许写）")
         self.btn_read.clicked.connect(self._on_read)
 
-        self.btn_apply = QPushButton("下发（须失能）")
+        self.btn_apply = TrButton("下发（须失能）")
         self.btn_apply.setMinimumHeight(34)
-        self.btn_apply.setToolTip(
+        tr_tooltip(
+            self.btn_apply,
             "写 0x28 item6 sub0/1/2。须先失能：改 gravity 会让重力前馈当拍阶跃，\n"
             "且三条非原子（中途经过模长 13.87 的中间态）。本页不会替你失能。")
         self.btn_apply.clicked.connect(self._on_apply)
 
-        self.btn_save = QPushButton("固化到 Flash")
+        self.btn_save = TrButton("固化到 Flash")
         self.btn_save.setMinimumHeight(34)
-        self.btn_save.setToolTip("写 0x25 保存当前 RAM 参数到 flash（同样须失能）")
+        tr_tooltip(self.btn_save, "写 0x25 保存当前 RAM 参数到 flash（同样须失能）")
         self.btn_save.clicked.connect(self._on_save)
 
-        self.lbl_dev = QLabel("设备当前：—")
+        self.lbl_dev = QLabel(i18n.tr("设备当前：—"))
         self.lbl_dev.setStyleSheet("color:#c8c8c8;")
 
         g_ops = group("③ 读 / 下发 / 固化",
@@ -269,9 +278,11 @@ class InstallationPage(QWidget):
         m = _mag(self._vector())
         off = abs(m - G0)
         ok = off <= G0 * MAG_TOL_REL
-        self.lbl_mag.setText(f"|g| = {m:.4f}  " + ("✅" if ok else f"⚠ 偏离 9.81 超 {MAG_TOL_REL:.0%}"))
+        self.lbl_mag.setText(
+            i18n.tr("|g| = {mag:.4f}  ", mag=m)
+            + ("✅" if ok else i18n.tr("⚠ 偏离 9.81 超 {pct:.0%}", pct=MAG_TOL_REL)))
         self.lbl_mag.setStyleSheet("color:#98c379;" if ok else "color:#ffd166;")
-        self.lbl_rpy_state.setText("(自定义)" if self._custom else "")
+        self.lbl_rpy_state.setText(i18n.tr("(自定义)") if self._custom else "")
         self._refresh()
 
     # ================= 外部状态 =================
@@ -296,8 +307,9 @@ class InstallationPage(QWidget):
                 self._device_synced = False
                 self._baseline = None
                 self._busy = False
-                self.lbl_dev.setText("设备当前：—")
-                self.status.setText("离线 — 断开或 500ms 无状态帧；重连后自动恢复")
+                self._dev = None
+                self._render_dev()
+                self._set_status("离线 — 断开或 500ms 无状态帧；重连后自动恢复")
             self._refresh()
 
     def set_busy(self, busy: bool):
@@ -313,8 +325,8 @@ class InstallationPage(QWidget):
         """
         self._st = st
         if st is not None and getattr(st, "enabled", False):
-            self.hint_lbl.setText("⚠ 臂处于使能态 —— 下发需先到 [整机] 页失能"
-                                  "（本页不会替你失能）")
+            self.hint_lbl.setText(i18n.tr(
+                "⚠ 臂处于使能态 —— 下发需先到 [整机] 页失能（本页不会替你失能）"))
             self.hint_lbl.setVisible(True)
         else:
             self.hint_lbl.setVisible(False)
@@ -323,6 +335,26 @@ class InstallationPage(QWidget):
     def _can_run(self) -> bool:
         return bool(self._submit is not None and self._online
                     and not self._busy and not self._ext_busy)
+
+    def _set_status(self, source: str, **fmt) -> None:
+        self._status_src = (source, fmt or None)
+        self.status.setText(i18n.tr(source, **fmt))
+
+    def _render_dev(self) -> None:
+        if self._dev is None:
+            self.lbl_dev.setText(i18n.tr("设备当前：—"))
+            return
+        g, name = self._dev
+        self.lbl_dev.setText(i18n.tr(
+            "设备当前：({x:+.4f}, {y:+.4f}, {z:+.4f}) = {name}   |g|={mag:.4f}",
+            x=g[0], y=g[1], z=g[2], name=i18n.tr(name), mag=_mag(g)))
+
+    def retranslate(self) -> None:
+        source, fmt = self._status_src
+        self._set_status(source, **(fmt or {}))
+        self._render_dev()
+        self._update_mag()
+        self._refresh()
 
     def _refresh(self):
         on = self._can_run()
@@ -336,31 +368,31 @@ class InstallationPage(QWidget):
         for s in self._rpy_spins + self._g_spins:
             s.setEnabled(on)
         if self._submit is not None and self._online and on and not self._device_synced:
-            self.status.setText("已连接 — 尚未读取设备当前装向，请先 [读当前]；在此之前禁下发")
+            self._set_status("已连接 — 尚未读取设备当前装向，请先 [读当前]；在此之前禁下发")
 
     def _pre_op(self, what: str) -> bool:
         if self._submit is None:
-            self.status.setText("未连接")
+            self._set_status("未连接")
             return False
         if not self._online:
-            self.status.setText("离线，忽略操作")
+            self._set_status("离线，忽略操作")
             return False
         if self._busy:
-            self.status.setText(f"忙：前一条操作仍在执行，已忽略 {what}")
+            self._set_status("忙：前一条操作仍在执行，已忽略 {what}", what=what)
             return False
         if self._ext_busy:
-            self.status.setText("忙：运动/控制命令在途（MainWindow），已忽略本页操作")
+            self._set_status("忙：运动/控制命令在途（MainWindow），已忽略本页操作")
             return False
         return True
 
     def _require_device_sync(self, what: str) -> bool:
         if self._device_synced:
             return True
-        QMessageBox.warning(self, "请先读取设备参数",
-                            f"{what}\n\n尚未成功 [读当前]，"
-                            "此时下发等于把控件里的默认值盲写进设备。\n"
-                            "请先点 [读当前]。")
-        self.status.setText("已拒绝 — 请先 [读当前]")
+        QMessageBox.warning(self, i18n.tr("请先读取设备参数"),
+                            i18n.tr("{what}\n\n尚未成功 [读当前]，"
+                                    "此时下发等于把控件里的默认值盲写进设备。\n"
+                                    "请先点 [读当前]。", what=what))
+        self._set_status("已拒绝 — 请先 [读当前]")
         return False
 
     def _confirm_disabled(self, what: str) -> bool:
@@ -368,15 +400,16 @@ class InstallationPage(QWidget):
         st = self._st
         if st is not None and not getattr(st, "enabled", True):
             return True
-        reason = ("臂处于使能态" if st is not None
-                  else "状态未知（尚未收到状态帧）—— 状态没到手不等于安全")
+        reason = (i18n.tr("臂处于使能态") if st is not None
+                  else i18n.tr("状态未知（尚未收到状态帧）—— 状态没到手不等于安全"))
         QMessageBox.warning(
-            self, "须先失能",
-            f"{what}\n\n{reason}。\n\n"
-            "改 gravity 会让重力前馈当拍阶跃（正装↔侧装 |Δg|=13.87 m/s²，"
-            "J2/J3 上几十 Nm），且三条分量下发非原子（中途模长 13.87、方向偏 45°）。\n"
-            "请先到 [整机] 页失能 —— 本页不会替你失能（那会让你失去保持力矩）。")
-        self.status.setText("已拒绝 — 须先失能")
+            self, i18n.tr("须先失能"),
+            i18n.tr("{what}\n\n{reason}。\n\n"
+                    "改 gravity 会让重力前馈当拍阶跃（正装↔侧装 |Δg|=13.87 m/s²，"
+                    "J2/J3 上几十 Nm），且三条分量下发非原子（中途模长 13.87、方向偏 45°）。\n"
+                    "请先到 [整机] 页失能 —— 本页不会替你失能（那会让你失去保持力矩）。",
+                    what=what, reason=reason))
+        self._set_status("已拒绝 — 须先失能")
         return False
 
     def _confirm_magnitude(self, g: Sequence[float]) -> bool:
@@ -384,35 +417,36 @@ class InstallationPage(QWidget):
         if abs(m - G0) <= G0 * MAG_TOL_REL:
             return True
         return QMessageBox.warning(
-            self, "|g| 偏离 9.81",
-            f"当前 |g| = {m:.4f} m/s²，偏离 9.81 超过 {MAG_TOL_REL:.0%}。\n\n"
-            "常见成因：只改了一个分量（例如正装→侧装时 z 没清零 → "
-            f"({g[0]:+.2f},{g[1]:+.2f},{g[2]:+.2f}) 模长 13.87 = 1.41×g）。\n"
-            "确认这是有意为之？",
+            self, i18n.tr("|g| 偏离 9.81"),
+            i18n.tr("当前 |g| = {mag:.4f} m/s²，偏离 9.81 超过 {pct:.0%}。\n\n"
+                    "常见成因：只改了一个分量（例如正装→侧装时 z 没清零 → "
+                    "({x:+.2f},{y:+.2f},{z:+.2f}) 模长 13.87 = 1.41×g）。\n"
+                    "确认这是有意为之？",
+                    mag=m, pct=MAG_TOL_REL, x=g[0], y=g[1], z=g[2]),
             QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Cancel) == QMessageBox.Ok
 
     def _start(self, what: str, worker, sig):
         if not self._pre_op(what):
             return
         self._busy = True
-        self.status.setText(f"执行中：{what} …")
+        self._set_status("执行中：{what} …", what=what)
         self._refresh()
-        self._submit(f"安装方向[{what}]", worker,
+        self._submit(i18n.tr("安装方向[{what}]", what=what), worker,
                      lambda res: self._unpack(res, what, sig))
 
     def _unpack(self, res, what, sig):
         self._busy = False
         if res is None or not res.ok:
             err = res.error if res is not None else "未执行"
-            self._log(f"[ERR] 安装方向[{what}] 失败：{err}")
-            self.status.setText(f"失败：{err}")
+            self._log(i18n.tr("[ERR] 安装方向[{what}] 失败：{err}", what=what, err=err))
+            self._set_status("失败：{err}", err=err)
             sig.emit(None)
             return
         sig.emit(res.value)
 
     # ================= 读当前 =================
     def _on_read(self):
-        self._start("读当前", _worker_read, self.sig_read_done)
+        self._start(i18n.tr("读当前"), _worker_read, self.sig_read_done)
 
     def _on_read_done(self, val):
         if val is None:
@@ -420,7 +454,7 @@ class InstallationPage(QWidget):
             return
         g = val["gravity"]
         if any(v is None for v in g):
-            self.status.setText("读回失败 — 固件不支持 0x2C item6？（需 ≥1.5.x）")
+            self._set_status("读回失败 — 固件不支持 0x2C item6？（需 ≥1.5.x）")
             self._refresh()
             return
         self._baseline = list(g)
@@ -436,26 +470,27 @@ class InstallationPage(QWidget):
         else:
             self._custom = True
         self._update_mag()
-        self.lbl_dev.setText(f"设备当前：({g[0]:+.4f}, {g[1]:+.4f}, {g[2]:+.4f}) = {name}"
-                             f"   |g|={_mag(g):.4f}")
-        self.status.setText(f"已读取设备当前装向（{name}）")
+        self._dev = (list(g), name)
+        self._render_dev()
+        self._set_status("已读取设备当前装向（{name}）", name=i18n.tr(name))
         self._refresh()
 
     # ================= 下发 =================
     def _on_apply(self):
-        if not self._pre_op("下发安装方向"):
+        if not self._pre_op(i18n.tr("下发安装方向")):
             return
-        if not self._require_device_sync("下发安装方向"):
+        if not self._require_device_sync(i18n.tr("下发安装方向")):
             return
-        if not self._confirm_disabled("下发安装方向"):
+        if not self._confirm_disabled(i18n.tr("下发安装方向")):
             self._refresh()
             return
         g = self._vector()
         if not self._confirm_magnitude(g):
-            self.status.setText("已取消 — |g| 偏离未确认")
+            self._set_status("已取消 — |g| 偏离未确认")
             self._refresh()
             return
-        self._start("下发安装方向", _make_apply_worker(g), self.sig_apply_done)
+        self._start(i18n.tr("下发安装方向"), _make_apply_worker(g),
+                    self.sig_apply_done)
 
     def _on_apply_done(self, val):
         if val is None:
@@ -464,14 +499,16 @@ class InstallationPage(QWidget):
         fails = val["fails"]
         if fails:
             for sub, code in fails:
-                self._log(f"[ERR] gravity[{sub}] 被拒：{PIO.err_text(code)}")
-            self.status.setText("下发失败：" + "；".join(
-                f"分量{sub}({PIO.err_text(code)})" for sub, code in fails))
+                self._log(i18n.tr("[ERR] gravity[{sub}] 被拒：{err}",
+                                  sub=sub, err=PIO.err_text(code)))
+            self._set_status("下发失败：{detail}", detail=i18n.tr("；").join(
+                i18n.tr("分量{sub}({err})", sub=sub, err=PIO.err_text(code))
+                for sub, code in fails))
             self._refresh()
             return
         back = val["back"]
         if any(v is None for v in back):
-            self.status.setText("下发后回读失败 —— 不能确认已生效")
+            self._set_status("下发后回读失败 —— 不能确认已生效")
             self._refresh()
             return
         wrote = val["wrote"]
@@ -482,7 +519,7 @@ class InstallationPage(QWidget):
         # G(q) 前后自比：写同值时**不该变**，写不同值时必须变（证明真的进了模型）
         gb, ga = val["gq_before"], val["gq_after"]
         if gb is None or ga is None:
-            gq_txt = "G(q)：未取到当前姿态，跳过"
+            gq_txt = i18n.tr("G(q)：未取到当前姿态，跳过")
             ok_gq = True
         else:
             changed = max(abs(ga[i] - gb[i]) for i in range(7)) > 1e-6
@@ -490,40 +527,45 @@ class InstallationPage(QWidget):
                 abs(_f32(back[i]) - (_f32(self._baseline[i]) if self._baseline else back[i]))
                 for i in range(3)) > 1e-4
             ok_gq = (changed == expect_change)
-            gq_txt = (f"G(q)：{'变了' if changed else '未变'}"
-                      f"（{'符合预期' if ok_gq else '⚠ 与预期不符'}）")
-        self.lbl_dev.setText(f"设备当前：({back[0]:+.4f}, {back[1]:+.4f}, {back[2]:+.4f})"
-                             f" = {_label_of(back)}   |g|={mag:.4f}")
+            gq_txt = i18n.tr(
+                "G(q)：{changed}（{verdict}）",
+                changed=i18n.tr("变了") if changed else i18n.tr("未变"),
+                verdict=i18n.tr("符合预期") if ok_gq else i18n.tr("⚠ 与预期不符"))
         self._baseline = list(back)
-        self.status.setText(
-            f"读回差异 {dmax:.2e} {'✅' if ok_rb else '❌ 与写入不一致'}；"
-            f"|g|={mag:.4f} {'✅' if ok_mag else '⚠'}；{gq_txt}")
+        self._dev = (list(back), _label_of(back))
+        self._render_dev()
+        self._set_status("读回差异 {dmax:.2e} {ok_rb}；|g|={mag:.4f} {ok_mag}；{gq}",
+                         dmax=dmax,
+                         ok_rb="✅" if ok_rb else i18n.tr("❌ 与写入不一致"),
+                         mag=mag, ok_mag="✅" if ok_mag else "⚠", gq=gq_txt)
         for line in (ok_rb, ok_mag, ok_gq):
             if not line:
-                self._log(f"[ERR] 下发后自检未过：{self.status.text()}")
+                self._log(i18n.tr("[ERR] 下发后自检未过：{status}",
+                                  status=self.status.text()))
                 break
         self._refresh()
 
     # ================= 固化 =================
     def _on_save(self):
-        if not self._pre_op("固化到 Flash"):
+        if not self._pre_op(i18n.tr("固化到 Flash")):
             return
-        if not self._require_device_sync("固化到 Flash"):
+        if not self._require_device_sync(i18n.tr("固化到 Flash")):
             return
-        if not self._confirm_disabled("固化到 Flash（0x25）"):
+        if not self._confirm_disabled(i18n.tr("固化到 Flash（0x25）")):
             self._refresh()
             return
-        self._start("固化到 Flash", lambda arm: PIO.save_params(arm)[0], self.sig_save_done)
+        self._start(i18n.tr("固化到 Flash"), lambda arm: PIO.save_params(arm)[0],
+                    self.sig_save_done)
 
     def _on_save_done(self, val):
         if val is None:
             self._refresh()
             return
         if val is True:
-            self.status.setText("已固化到 Flash（掉电保持）")
+            self._set_status("已固化到 Flash（掉电保持）")
         else:
-            self.status.setText("固化失败：固件拒绝（须失能；0x04=需先 disable）")
-            self._log("[ERR] 0x25 PARAM_SAVE 被拒")
+            self._set_status("固化失败：固件拒绝（须失能；0x04=需先 disable）")
+            self._log(i18n.tr("[ERR] 0x25 PARAM_SAVE 被拒"))
         self._refresh()
 
 

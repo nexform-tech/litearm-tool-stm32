@@ -32,6 +32,10 @@ scene_msaa: 0
 # 关掉它会明显变慢；只在高端 GPU 上想要最大细节时才设 false。
 scene_lod: true
 
+# 界面语言：auto（跟随系统）/ zh / en。操作员在「设置」页选过语言后，
+# 那里的选择优先于本项；把设置页选回「跟随系统」则重新以本项为准。
+language: auto
+
 # Windows 上没有可用的桌面 OpenGL（远程桌面/虚拟显示器常见）时，3D 页可改用 Qt
 # 自带的 Mesa 软件渲染（CPU）。默认关闭；只在 3D 视口黑屏时设 true。
 scene_software_gl: false

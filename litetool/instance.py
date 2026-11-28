@@ -27,6 +27,8 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+from litetool import i18n
+
 from PyQt5.QtCore import QLockFile, QObject, QStandardPaths, pyqtSignal
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 
@@ -114,7 +116,8 @@ class InstanceGuard(QObject):
             return True, None
         if self._lock_file.error() == QLockFile.LockFailedError:
             return False, None
-        return False, (self._lock_file.errorString() or "锁文件不可用")
+        return False, (self._lock_file.errorString()
+                       or i18n.tr("锁文件不可用"))
 
     def _start_server(self) -> None:
         """起激活通道。它**不承担排他**，起不来只影响"前置已有窗口"。"""
@@ -123,7 +126,8 @@ class InstanceGuard(QObject):
         # 上次进程崩溃可能留下陈旧的 socket / 管道名；有文件锁兜底，这里可以安全清。
         QLocalServer.removeServer(self._name)
         if not self._server.listen(self._name) and not self.lock_error:
-            self.lock_error = self._server.errorString() or "未知错误"
+            self.lock_error = (self._server.errorString()
+                           or i18n.tr("未知错误"))
 
     def _notify_existing(self) -> bool:
         sock = QLocalSocket()

@@ -64,6 +64,8 @@ DfuSe 协议要点 (与标准 DFU 1.1 的区别)
 
 from __future__ import annotations
 
+from litetool import i18n
+
 import time
 from typing import Callable
 
@@ -259,9 +261,9 @@ def get_backend():
 def backend_status() -> str:
     """后端诊断串, 供 GUI/CLI 显示"""
     if not _HAVE_PYUSB:
-        return "未安装 pyusb (pip install pyusb)"
+        return i18n.tr("未安装 pyusb (pip install pyusb)")
     get_backend()
-    return _backend_label
+    return i18n.tr(_backend_label)
 
 
 def available() -> bool:
@@ -282,7 +284,8 @@ class DfuDevice:
     def __init__(self, dev=None, transfer_size: int | None = None):
         self.dev = dev or find_device()
         if self.dev is None:
-            raise DfuError("找不到 DFU 设备 (VID:PID = 0483:DF11) —— 芯片是否已进入 bootloader?")
+            raise DfuError(i18n.tr(
+                "找不到 DFU 设备 (VID:PID = 0483:DF11) —— 芯片是否已进入 bootloader?"))
         self.transfer_size = transfer_size or self._read_transfer_size()
         # [2026-09-28 加固] 块大小必须是 flash word 的整数倍。
         # 理由: _flash_range 按 transfer_size 切连续块。若它**不是** 32B 的整数倍,
@@ -293,10 +296,11 @@ class DfuDevice:
         # ⚠ 本板 wTransferSize=1024 (= 32×32) 本来就对齐, 故这是**纵深防线**:
         #   换型号/换 bootloader 报别的值时, 这里会当场拒绝而不是安静地烧出砖头。
         if self.transfer_size <= 0 or self.transfer_size % FLASH_WORD:
-            raise DfuError(
-                f"wTransferSize={self.transfer_size} 不是 {FLASH_WORD} B flash word 的整数倍 —— "
-                f"块边界会切在 flash word 中间, 相邻块将二次编程同一批字, "
-                f"H7 会产生 DBECCERR 坏字并变砖。请显式传对齐的 transfer_size=。")
+            raise DfuError(i18n.tr(
+                "wTransferSize={size} 不是 {word} B flash word 的整数倍 —— "
+                "块边界会切在 flash word 中间, 相邻块将二次编程同一批字, "
+                "H7 会产生 DBECCERR 坏字并变砖。请显式传对齐的 transfer_size=。",
+                size=self.transfer_size, word=FLASH_WORD))
         self.intf = 0
         self._opened = False
         self._upload_ok = None      # None=未探测; 见 upload_supported()
@@ -452,7 +456,8 @@ class DfuDevice:
             st = self._raw_status()
             if st is not None and st[2] != DFU_STATE_ERROR:
                 return
-        raise DfuError("DFU_CLRSTATUS 之后设备仍在 dfuERROR —— 无法恢复命令相位。")
+        raise DfuError(i18n.tr(
+            "DFU_CLRSTATUS 之后设备仍在 dfuERROR —— 无法恢复命令相位。"))
 
     # ------------------------------------------------------------------
     def upload(self, block_num: int, length: int) -> bytes:
@@ -574,13 +579,17 @@ class DfuDevice:
                 f"    ⇒ 检查 WBLOCK_ERASE 是否为 0 (DfuSe 特殊命令都用 wBlockNum=0)。")
         if not self.upload_supported():
             if note:
-                note(f"擦除扇区 0x{addr:08X} 耗时 {busy:.2f} s ✓ (忙时长下界通过; "
-                     f"本机无 UPLOAD, 无法再读回复核)")
+                note(i18n.tr(
+                    "擦除扇区 0x{addr:08X} 耗时 {busy:.2f} s ✓ "
+                    "(忙时长下界通过; 本机无 UPLOAD, 无法再读回复核)",
+                    addr=addr, busy=busy))
             return
         for i in range(300):                       # 上限 ~30 s (最坏擦除 4s 的 7 倍余量)
             if self.sector_is_erased(addr):
                 if note:
-                    note(f"擦除扇区 0x{addr:08X} 耗时 {busy:.2f} s, 读回复核全 0xFF ✓")
+                    note(i18n.tr(
+                        "擦除扇区 0x{addr:08X} 耗时 {busy:.2f} s, 读回复核全 0xFF ✓",
+                        addr=addr, busy=busy))
                 return
             time.sleep(0.1)
         raise DfuError(
@@ -657,7 +666,8 @@ class DfuDevice:
                     f"    (典型: base 落在受保护区内)。\n"
                     f"    确实要连它一起擦写, 走 flash(param_policy=\"wipe\") 那条路。")
             if note:
-                note(f"擦除扇区 {k} (@0x{sect:08X}) ...")
+                note(i18n.tr("擦除扇区 {k} (@0x{addr:08X}) ...",
+                             k=k, addr=sect))
             self.erase_sector_verified(sect, note=note)
 
 
@@ -703,14 +713,14 @@ class DfuDevice:
         if not total:
             return
         if erase:
-            rep(done_base, "设置地址指针 (擦除前) ...")
+            rep(done_base, i18n.tr("设置地址指针 (擦除前) ..."))
             # ⚠ 只擦**镜像覆盖到的**扇区。本工程固件 103,712 B 全部落在扇区 0,
             #   所以正常情况下这里只会擦扇区 0 —— 扇区 6(许可证)/7(标定) 不会被碰。
             self.erase_sectors_covering(base, total,
                                         note=lambda m, d=done_base: rep(d, m),
                                         allow_protected=allow_protected)
 
-        rep(done_base, "设置地址指针 (写数据前) ...")
+        rep(done_base, i18n.tr("设置地址指针 (写数据前) ..."))
         self.set_address(base)
 
         block = WBLOCK_DATA0
@@ -720,7 +730,8 @@ class DfuDevice:
             self.dnload(block, chunk)
             off += len(chunk)
             block += 1
-            rep(done_base + off, f"写入 {off}/{total} B (块 {block - 1}) ...")
+            rep(done_base + off, i18n.tr("写入 {off}/{total} B (块 {block}) ...",
+                                         off=off, total=total, block=block - 1))
 
     # ------------------------------------------------------------------
     def flash(self, blob: bytes, base: int = FLASH_BASE,

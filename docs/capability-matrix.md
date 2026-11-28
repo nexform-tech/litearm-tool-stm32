@@ -5,9 +5,9 @@ This document maps the capabilities of `litearm-studio` (GitHub `main`, 2026-11-
 the remaining work. It is the deliverable for issue #15 and the capability/migration boundary
 required by planning#18.
 
-Status is as of **2026-11-27**, after the implementation pass through PR #36. All implementation
-and packaging PRs are merged. Remaining work is the English UI (#12), joint zeroing (#20), and
-hardware acceptance on a real arm, gripper, DFU board and Windows CDC.
+Status is as of **2026-11-28**, after the implementation pass through PR #36 and the
+Chinese/English UI work (issue #12). Remaining work is joint zeroing (#20) and hardware
+acceptance on a real arm, gripper, DFU board and Windows CDC.
 
 # Studio → tool capability matrix
 
@@ -37,7 +37,7 @@ hardware acceptance on a real arm, gripper, DFU board and Windows CDC.
 | Structured logs | JSONL + web viewer | JSONL, redaction, PyQt viewer, restart history | Delivered, PR #23 |
 | CSV export | Browser telemetry export | Plot window + capture samples | Delivered, PR #22 |
 | Single instance / fake device | Daemon lock + `--fake` | Single-instance lock and `--fake` demo mode | Delivered, PR #21 + #33 |
-| Chinese / English UI | Yes | Chinese only | Not started, issue #12 |
+| Chinese / English UI | Yes | Chinese + English; live switch, system default, persisted per machine | Delivered, issue #12 |
 | Light / dark theme | Yes | Dark only | Not migrated; add on request |
 | Windows build | Yes (exe) | PyInstaller onedir; tag releases build Linux and Windows bundles | Delivered, PR #29/#35/#36 (real CDC/DFU acceptance pending; Windows/OpenGL verified, including software-GL fallback) |
 | Release artifacts | Studio desktop build | Every tag attaches Linux tar.gz + `.deb` + Windows zip with `.sha256` sidecars | Delivered, PR #35/#36 |
@@ -65,7 +65,7 @@ hardware acceptance on a real arm, gripper, DFU board and Windows CDC.
 | Browser telemetry store and retention policy | Not ported; the tool's 100 Hz ring buffer and 300 Hz firmware capture are the data sources. |
 | QtWebEngine / embedded browser | Excluded. |
 | VR runtime and rendering | Stays in `litearm-vr-studio`; the tool does not host VR. |
-| Studio web i18n stack | Not ported; issue #12 uses Qt translation or a string table. |
+| Studio web i18n stack | Not ported. The tool uses a lightweight Chinese-source string table (automatic fallback) plus a `QSettings` language choice; no Qt Linguist or Web i18n dependency. |
 | Theme toggle | Not ported for now; add only on request. |
 
 ## Remaining work
@@ -74,7 +74,6 @@ All capabilities in the map are delivered except the rows marked otherwise. What
 
 | Item | Issue | Depends on | Exit criteria |
 | --- | --- | --- | --- |
-| Chinese/English UI | #12 | Stable strings | Language switch without restart |
 | Joint zero-offset calibration | #20 | Firmware command IDs and persistence | Manual zero + auto approach on hardware |
 | Hardware acceptance | #5, #7, #9, #14, #16 | Real arm, gripper CAN adapter, DFU board, Windows host | Cartesian/jog, gripper, DFU success/cancel/unplug, Windows CDC/DFU; 3D at 60 FPS on target GPU |
 

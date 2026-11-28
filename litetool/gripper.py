@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from litetool import i18n
+
 import queue
 import sys
 import threading
@@ -75,19 +77,25 @@ class GripperTaskResult:
 
     @property
     def text(self) -> str:
+        name = self.name if not i18n.has_chinese(self.name) else i18n.tr(self.name)
+        if i18n.has_chinese(name):
+            name = i18n.tr("夹爪任务")
         if self.ok:
-            return f"{self.name} 完成"
-        return f"{self.name} 失败: {self.error}"
+            return i18n.tr("{name} 完成", name=name)
+        return i18n.tr("{name} 失败: {err}", name=name,
+                       err=i18n.safe_detail(self.error) or i18n.tr("未预期错误"))
 
 
 def availability() -> tuple:
     """`(可用, 原因)` —— 页面在构造时显示原因，不靠用户猜。"""
     if not sys.platform.startswith("linux"):
-        return False, "LiteGrip 仅支持 Linux（SocketCAN）"
+        return False, i18n.tr("LiteGrip 仅支持 Linux（SocketCAN）")
     try:
         import litegrip  # noqa: F401
     except Exception as e:  # noqa: BLE001 - 未安装/装载失败都按不可用
-        return False, f"未安装 litegrip-python: {e}"
+        # 技术原因不带中文：页面会把它嵌进已翻译的"不可用"提示里；
+        # 这里若先翻译/格式化，切语言时就再也匹配不回源串。
+        return False, f"litegrip-python: {e}"
     return True, ""
 
 
@@ -188,9 +196,11 @@ class GripperWorker:
                                         daemon=True)
         self._thread.start()
         fw = self._firmware_of(grip)
-        self._on_online(True, f"夹爪已连接 {channel}（{fw}）" if fw
-                        else f"夹爪已连接 {channel}")
-        self._log(f"[OK] 夹爪已连接 {channel} CAN ID=0x{int(can_id):02X}")
+        self._on_online(True, i18n.tr("夹爪已连接 {channel}（{fw}）",
+                                      channel=channel, fw=fw) if fw
+                        else i18n.tr("夹爪已连接 {channel}", channel=channel))
+        self._log(i18n.tr("[OK] 夹爪已连接 {channel} CAN ID=0x{can_id:02X}",
+                          channel=channel, can_id=int(can_id)))
 
     def close(self) -> None:
         """停线程 → 断开（SDK 默认先失能）。"""
@@ -205,10 +215,10 @@ class GripperWorker:
             try:
                 grip.disconnect()
             except Exception as e:  # noqa: BLE001 - 关闭失败不该阻断退出
-                self._log(f"[WARN] 夹爪断开出错: {e}")
+                self._log(i18n.tr("[WARN] 夹爪断开出错: {err}", err=e))
         if self._online:
             self._online = False
-            self._on_online(False, "夹爪已断开")
+            self._on_online(False, i18n.tr("夹爪已断开"))
 
     @staticmethod
     def _firmware_of(grip: Any) -> str:
@@ -219,7 +229,7 @@ class GripperWorker:
     def submit(self, name: str, fn, on_done=None) -> None:
         if self._grip is None:
             res = GripperTaskResult(name, False,
-                                    error=GripperUnavailable("夹爪未连接"))
+                                    error=GripperUnavailable(i18n.tr("夹爪未连接")))
             (on_done or self._on_task)(res)
             return
         self._tasks.put((name, fn, on_done))
@@ -241,9 +251,9 @@ class GripperWorker:
         """
         grip = self._grip
         if grip is None:
-            return False, "夹爪未连接"
+            return False, i18n.tr("夹爪未连接")
         busy = self._busy.is_set()
-        dropped = self.drop_pending("停止/释放")
+        dropped = self.drop_pending(i18n.tr("停止/释放"))
         if busy:
             # 只标记在途任务；排队任务已经被丢掉，不会误伤下一条新任务。
             self._interrupted.set()
@@ -256,16 +266,18 @@ class GripperWorker:
             try:
                 grip.disable()
             except Exception as e:  # noqa: BLE001
-                return False, (f"零力矩帧已发出，但失能失败（在途动作可能继续）: {e}")
-            extra = " · 已失能并中止在途动作"
+                return False, i18n.tr(
+                    "零力矩帧已发出，但失能失败（在途动作可能继续）: {err}", err=e)
+            extra = i18n.tr(" · 已失能并中止在途动作")
         else:
             extra = ""
         if dropped:
-            extra += f" · 已丢弃 {dropped} 条排队任务"
-        return True, "零力矩帧已发出" + extra
+            extra += i18n.tr(" · 已丢弃 {n} 条排队任务", n=dropped)
+        return True, i18n.tr("零力矩帧已发出") + extra
 
-    def drop_pending(self, reason: str = "停止") -> int:
+    def drop_pending(self, reason: str = "") -> int:
         """丢掉尚未开始的夹爪任务，返回条数。每条都补一次失败回调。"""
+        reason = reason or i18n.tr("停止")
         n = 0
         while True:
             try:
@@ -274,7 +286,8 @@ class GripperWorker:
                 return n
             n += 1
             res = GripperTaskResult(
-                name, False, error=RuntimeError(f"任务已被丢弃（{reason}）"))
+                name, False,
+                error=RuntimeError(i18n.tr("任务已被丢弃（{reason}）", reason=reason)))
             try:
                 (on_done or self._on_task)(res)
             except Exception:  # noqa: BLE001 - GUI 回调出错不能拖垮调用方
@@ -282,29 +295,29 @@ class GripperWorker:
 
     # ---- 常用动作（页面用） ----
     def enable(self, cb=None) -> None:
-        self.submit("夹爪使能", lambda g: g.enable(), cb)
+        self.submit(i18n.tr("夹爪使能"), lambda g: g.enable(), cb)
 
     def disable(self, cb=None) -> None:
-        self.submit("夹爪失能", lambda g: g.disable(), cb)
+        self.submit(i18n.tr("夹爪失能"), lambda g: g.disable(), cb)
 
     def open_jaws(self, speed: Optional[float] = None, cb=None) -> None:
-        self.submit("夹爪张开", lambda g: g.open(speed), cb)
+        self.submit(i18n.tr("夹爪张开"), lambda g: g.open(speed), cb)
 
     def close_jaws(self, speed: Optional[float] = None, cb=None) -> None:
-        self.submit("夹爪闭合", lambda g: g.close(speed), cb)
+        self.submit(i18n.tr("夹爪闭合"), lambda g: g.close(speed), cb)
 
     def grasp(self, force_n: Optional[float], hold_s: float, cb=None) -> None:
-        self.submit(f"夹爪抓取 {force_n}N/{hold_s}s",
+        self.submit(i18n.tr("夹爪抓取 {force}N/{hold}s", force=force_n, hold=hold_s),
                     lambda g: g.grasp(force_n, hold_s), cb)
 
     def write_zero(self, cb=None) -> None:
-        self.submit("夹爪写零（不可逆）", lambda g: g.write_zero(), cb)
+        self.submit(i18n.tr("夹爪写零（不可逆）"), lambda g: g.write_zero(), cb)
 
     def zero(self, cb=None) -> None:
-        self.submit("夹爪两端标定", lambda g: g.zero(), cb)
+        self.submit(i18n.tr("夹爪两端标定"), lambda g: g.zero(), cb)
 
     def save_calibration(self, path: Optional[str], cb=None) -> None:
-        self.submit("保存标定", lambda g: g.save_calibration(path), cb)
+        self.submit(i18n.tr("保存标定"), lambda g: g.save_calibration(path), cb)
 
     def load_calibration(self, *, path: Optional[str] = None,
                          mount: Optional[str] = None, cb=None) -> None:
@@ -314,10 +327,10 @@ class GripperWorker:
             if mount:
                 return g.load_calibration(template=str(mount))
             return g.load_calibration()
-        self.submit("加载标定", fn, cb)
+        self.submit(i18n.tr("加载标定"), fn, cb)
 
     def refresh(self, cb=None) -> None:
-        self.submit("刷新夹爪状态", lambda g: g.refresh_status(), cb)
+        self.submit(i18n.tr("刷新夹爪状态"), lambda g: g.refresh_status(), cb)
 
     def calibration(self, cb=None) -> None:
         """读回当前标定的摘要（给页面显示行程/方向/是否已标定）。"""
@@ -331,7 +344,7 @@ class GripperWorker:
                 "travel_mm": abs(float(c.pos_open_rad) - float(c.pos_closed_rad))
                 * float(c.rad_to_mm),
             }
-        self.submit("读取标定", fn, cb)
+        self.submit(i18n.tr("读取标定"), fn, cb)
 
     # ================= 所有者线程 =================
     def _loop(self) -> None:
@@ -348,7 +361,7 @@ class GripperWorker:
                 st = grip.get_state(wait=True)
             except Exception as e:  # noqa: BLE001 - 连续失败判离线
                 self._errors += 1
-                self._log(f"[WARN] 夹爪状态读取失败: {e}")
+                self._log(i18n.tr("[WARN] 夹爪状态读取失败: {err}", err=e))
                 if self._errors >= 3:
                     self._go_offline(str(e))
                     return
@@ -393,10 +406,11 @@ class GripperWorker:
             self._interrupted.clear()
             detail = f"（{res.error}）" if not res.ok and res.error else ""
             res = GripperTaskResult(
-                name, False, error=RuntimeError(f"已按停止/释放中止{detail}"))
+                name, False,
+                error=RuntimeError(i18n.tr("已按停止/释放中止{detail}", detail=detail)))
         elif self._stop.is_set() and res.ok:
             res = GripperTaskResult(name, False,
-                                    error=RuntimeError("夹爪已断开"))
+                                    error=RuntimeError(i18n.tr("夹爪已断开")))
         self._log(f"[{'OK' if res.ok else 'ERR'}] {res.text}")
         try:
             (on_done or self._on_task)(res)
@@ -413,5 +427,5 @@ class GripperWorker:
                 pass
         with self._lock:
             self._state = None
-        self._log(f"[ERR] 夹爪离线: {why}")
+        self._log(i18n.tr("[ERR] 夹爪离线: {why}", why=why))
         self._on_online(False, why)

@@ -22,9 +22,10 @@ from PyQt5.QtWidgets import (QCheckBox, QFileDialog, QGridLayout, QGroupBox,
                              QHBoxLayout, QLabel, QMessageBox, QProgressBar,
                              QPushButton, QVBoxLayout, QWidget)
 
-from litetool import dfu
+from litetool import dfu, i18n
 from litetool.dfu import controller as dfu_controller
 from litetool.dfu import job
+from litetool.gui.i18n_ui import TrButton, TrCheckBox, TrGroupBox, TrLabel
 from litetool.gui.pages.common import group, row
 
 PHASE_TEXT = {
@@ -69,25 +70,32 @@ _REASON_TEXT = {
 def _reason_text(reason: Optional[str], message: str = "") -> str:
     """短码 → 面向操作员的一句话；短码不认识时如实回服务端/引擎的消息。"""
     key = reason or ""
-    base = _REASON_TEXT.get(key)
+    message = i18n.safe_detail(message)
+    source = _REASON_TEXT.get(key)
+    base = i18n.tr(source) if source else None
     if key in ("dfu_device_absent", "dfu_permission_denied"):
         # 这两条的 message 本身就是可执行的说明（缺什么 / 怎么修），不要覆盖它。
         return message or base or key
     if key == "engine_unavailable":
-        detail = message or "未找到 libusb 后端"
-        return (f"这台机器上没有可用的 USB 烧录引擎：{detail}"
-                "（需要 pyusb 与 libusb；Windows 上还要装 ST 的 WinUSB 驱动）")
+        detail = message or i18n.tr("未找到 libusb 后端")
+        return i18n.tr("这台机器上没有可用的 USB 烧录引擎：{detail}"
+                       "（需要 pyusb 与 libusb；Windows 上还要装 ST 的 WinUSB 驱动）",
+                       detail=detail)
     if key == "flash_failed":
-        tail = ("设备已被尽量擦回空白，可以直接重试；若反复失败需要 SWD 探针救机"
-                if message else "请重试")
-        return f"烧录失败：{message}。{tail}" if message else (base or "烧录失败")
+        tail = (i18n.tr("设备已被尽量擦回空白，可以直接重试；"
+                        "若反复失败需要 SWD 探针救机")
+                if message else i18n.tr("请重试"))
+        return (i18n.tr("烧录失败：{message}。{tail}", message=message, tail=tail)
+                if message else (base or i18n.tr("烧录失败")))
     if key == "reconnect_failed":
         return message or (base or key)
     if key == "arm_enabled" and message:
-        return f"{base}（{message}）" if base else message
+        return i18n.tr("{base}（{message}）", base=base, message=message) \
+            if base else message
     if key == "dfu_not_entered" and message:
-        return f"{base}（{message}）" if base else message
-    return base or message or key or "升级失败"
+        return i18n.tr("{base}（{message}）", base=base, message=message) \
+            if base else message
+    return base or message or key or i18n.tr("升级失败")
 
 
 class FirmwarePage(QWidget):
@@ -204,7 +212,7 @@ class FirmwarePage(QWidget):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
-        self.title = QLabel("固件升级（USB DFU）")
+        self.title = TrLabel("固件升级（USB DFU）")
         self.title.setStyleSheet("font-weight:bold;font-size:14px;")
         self.state_lbl = QLabel("未连接")
         self.state_lbl.setStyleSheet("color:#8a97a4;font-size:12px;")
@@ -221,7 +229,7 @@ class FirmwarePage(QWidget):
         self.status_lbl.setStyleSheet("color:#8a97a4;font-size:12px;")
 
         # ---- 选镜像 ----
-        self.btn_pick = QPushButton("选择固件文件")
+        self.btn_pick = TrButton("选择固件文件")
         self.btn_pick.clicked.connect(self._on_pick)
         self.file_lbl = QLabel("")
         self.file_lbl.setStyleSheet("font-family:'DejaVu Sans Mono';font-size:12px;")
@@ -251,19 +259,19 @@ class FirmwarePage(QWidget):
         self.version_note_lbl.setStyleSheet("color:#9a6400;font-size:12px;")
         self.version_note_lbl.setVisible(False)
         grid = QGridLayout()
-        grid.addWidget(QLabel("版本"), 0, 0)
+        grid.addWidget(TrLabel("版本"), 0, 0)
         grid.addWidget(self.ver_lbl, 0, 1)
-        grid.addWidget(QLabel("大小"), 0, 2)
+        grid.addWidget(TrLabel("大小"), 0, 2)
         grid.addWidget(self.size_lbl, 0, 3)
-        grid.addWidget(QLabel("地址范围"), 1, 0)
+        grid.addWidget(TrLabel("地址范围"), 1, 0)
         grid.addWidget(self.range_lbl, 1, 1, 1, 3)
-        grid.addWidget(QLabel("格式"), 2, 0)
+        grid.addWidget(TrLabel("格式"), 2, 0)
         grid.addWidget(self.format_lbl, 2, 1)
-        grid.addWidget(QLabel("空洞"), 2, 2)
+        grid.addWidget(TrLabel("空洞"), 2, 2)
         grid.addWidget(self.holes_lbl, 2, 3)
-        grid.addWidget(QLabel("sha256"), 3, 0)
+        grid.addWidget(TrLabel("sha256"), 3, 0)
         grid.addWidget(self.sha_lbl, 3, 1, 1, 3)
-        self.summary_box = QGroupBox("镜像摘要")
+        self.summary_box = TrGroupBox("镜像摘要")
         sl = QVBoxLayout(self.summary_box)
         sl.addLayout(grid)
         sl.addWidget(self.version_note_lbl)
@@ -273,16 +281,16 @@ class FirmwarePage(QWidget):
         self.safety_lbl = QLabel("")
         self.safety_lbl.setWordWrap(True)
         self.safety_lbl.setStyleSheet("color:#9a6400;font-size:12px;")
-        self.safety_cb = QCheckBox("我确定机械臂在安全状态下，且升级期间不再控制它")
+        self.safety_cb = TrCheckBox("我确定机械臂在安全状态下，且升级期间不再控制它")
         self.safety_cb.toggled.connect(lambda _on: self._refresh_buttons())
         safety_box = group("开始之前必须确认", self.safety_lbl, self.safety_cb)
 
         # ---- 动作 ----
-        self.btn_start = QPushButton("开始升级")
+        self.btn_start = TrButton("开始升级")
         self.btn_start.clicked.connect(self._on_start)
-        self.btn_cancel = QPushButton("取消升级")
+        self.btn_cancel = TrButton("取消升级")
         self.btn_cancel.clicked.connect(self._on_cancel)
-        self.btn_reset = QPushButton("重置")
+        self.btn_reset = TrButton("重置")
         self.btn_reset.clicked.connect(self._on_reset)
         self.btn_cancel.setVisible(False)
         self.btn_reset.setEnabled(False)
@@ -338,17 +346,18 @@ class FirmwarePage(QWidget):
         try:
             size = os.path.getsize(path)
         except OSError as e:
-            self._reject_image(f"读不出文件: {e}")
+            self._reject_image(i18n.tr("读不出文件: {err}", err=e))
             return
         if size > MAX_IMAGE_BYTES:
             self._reject_image(
                 _reason_text("image_too_large",
-                             f"文件 {size} B 超过 {MAX_IMAGE_BYTES} B 上限"))
+                             i18n.tr("文件 {size} B 超过 {limit} B 上限",
+                                     size=size, limit=MAX_IMAGE_BYTES)))
             return
         try:
             data = Path(path).read_bytes()
         except OSError as e:
-            self._reject_image(f"读不出文件: {e}")
+            self._reject_image(i18n.tr("读不出文件: {err}", err=e))
             return
         self.inspect_bytes(Path(path).name, data)
 
@@ -376,8 +385,11 @@ class FirmwarePage(QWidget):
         self._result = None
         self.result_box.setVisible(False)
         self.progress_box.setVisible(False)
-        self._log(f"[INFO] 镜像已校验: {summary.name} · {summary.size} B · "
-                  f"版本 {summary.version or '未识别'} · sha256 {summary.sha256[:12]}")
+        self._log(i18n.tr("[INFO] 镜像已校验: {name} · {size} B · "
+                          "版本 {version} · sha256 {sha}",
+                          name=summary.name, size=summary.size,
+                          version=summary.version or i18n.tr("未识别"),
+                          sha=summary.sha256[:12]))
         self._refresh_buttons()
 
     def _show_image_error(self, text: str) -> None:
@@ -388,13 +400,13 @@ class FirmwarePage(QWidget):
     def _show_summary(self, summary) -> None:
         self.summary_box.setVisible(True)
         self.file_lbl.setText(summary.name)
-        self.ver_lbl.setText(summary.version or
-                             f"未识别（{summary.version_note or '—'}）")
+        self.ver_lbl.setText(summary.version or i18n.tr(
+            "未识别（{note}）", note=summary.version_note or "—"))
         self.size_lbl.setText(f"{summary.size} B")
         end = summary.base + summary.size - 1
         self.range_lbl.setText(f"0x{summary.base:08X}..0x{end:08X}")
         self.format_lbl.setText(summary.format)
-        self.holes_lbl.setText(f"{summary.holes} 段（按 0xFF 填充）")
+        self.holes_lbl.setText(i18n.tr("{n} 段（按 0xFF 填充）", n=summary.holes))
         self.sha_lbl.setText(summary.sha256)
         self.version_note_lbl.setText(summary.version_note or "")
         self.version_note_lbl.setVisible(bool(summary.version_note))
@@ -415,7 +427,7 @@ class FirmwarePage(QWidget):
             label = str(self._engine.backend_status())
         except Exception:                                        # noqa: BLE001
             self._engine_ready = False
-            label = "引擎状态读取失败"
+            label = i18n.tr("引擎状态读取失败")
         self._engine_checked = True
         self._engine_label = label
         dev = None
@@ -425,7 +437,8 @@ class FirmwarePage(QWidget):
             except Exception as e:                               # noqa: BLE001
                 self._dfu_present = False
                 self._dfu_location = ""
-                self._log(f"[WARN] 枚举 USB 设备失败: {type(e).__name__}: {e}")
+                self._log(i18n.tr("[WARN] 枚举 USB 设备失败: {detail}",
+                                  detail=f"{type(e).__name__}: {e}"))
             else:
                 self._dfu_present = dev is not None
                 self._dfu_location = dfu.device_location(dev) if dev is not None else ""
@@ -440,54 +453,61 @@ class FirmwarePage(QWidget):
 
     def _update_status(self) -> None:
         if self._running:
-            state, color = "升级中", "#9a6400"
+            state, color = i18n.tr("升级中"), "#9a6400"
         elif self._online:
-            state, color = "已连接", "#1f6fb2"
+            state, color = i18n.tr("已连接"), "#1f6fb2"
         elif self._dfu_present:
             state, color = "DFU", "#9a6400"
         else:
-            state, color = "未连接", "#8a97a4"
+            state, color = i18n.tr("未连接"), "#8a97a4"
         self.state_lbl.setText(state)
         self.state_lbl.setStyleSheet(f"color:{color};font-size:12px;")
 
         if not self._engine_checked:
-            self.engine_lbl.setText("烧录引擎：检查中…")
+            self.engine_lbl.setText(i18n.tr("烧录引擎：检查中…"))
             self.engine_lbl.setStyleSheet("color:#8a97a4;font-size:12px;")
         elif self._engine_ready:
-            self.engine_lbl.setText(f"烧录引擎可用：{self._engine_label}")
+            self.engine_lbl.setText(i18n.tr("烧录引擎可用：{label}",
+                                            label=self._engine_label))
             self.engine_lbl.setStyleSheet("color:#8a97a4;font-size:12px;")
         else:
-            self.engine_lbl.setText(
-                f"烧录引擎不可用：{self._engine_label}"
-                "（需要 pyusb 与 libusb；Windows 上还要装 ST 的 WinUSB 驱动）")
+            self.engine_lbl.setText(i18n.tr(
+                "烧录引擎不可用：{label}"
+                "（需要 pyusb 与 libusb；Windows 上还要装 ST 的 WinUSB 驱动）",
+                label=self._engine_label))
             self.engine_lbl.setStyleSheet("color:#b33a3a;font-size:12px;")
 
         if self._running:
-            self.status_lbl.setText(
+            self.status_lbl.setText(i18n.tr(
                 "升级进行中 —— 控制器在 bootloader 里，升级结束前界面连不上它，"
-                "这是正常的。")
+                "这是正常的。"))
         elif self._from_dfu():
-            text = ("检测到控制器停在 bootloader（DFU）里：它不在应用态，所以顶栏"
-                    "连不上它 —— 这不是没插线。点下面的「烧录并复位回应用」把它写回来。")
+            text = i18n.tr(
+                "检测到控制器停在 bootloader（DFU）里：它不在应用态，所以顶栏"
+                "连不上它 —— 这不是没插线。点下面的「烧录并复位回应用」把它写回来。")
             if self._dfu_location:
-                text += f"\n找到的控制器位于 USB {self._dfu_location}，请确认这就是你要烧录的控制器。"
+                text += i18n.tr(
+                    "\n找到的控制器位于 USB {loc}，请确认这就是你要烧录的控制器。",
+                    loc=self._dfu_location)
             self.status_lbl.setText(text)
         elif self._online:
-            self.status_lbl.setText(
-                f"当前固件：{self._firmware or '—'} · 端口：{self._port or '—'}")
+            self.status_lbl.setText(i18n.tr(
+                "当前固件：{fw} · 端口：{port}",
+                fw=self._firmware or "—", port=self._port or "—"))
         else:
-            self.status_lbl.setText(
-                "未连接控制器 —— 连上之后才能升级。若板子停在 DFU 里，这里会单独提示。")
+            self.status_lbl.setText(i18n.tr(
+                "未连接控制器 —— 连上之后才能升级。若板子停在 DFU 里，这里会单独提示。"))
 
         if self._from_dfu():
-            disarm = ("这次不会再失能一次 —— 应用早已停下，电机保持松开；"
-                      "烧录完成后板子会复位回应用态")
+            disarm = i18n.tr("这次不会再失能一次 —— 应用早已停下，电机保持松开；"
+                             "烧录完成后板子会复位回应用态")
         else:
-            disarm = "升级会先让机械臂失能 —— 中途电机会松开，有重力负载就会下垂"
-        self.safety_lbl.setText(
-            f"• {disarm}\n"
+            disarm = i18n.tr("升级会先让机械臂失能 —— 中途电机会松开，有重力负载就会下垂")
+        self.safety_lbl.setText(i18n.tr(
+            "• {disarm}\n"
             "• 升级期间无法急停 —— 设备在 bootloader 里，应用已停摆\n"
-            "• 许可证与出厂标定所在的扇区不会被触碰；镜像若覆盖该区会被直接拒绝")
+            "• 许可证与出厂标定所在的扇区不会被触碰；镜像若覆盖该区会被直接拒绝",
+            disarm=disarm))
 
     def _refresh_buttons(self) -> None:
         running = self._running
@@ -497,29 +517,32 @@ class FirmwarePage(QWidget):
         self.btn_cancel.setVisible(running)
         self.btn_cancel.setEnabled(running)
         if not running:
-            self.btn_cancel.setText("取消升级")
+            self.btn_cancel.setText(i18n.tr("取消升级"))
         from_dfu = self._from_dfu()
         can_start = (not running and self._worker is not None
                      and self._summary is not None
                      and self._engine_ready and (self._online or from_dfu)
                      and self.safety_cb.isChecked())
         self.btn_start.setEnabled(can_start)
-        self.btn_start.setText("烧录并复位回应用" if from_dfu else "开始升级")
+        self.btn_start.setText(i18n.tr("烧录并复位回应用") if from_dfu
+                               else i18n.tr("开始升级"))
         self.btn_start.setToolTip(self._start_tooltip(from_dfu))
 
     def _start_tooltip(self, from_dfu: bool) -> str:
         if self._running:
-            return "升级进行中"
+            return i18n.tr("升级进行中")
         if self._worker is None:
-            return "内部错误：SDK 未接入"
+            return i18n.tr("内部错误：SDK 未接入")
         if not self._engine_ready:
-            return "烧录引擎不可用 —— 需要 pyusb 与 libusb；Windows 上还要装 ST 的 WinUSB 驱动"
+            return i18n.tr("烧录引擎不可用 —— 需要 pyusb 与 libusb；"
+                           "Windows 上还要装 ST 的 WinUSB 驱动")
         if self._summary is None:
-            return "请先选择并校验一份固件镜像"
+            return i18n.tr("请先选择并校验一份固件镜像")
         if not (self._online or from_dfu):
-            return "请先连接控制器；若板子停在 bootloader 里，等它被检测到后可直接烧录"
+            return i18n.tr("请先连接控制器；若板子停在 bootloader 里，"
+                           "等它被检测到后可直接烧录")
         if not self.safety_cb.isChecked():
-            return "请先确认机械臂处于安全状态"
+            return i18n.tr("请先确认机械臂处于安全状态")
         return ""
 
     # ------------------------------------------------------------------ 开始/取消
@@ -528,10 +551,11 @@ class FirmwarePage(QWidget):
             return
         from_dfu = self._from_dfu()
         if not (self._online or from_dfu):
-            self._show_result_text("请先连接控制器，或把板子置于 DFU 状态。", error=True)
+            self._show_result_text(i18n.tr("请先连接控制器，或把板子置于 DFU 状态。"),
+                                   error=True)
             return
         if not self.safety_cb.isChecked():
-            self._show_result_text("请先勾选安全确认。", error=True)
+            self._show_result_text(i18n.tr("请先勾选安全确认。"), error=True)
             return
         if not self._confirm_cb(from_dfu):
             return
@@ -543,15 +567,17 @@ class FirmwarePage(QWidget):
         self._result = None
         self.result_box.setVisible(False)
         self.progress_box.setVisible(True)
-        self.phase_lbl.setText("准备…")
+        self.phase_lbl.setText(i18n.tr("准备…"))
         self.bar.setRange(0, 0)
         self.detail_lbl.setText("")
         self._last_phase = None
         self._running = True
         self._refresh_buttons()
-        self._log(f"[INFO] 固件升级开始: {self._summary.name} "
-                  f"({self._summary.size} B) · "
-                  f"{'从 bootloader 起跑' if from_dfu else '从应用态起跑'}")
+        self._log(i18n.tr(
+            "[INFO] 固件升级开始: {name} ({size} B) · {route}",
+            name=self._summary.name, size=self._summary.size,
+            route=i18n.tr("从 bootloader 起跑") if from_dfu
+            else i18n.tr("从应用态起跑")))
         self._controller = dfu_controller.UpgradeController(
             sdk=self._worker, engine_module=self._engine,
             reconnect=self._reconnect_rpc,
@@ -566,8 +592,8 @@ class FirmwarePage(QWidget):
         if self._controller is not None and self._running:
             self._controller.cancel()
             self.btn_cancel.setEnabled(False)
-            self.btn_cancel.setText("正在取消…")
-            self._log("[WARN] 已请求取消升级（烧录相位内不生效）")
+            self.btn_cancel.setText(i18n.tr("正在取消…"))
+            self._log(i18n.tr("[WARN] 已请求取消升级（烧录相位内不生效）"))
 
     def _on_reset(self):
         if self._running:
@@ -592,8 +618,8 @@ class FirmwarePage(QWidget):
     def _on_progress(self, progress):
         if not isinstance(progress, job.Progress):
             return
-        phase = PHASE_TEXT.get(progress.phase, progress.phase)
-        self.phase_lbl.setText(f"升级进行中 · {phase}")
+        phase = i18n.tr(PHASE_TEXT.get(progress.phase, progress.phase))
+        self.phase_lbl.setText(i18n.tr("升级进行中 · {phase}", phase=phase))
         if progress.phase == job.PHASE_FLASH and progress.total > 0:
             self.bar.setRange(0, progress.total)
             self.bar.setValue(min(progress.done, progress.total))
@@ -609,7 +635,8 @@ class FirmwarePage(QWidget):
             self.detail_lbl.setText(progress.detail)
         if progress.phase != self._last_phase:
             self._last_phase = progress.phase
-            self._log(f"[DFU] {phase} — {progress.detail}")
+            self._log(i18n.tr("[DFU] {phase} — {detail}",
+                              phase=phase, detail=progress.detail))
         elif any(word in progress.detail for word in ("校验", "擦除", "manifest")):
             self._log(f"[DFU] {progress.detail}")
 
@@ -620,22 +647,31 @@ class FirmwarePage(QWidget):
         self._result = result
         self.progress_box.setVisible(False)
         self.result_box.setVisible(True)
+        self._render_result(result)
         if result.ok:
-            text = "升级完成，设备已回到应用态并通过读回校验。"
-            if result.version:
-                text += f" 设备现在报告的版本：{result.version}"
-            self.result_lbl.setText(text)
-            self.result_lbl.setStyleSheet("color:#2e7d32;font-size:13px;")
-            self._log(f"[OK] 固件升级完成 · 设备版本 {result.version or '未知'}")
+            self._log(i18n.tr("[OK] 固件升级完成 · 设备版本 {version}",
+                              version=result.version or i18n.tr("未知")))
         else:
-            self._show_result_text(
-                f"升级失败：{_reason_text(result.reason, result.message)}",
-                error=True)
-            self._log(f"[ERR] 固件升级失败({result.reason}): {result.message}")
+            self._log(i18n.tr("[ERR] 固件升级失败({reason}): {message}",
+                              reason=result.reason, message=result.message))
         self.warning_lbl.setText(result.warning or "")
         self.warning_lbl.setVisible(bool(result.warning))
         self._refresh_buttons()
         QTimer.singleShot(0, self._poll)         # 结果出来后刷新 DFU 是否存在
+
+    def _render_result(self, result) -> None:
+        if result.ok:
+            text = i18n.tr("升级完成，设备已回到应用态并通过读回校验。")
+            if result.version:
+                text += i18n.tr(" 设备现在报告的版本：{version}",
+                                version=result.version)
+            self.result_lbl.setText(text)
+            self.result_lbl.setStyleSheet("color:#2e7d32;font-size:13px;")
+        else:
+            self._show_result_text(
+                i18n.tr("升级失败：{detail}",
+                        detail=_reason_text(result.reason, result.message)),
+                error=True)
 
     def _show_result_text(self, text: str, *, error: bool) -> None:
         self.result_box.setVisible(True)
@@ -644,6 +680,17 @@ class FirmwarePage(QWidget):
             "color:#b33a3a;font-size:13px;" if error else "color:#2e7d32;font-size:13px;")
         if error:
             self.warning_lbl.setVisible(False)
+
+    def retranslate(self) -> None:
+        self._update_status()
+        self._refresh_buttons()
+        if self._summary is not None:
+            self._show_summary(self._summary)
+        if self._result is not None:
+            self._render_result(self._result)
+        if self._running and self._last_phase is not None:
+            phase = i18n.tr(PHASE_TEXT.get(self._last_phase, self._last_phase))
+            self.phase_lbl.setText(i18n.tr("升级进行中 · {phase}", phase=phase))
 
     def _on_upgrading(self, active: bool):
         self._running = bool(active)
@@ -660,13 +707,15 @@ class FirmwarePage(QWidget):
     # ------------------------------------------------------------------ 确认框
     def _confirm_dialog(self, from_dfu: bool) -> bool:
         if from_dfu:
-            body = ("板子停在 bootloader 里：应用没有在跑，机械臂此刻没有力矩。\n\n"
-                    "升级期间无法控制机械臂，也无法软件急停。烧录完成后会自动复位回应用态。\n\n"
-                    "继续吗？")
+            body = i18n.tr(
+                "板子停在 bootloader 里：应用没有在跑，机械臂此刻没有力矩。\n\n"
+                "升级期间无法控制机械臂，也无法软件急停。烧录完成后会自动复位回应用态。\n\n"
+                "继续吗？")
         else:
-            body = ("升级会先让机械臂失能 —— 电机会松开，有重力负载的机械臂会下垂。\n\n"
-                    "升级期间无法控制机械臂，也无法软件急停。请确认手臂已放稳或有支撑。\n\n"
-                    "继续吗？")
+            body = i18n.tr(
+                "升级会先让机械臂失能 —— 电机会松开，有重力负载的机械臂会下垂。\n\n"
+                "升级期间无法控制机械臂，也无法软件急停。请确认手臂已放稳或有支撑。\n\n"
+                "继续吗？")
         return QMessageBox.question(
-            self, "开始固件升级", body,
+            self, i18n.tr("开始固件升级"), body,
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes

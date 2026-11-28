@@ -6,6 +6,8 @@ from typing import List, Sequence
 from PyQt5.QtWidgets import (QDoubleSpinBox, QGridLayout, QGroupBox, QHBoxLayout,
                              QLabel, QVBoxLayout, QWidget)
 
+from litetool import i18n
+from litetool.gui.i18n_ui import TrGroupBox, TrLabel
 from litetool.gui.widgets import Banner
 
 #: 关节角输入范围 (rad) —— 只作 GUI 侧防手滑；真权威是固件软限位。
@@ -110,9 +112,9 @@ class JointRow(QWidget):
             sp.setEnabled(on)
 
 
-def group(title: str, *children) -> QGroupBox:
-    """竖排分组框；children 可以是 widget 或 layout。"""
-    box = QGroupBox(title)
+def group(title: str, *children, **fmt) -> QGroupBox:
+    """竖排分组框；children 可以是 widget 或 layout，``fmt`` 给标题占位符。"""
+    box = TrGroupBox(title, **fmt)
     lay = QVBoxLayout(box)
     for ch in children:
         if hasattr(ch, "addWidget") and not isinstance(ch, QWidget):
@@ -133,15 +135,15 @@ def row(*widgets) -> QHBoxLayout:
     return lay
 
 
-def note(text: str) -> QLabel:
-    lb = QLabel(text)
+def note(text: str, **fmt) -> QLabel:
+    lb = TrLabel(text, **fmt)
     lb.setWordWrap(True)
     lb.setStyleSheet("color:#8a97a4;font-size:12px;")
     return lb
 
 
-def hint(text: str) -> QLabel:
-    lb = QLabel(text)
+def hint(text: str, **fmt) -> QLabel:
+    lb = TrLabel(text, **fmt)
     lb.setWordWrap(True)
     lb.setStyleSheet("color:#ffd166;font-size:12px;")
     return lb
@@ -162,7 +164,7 @@ class LockBanner(Banner):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.set_locked(True, "未连接 — 连接后才可操作")
+        self.set_locked(True, i18n.tr("未连接 — 连接后才可操作"))
 
     def set_gate(self, *, online: bool, can_move: bool,
                  fault_blocked: bool = False) -> bool:
@@ -174,13 +176,13 @@ class LockBanner(Banner):
         `can_move` 恒为真（退出必须永远可行），此时即便固件锁存着也不能拦住退出。
         """
         if not online:
-            self.set_locked(True, "未连接 — 连接后才可操作")
+            self.set_locked(True, i18n.tr("未连接 — 连接后才可操作"))
             return False
         if can_move:
             self.set_locked(False)
             return True
         if fault_blocked:
-            self.set_locked(True, "FAULT / 急停锁存中 — 先 [清故障] 或 [复位]")
+            self.set_locked(True, i18n.tr("FAULT / 急停锁存中 — 先 [清故障] 或 [复位]"))
         else:
-            self.set_locked(True, UNLOCK_HINT)
+            self.set_locked(True, i18n.tr(UNLOCK_HINT))
         return False

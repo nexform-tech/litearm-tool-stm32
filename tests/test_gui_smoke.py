@@ -17,7 +17,7 @@ from tests.fake_arm import make_state                         # noqa: E402
 
 PAGE_KEYS = ("overview", "scene", "capture", "log", "machine", "fault", "joint",
              "cart", "zerog", "gripper", "params", "install", "activation",
-             "firmware", "guide", "diag")
+             "firmware", "guide", "diag", "settings")
 
 
 def _win():

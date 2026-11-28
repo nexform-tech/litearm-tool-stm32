@@ -42,6 +42,7 @@ import struct
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+from litetool import i18n
 from litetool import param_catalog as C
 
 __all__ = ["HyyConfigError", "HyyConfig", "parse_hyy_config", "to_snapshot",
@@ -102,17 +103,19 @@ class HyyConfig:
 # ---------------------------------------------------------------------------
 def _req(d: dict, key: str, where: str):
     if not isinstance(d, dict) or key not in d:
-        raise HyyConfigError(f"{where} 缺字段 `{key}`")
+        raise HyyConfigError(i18n.tr("{where} 缺字段 `{key}`", where=where, key=key))
     return d[key]
 
 
 def _num(d: dict, key: str, where: str) -> float:
     v = _req(d, key, where)
     if isinstance(v, bool) or not isinstance(v, (int, float)):
-        raise HyyConfigError(f"{where}.{key} 须为数值, 实际 {v!r}")
+        raise HyyConfigError(i18n.tr("{where}.{key} 须为数值, 实际 {value}",
+                                      where=where, key=key, value=repr(v)))
     f = float(v)
     if not math.isfinite(f):
-        raise HyyConfigError(f"{where}.{key} 非有限 ({f})")
+        raise HyyConfigError(i18n.tr("{where}.{key} 非有限 ({value})",
+                                      where=where, key=key, value=f))
     return f
 
 
@@ -152,10 +155,10 @@ def parse_hyy_config(path: str) -> HyyConfig:
     except HyyConfigError:
         raise
     except Exception as e:                       # noqa: BLE001 - 统一转中文
-        raise HyyConfigError(f"读取/解析 yaml 失败: {e}") from e
+        raise HyyConfigError(i18n.tr("读取/解析 yaml 失败: {err}", err=e)) from e
 
     if not isinstance(raw, dict):
-        raise HyyConfigError("yaml 顶层须为对象")
+        raise HyyConfigError(i18n.tr("yaml 顶层须为对象"))
 
     with open(path, "rb") as f:
         sha = hashlib.sha256(f.read()).hexdigest()[:16]
@@ -166,33 +169,37 @@ def parse_hyy_config(path: str) -> HyyConfig:
 
     rob = _req(_req(raw, "robot_group", "顶层"), "robot", "robot_group")
     if not isinstance(rob, list) or not rob:
-        raise HyyConfigError("robot_group.robot 须为非空数组")
+        raise HyyConfigError(i18n.tr("robot_group.robot 须为非空数组"))
     r0 = rob[0]
 
     joints = _req(r0, "joint", "robot[0]")
     if not isinstance(joints, list) or len(joints) != C.NUM_JOINTS:
-        raise HyyConfigError(
-            f"robot[0].joint 须为长度 {C.NUM_JOINTS} 的数组 (J1..J7, 顺序即关节号), "
-            f"实际 {len(joints) if isinstance(joints, list) else type(joints).__name__}")
+        raise HyyConfigError(i18n.tr(
+            "robot[0].joint 须为长度 {n} 的数组 (J1..J7, 顺序即关节号), 实际 {got}",
+            n=C.NUM_JOINTS,
+            got=len(joints) if isinstance(joints, list) else type(joints).__name__))
 
     for i, j in enumerate(joints):
         where = f"joint[{i}] (J{i + 1})"
         if not isinstance(j, dict):
-            raise HyyConfigError(f"{where} 须为对象")
+            raise HyyConfigError(i18n.tr("{where} 须为对象", where=where))
         ax = _req(j, "axis", where)
         # [关键] 数组顺序必须与 axis.id 一致 —— 否则 body[i+1] 会静默错位,
         # 而读回比对全绿 (写进去的和读回来的一致)。
         jid = ax.get("id")
         if jid is not None and int(jid) != i:
-            raise HyyConfigError(
-                f"{where}: axis.id={jid} 与数组下标 {i} 不一致 —— 顺序即关节号, 拒绝导入")
+            raise HyyConfigError(i18n.tr(
+                "{where}: axis.id={jid} 与数组下标 {i} 不一致 —— "
+                "顺序即关节号, 拒绝导入", where=where, jid=jid, i=i))
         d = _req(j, "dynamics_parameters", where)
         for k in MODEL_BODY_KEYS + ("fv", "fc0", "fc1", "jm"):
             _num(d, k, f"{where}.dynamics_parameters")
         lo = _num(ax, "smin", f"{where}.axis")
         hi = _num(ax, "smax", f"{where}.axis")
         if not lo < hi:
-            raise HyyConfigError(f"{where}.axis: smin({lo}) 须 < smax({hi})")
+            raise HyyConfigError(i18n.tr(
+                "{where}.axis: smin({lo}) 须 < smax({hi})",
+                where=where, lo=lo, hi=hi))
         _num(ax, "torque_max", f"{where}.axis")
         _req(j, "kinematics_parameters", where)
 
@@ -202,8 +209,9 @@ def parse_hyy_config(path: str) -> HyyConfig:
     # (哨兵比的是候选 G 与出厂 G 的比值)。固件已把评估重力钉死, 但 yaml 侧
     # 仍应拦住明显非法的 0 重力。
     if math.sqrt(sum(v * v for v in grav)) < 1.0:
-        raise HyyConfigError(
-            f"robot[0].gravity 模长 {math.sqrt(sum(v*v for v in grav)):.3f} < 1.0 m/s² —— 非法")
+        raise HyyConfigError(i18n.tr(
+            "robot[0].gravity 模长 {mag:.3f} < 1.0 m/s² —— 非法",
+            mag=math.sqrt(sum(v * v for v in grav))))
 
     keys: List[str] = []
     _walk_keys(raw, "", keys)
@@ -227,7 +235,9 @@ def _check_range(key: str, v: float, where: str) -> None:
     """
     p = C.JOINT_BY_KEY.get(key) or C.GLOBAL_BY_KEY.get(key)
     if p is None:
-        raise HyyConfigError(f"{where}.{key} 不在参数目录中 (既非关节项也非全局项)")
+        raise HyyConfigError(i18n.tr(
+            "{where}.{key} 不在参数目录中 (既非关节项也非全局项)",
+            where=where, key=key))
     err = C.check_value(p.lo, p.hi, v, label=f"{where}.{key}")
     if err:
         raise HyyConfigError(err)
@@ -250,7 +260,8 @@ def to_snapshot(cfg: HyyConfig, baseline: Optional[dict]) -> Tuple[dict, dict, L
     `axis.torque_max` / `gravity` 刻意不导 (见模块 docstring 的说明)。
     """
     if baseline is None:
-        raise HyyConfigError("尚无设备基线 —— 请先点 [刷新当前] 再导入 (导入需要基线补齐未映射字段)")
+        raise HyyConfigError(i18n.tr(
+            "尚无设备基线 —— 请先点 [刷新当前] 再导入 (导入需要基线补齐未映射字段)"))
 
     notes: List[str] = []
     joints: List[Dict[str, Any]] = []
@@ -274,9 +285,9 @@ def to_snapshot(cfg: HyyConfig, baseline: Optional[dict]) -> Tuple[dict, dict, L
         for k, v in list(base.items()):
             # 只看参数键 (`name` 是助读字段, 不是参数)
             if v is None and k in C.JOINT_BY_KEY:
-                raise HyyConfigError(
-                    f"{where}.{k} 在设备基线上为空 —— 台架上 J2..J7 无读回值。"
-                    f"导入需要整臂基线")
+                raise HyyConfigError(i18n.tr(
+                    "{where}.{key} 在设备基线上为空 —— 台架上 J2..J7 无读回值。"
+                    "导入需要整臂基线", where=where, key=k))
         # **cast 成 float32** —— 见 `_f32` 的说明: 设备存的是 float32, 不 cast 会让
         # diff 每次都报这 21 项假"修改"。
         base["friction_v"], base["friction_fc0"], base["friction_fc1"] = \
@@ -385,18 +396,22 @@ def asymmetry_message(items: List[FrictionAsymmetry]) -> Tuple[str, str]:
     "挤成一坨"。所以本函数整体按富文本写。
     """
     n = len(items)
-    head = (f"检测到 <b>{n}</b> 个关节的<b>正、反方向库仑摩擦严重不对称</b>"
-            f"<br>判据: 比值 &gt; {FC_ASYM_RATIO:g} 且差值 ≥ {FC_ASYM_MIN_DELTA:g} Nm")
+    head = i18n.tr(
+        "检测到 <b>{n}</b> 个关节的<b>正、反方向库仑摩擦严重不对称</b>"
+        "<br>判据: 比值 &gt; {ratio:g} 且差值 ≥ {delta:g} Nm",
+        n=n, ratio=FC_ASYM_RATIO, delta=FC_ASYM_MIN_DELTA)
 
     rows: List[str] = []
     for x in items:
         r = "∞" if math.isinf(x.ratio) else f"{x.ratio:.2f}"
         # 每个关节固定两行 —— 单行版在窄窗口下会**折在数字中间** (离屏渲染实测),
         # 显式换行不依赖窗口宽度, 也就不会有那种难看的断点。
-        rows.append(f"&nbsp;&nbsp;J{x.joint}:&nbsp; |fc0| = <b>{x.a:.3f}</b> Nm , "
-                    f"|fc1| = <b>{x.b:.3f}</b> Nm"
-                    f"<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
-                    f"比值 <b>{r}</b> , 差值 {x.delta:.3f} Nm")
+        rows.append(i18n.tr(
+            "&nbsp;&nbsp;J{joint}:&nbsp; |fc0| = <b>{a:.3f}</b> Nm , "
+            "|fc1| = <b>{b:.3f}</b> Nm"
+            "<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+            "比值 <b>{ratio}</b> , 差值 {delta:.3f} Nm",
+            joint=x.joint, a=x.a, b=x.b, ratio=r, delta=x.delta))
     return head, "<br>".join(rows)
 
 
@@ -466,5 +481,5 @@ def unmapped_report(cfg: HyyConfig) -> List[Tuple[str, str]]:
     for k in cfg.raw_keys:
         if k in MAPPED_KEYS:
             continue
-        out.append((k, UNMAPPED_REASONS.get(k, "未登记 —— 需裁决")))
+        out.append((k, i18n.tr(UNMAPPED_REASONS.get(k, "未登记 —— 需裁决"))))
     return out

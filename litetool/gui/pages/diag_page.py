@@ -8,6 +8,10 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (QGridLayout, QPlainTextEdit, QPushButton,
                              QVBoxLayout, QWidget)
 
+import litearm as pa
+
+from litetool import i18n
+from litetool.gui.i18n_ui import TrButton, tr_placeholder, tr_tooltip
 from litetool.gui.pages.common import group, note, row
 from litetool.gui.widgets import mono_label, static_label
 
@@ -19,9 +23,11 @@ class DiagPage(QWidget):
         super().__init__(parent)
         self._online = False
         self._busy = False
+        self._metrics = None
 
-        self.btn_bench = QPushButton("运行 KIN_BENCH 自检")
-        self.btn_bench.setToolTip(
+        self.btn_bench = TrButton("运行 KIN_BENCH 自检")
+        tr_tooltip(
+            self.btn_bench,
             "触发固件运动学/动力学单拍开销自测（固件侧最长窗口 5s，期间控制循环\n"
             "心跳监督豁免）。注意：该命令不检查载荷长度，发出即产生一次真实测量。")
         self.btn_bench.clicked.connect(self.bench_req.emit)
@@ -50,7 +56,8 @@ class DiagPage(QWidget):
 
         self.raw = QPlainTextEdit()
         self.raw.setReadOnly(True)
-        self.raw.setPlaceholderText("KIN_BENCH 原文（含逐项计时与 LINK 诊断行）会显示在这里")
+        tr_placeholder(self.raw,
+                       "KIN_BENCH 原文（含逐项计时与 LINK 诊断行）会显示在这里")
         g_raw = group("KIN_BENCH 回执原文", self.raw)
 
         lay = QVBoxLayout(self)
@@ -73,11 +80,18 @@ class DiagPage(QWidget):
 
     def set_metrics(self, *, drops, fps, firmware, n_joints, reset_reason,
                     fault="—"):
+        self._metrics = dict(drops=drops, fps=fps, firmware=firmware,
+                             n_joints=n_joints, reset_reason=reset_reason,
+                             fault=fault)
         for key, val in (("drops", drops), ("fps", f"{fps:.0f}"),
                          ("firmware", firmware or "—"), ("n_joints", n_joints),
                          ("reset_reason", "—" if reset_reason is None else reset_reason),
-                         ("fault", fault or "无")):
+                         ("fault", fault or i18n.tr("无"))):
             self.vals[key].setText(str(val))
+
+    def retranslate(self):
+        if self._metrics is not None:
+            self.set_metrics(**self._metrics)
 
     def set_bench(self, res):
         """res: `litearm.KinBenchResult`。"""
@@ -89,5 +103,9 @@ class DiagPage(QWidget):
                          ("loop_overruns", res.loop_overruns)):
             self.vals[key].setText(str(val))
 
-    def set_bench_error(self, msg: str):
-        self.raw.setPlainText(f"失败：{msg}")
+    def set_bench_error(self, msg):
+        try:
+            msg = pa.describe_exc(msg, locale=i18n.sdk_locale()).title
+        except Exception:  # noqa: BLE001
+            msg = str(msg)
+        self.raw.setPlainText(i18n.tr("失败：{msg}", msg=msg))

@@ -9,6 +9,8 @@ from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (QLabel, QPushButton, QSlider,
                              QVBoxLayout, QWidget)
 
+from litetool import i18n
+from litetool.gui.i18n_ui import TrButton, TrLabel, tr_tooltip
 from litetool.gui.pages.common import LockBanner, group, hint, note, row
 
 _MOVE_OPS = ("home",)          # 会动臂的按钮 —— 运动解锁才放行
@@ -27,14 +29,17 @@ class MachinePage(QWidget):
         self._busy = False
         self._armed = False
         self._fault_blocked = False
+        self._st = None
+        self._metrics = None
 
         self.btn_enable = self._btn("使能 enable", "enable")
         self.btn_disable = self._btn("失能 disable", "disable")
         self.btn_clear = self._btn("清故障 clear_faults", "clear_faults")
         self.btn_reset = self._btn("复位 reset", "reset")
-        self.btn_home = QPushButton("回零 home")
+        self.btn_home = TrButton("回零 home")
         self.btn_home.setMinimumHeight(34)
-        self.btn_home.setToolTip(
+        tr_tooltip(
+            self.btn_home,
             "固件 CMD_HOME 0x2A：各轴低速(固件写死 0.10)回 URDF 零位。\n"
             "与 movej(0) 同一条路径，只是速度更低。需先使能。")
         self.btn_home.clicked.connect(self.home_req.emit)
@@ -49,18 +54,18 @@ class MachinePage(QWidget):
         self.speed.setMinimumWidth(240)
         self.speed_lbl = QLabel("100%")
         self.speed.valueChanged.connect(lambda v: self.speed_lbl.setText(f"{v}%"))
-        self.btn_speed = QPushButton("应用")
+        self.btn_speed = TrButton("应用")
         self.btn_speed.clicked.connect(lambda: self.set_speed.emit(self.speed.value()))
-        self.btn_park = QPushButton("park（静止保持用全刚度）")
+        self.btn_park = TrButton("park（静止保持用全刚度）")
         self.btn_park.clicked.connect(self.park_req.emit)
         g_speed = group(
             "全局调速器（0..100 整数百分比）",
-            row(QLabel("限速"), self.speed, self.speed_lbl, self.btn_speed, self.btn_park),
+            row(TrLabel("限速"), self.speed, self.speed_lbl, self.btn_speed, self.btn_park),
             note("实际速度 = min(单条 movej 的 speed, 本值)。注意这里是百分比："
                  "填 1 就是 1% 速度（爬行），不是 0..1 倍率。"),
         )
 
-        self.btn_status = QPushButton("读取状态 GET_STATUS")
+        self.btn_status = TrButton("读取状态 GET_STATUS")
         self.btn_status.clicked.connect(self.status_now.emit)
         self.status_lbl = QLabel("—")
         self.status_lbl.setStyleSheet("color:#61afef;")
@@ -68,7 +73,7 @@ class MachinePage(QWidget):
         self.reset_lbl.setStyleSheet("color:#c8c8c8;")
         g_status = group("链路与启动信息",
                          row(self.btn_status, self.status_lbl),
-                         row(QLabel("上次启动原因"), self.reset_lbl),
+                         row(TrLabel("上次启动原因"), self.reset_lbl),
                          note("固件开机签名里的 IWDG 标注 —— 若为 iwdg-rst 说明上电是看门狗复位，"
                               "排查完再动臂。"))
 
@@ -89,7 +94,7 @@ class MachinePage(QWidget):
         self._ops = [self.btn_enable, self.btn_disable, self.btn_clear, self.btn_reset]
 
     def _btn(self, text: str, name: str) -> QPushButton:
-        b = QPushButton(text)
+        b = TrButton(text)
         b.setMinimumHeight(34)
         b.clicked.connect(lambda: self.cmd.emit(name))
         return b
@@ -114,6 +119,7 @@ class MachinePage(QWidget):
 
     def update_from(self, st):
         """状态帧驱动：EMERGENCY 锁存/故障位时禁用 enable 并给提示。"""
+        self._st = st
         if st is None:
             # 离线：故障锁存未知，别让上一条连接的状态残留着挡住按钮
             self._fault_blocked = False
@@ -122,15 +128,17 @@ class MachinePage(QWidget):
             return
         if st.mode_name == "EMERGENCY":
             self._fault_blocked = True
-            self.hint_lbl.setText(
+            self.hint_lbl.setText(i18n.tr(
                 "⚠ 急停锁存中 —— 仅 [复位 reset] 可退出 EMERGENCY（固件 1.5.0/M3："
-                "失能不再解除锁存）")
+                "失能不再解除锁存）"))
         elif st.faulted:
             self._fault_blocked = True
             axes = "".join(f" J{a + 1}" for a in st.fault_axes)
-            self.hint_lbl.setText(
-                f"⚠ 检测到故障位（{st.fault_detail}）—— 建议先 [清故障 clear_faults]，"
-                f"仍不行则 [复位 reset]。{(' 断轴:' + axes) if axes else ''}")
+            self.hint_lbl.setText(i18n.tr(
+                "⚠ 检测到故障位（{detail}）—— 建议先 [清故障 clear_faults]，"
+                "仍不行则 [复位 reset]。{axes}",
+                detail=st.fault_detail,
+                axes=(i18n.tr(" 断轴:{axes}", axes=axes) if axes else "")))
         else:
             self._fault_blocked = False
             self.hint_lbl.setVisible(False)
@@ -139,7 +147,14 @@ class MachinePage(QWidget):
         self._refresh()
 
     def set_metrics(self, drops: int, fps: float, reset_reason):
+        self._metrics = (drops, fps, reset_reason)
         self.reset_lbl.setText("—" if reset_reason is None else str(reset_reason))
+
+    def retranslate(self):
+        self.update_from(self._st)
+        self.speed_lbl.setText(f"{self.speed.value()}%")
+        if self._metrics is not None:
+            self.set_metrics(*self._metrics)
 
     def set_status_text(self, text: str):
         self.status_lbl.setText(text)

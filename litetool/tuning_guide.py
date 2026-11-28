@@ -7,7 +7,9 @@
   - User/litearm/params/defaults.c        (出厂默认 / gs 基线)
 GUI 页签只负责渲染本模块拼好的 HTML (QTextBrowser)。
 """
+from litetool import i18n
 from litetool import param_catalog as C
+from litetool import tuning_guide_en as EN
 
 #: 出厂 gs 基线 —— 与 param_catalog 共用一份 (2026-09-12 换辨识模型后全 1.0)
 GS_BASELINE = C.GS_BASELINE
@@ -86,31 +88,54 @@ def _table(headers, rows) -> str:
     return "\n".join(out)
 
 
+def _english() -> bool:
+    return i18n.language() == "en" and bool(EN.FORMULA_TEXT)
+
+
+def _h(key: str, fallback: str) -> str:
+    if _english():
+        return EN.HEADINGS.get(key) or fallback
+    return i18n.tr(fallback)
+
+
 def build_guide_html() -> str:
     """拼整页 HTML (QTextBrowser 渲染; 无第三方渲染依赖)。"""
-    pre = f"<pre style='font-size:13px;line-height:1.45;'>{_esc(FORMULA_TEXT)}</pre>"
-    sym = _table(["符号", "对应界面参数"], SYMBOL_MAP)
-    read = "".join(f"<li>{_esc(x)}</li>" for x in READ_FIRST)
-    symp = _table(["症状", "先动", "备注"], SYMPTOM_TABLE)
-    ff_rows = [(f"FF_{name}", f"0x{mask:02X}", label) for mask, name, label in FF_BITS_ROWS]
-    ff = _table(["位", "值", "含义"], ff_rows)
+    formula = EN.FORMULA_TEXT if _english() else FORMULA_TEXT
+    symbols = EN.SYMBOL_MAP if _english() and EN.SYMBOL_MAP else SYMBOL_MAP
+    read_first = EN.READ_FIRST if _english() and EN.READ_FIRST else READ_FIRST
+    symptoms = EN.SYMPTOM_TABLE if _english() and EN.SYMPTOM_TABLE else SYMPTOM_TABLE
+    pre = f"<pre style='font-size:13px;line-height:1.45;'>{_esc(formula)}</pre>"
+    sym = _table([_h("symbols", "符号"), _h("ui_param", "对应界面参数")],
+                 [(sym, i18n.tr(desc) if not _english() else desc)
+                  for sym, desc in symbols])
+    read = "".join(f"<li>{_esc(i18n.tr(x) if not _english() else x)}</li>"
+                   for x in read_first)
+    symp = _table([_h("symptom", "症状"), _h("first_move", "先动"),
+                   _h("remarks", "备注")],
+                  [(i18n.tr(a), i18n.tr(b), i18n.tr(c)) if not _english()
+                   else (a, b, c) for a, b, c in symptoms])
+    ff_rows = [(f"FF_{name}", f"0x{mask:02X}", C.ff_label_text(i))
+               for i, (mask, name, _label) in enumerate(FF_BITS_ROWS)]
+    ff = _table([_h("bit", "位"), _h("value", "值"), _h("meaning", "含义")], ff_rows)
     html = f"""<html><body style='font-family:sans-serif;'>
-<h2>公式 &amp; 调参指南</h2>
+<h2>{_esc(_h("title", "公式 & 调参指南"))}</h2>
 
-<h3>1) 动力学 / 控制律公式</h3>
+<h3>{_esc(_h("formula", "1) 动力学 / 控制律公式"))}</h3>
 {pre}
-<p><b>说明:</b> PD 与各种前馈在固件内按 <code>ff_mask</code> 使能位合成; 出厂默认 ff_mask=0x1BF(447)。
-符号对应界面参数见下表（悬停参数页相应行列亦可看到同款说明）。</p>
+<p><b>{_esc(_h("note", "说明:"))}</b> {_esc(
+    EN.EXPLANATION if _english() else i18n.tr(
+        "PD 与各种前馈在固件内按 ff_mask 使能位合成; 出厂默认 ff_mask=0x1BF(447)。"
+        "符号对应界面参数见下表（悬停参数页相应行列亦可看到同款说明）。"))}</p>
 {sym}
 
-<h3>2) 读前须知</h3>
+<h3>{_esc(_h("read_first", "2) 读前须知"))}</h3>
 <ul>{read}</ul>
 
-<h3>3) 症状 → 建议参数</h3>
+<h3>{_esc(_h("symptoms", "3) 症状 → 建议参数"))}</h3>
 {symp}
-<p><i>以上为经验起点, 每次小步试并记录; 权威钳幅/限位始终在固件。</i></p>
+<p><i>{_esc(_h("footer", "以上为经验起点, 每次小步试并记录; 权威钳幅/限位始终在固件。"))}</i></p>
 
-<h3>4) ff_mask 位含义脚注</h3>
+<h3>{_esc(_h("ff_bits", "4) ff_mask 位含义脚注"))}</h3>
 {ff}
 </body></html>"""
     return html

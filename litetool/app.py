@@ -43,17 +43,29 @@ def config_path() -> str | None:
 
 
 def main(argv=None) -> int:
+    from PyQt5.QtCore import QLocale
     from PyQt5.QtWidgets import QApplication, QMessageBox
 
+    from litetool import i18n
     from litetool.gui.main_window import MainWindow
+    from litetool.gui.prefs import UiPreferences
     from litetool.instance import InstanceGuard
     from litetool.settings import Settings
 
     raw = list(sys.argv if argv is None else argv)
+    language = _flag_value(raw, "--lang")
+    if language is None and _has_option(raw, "--lang"):
+        print("[lang] --lang 缺少值；使用配置/系统语言", file=sys.stderr)
+    if language is not None and i18n.normalize_language(language) is None:
+        print(i18n.tr("[lang] 不认识的 --lang={value}；支持 zh / en",
+                      value=repr(language)), file=sys.stderr)
+        language = None
+    raw = _drop_option(raw, "--lang")
     activation_url = _flag_value(raw, "--activation-url")
     if not activation_url and _has_option(raw, "--activation-url"):
         # 缺值不能悄悄回落到生产地址：使用者以为自己指到了 staging。
-        print("[activation] --activation-url 缺少值；使用默认地址", file=sys.stderr)
+        print(i18n.tr("[activation] --activation-url 缺少值；使用默认地址"),
+              file=sys.stderr)
     raw = _drop_option(raw, "--activation-url")
     if activation_url:
         # 授权页只读这个环境变量；与 `LITEARM_ACTIVATION_URL` 同一入口。
@@ -67,24 +79,35 @@ def main(argv=None) -> int:
     app = QApplication(raw)
     app.setApplicationName("LiteArm Tool STM32")
 
+    # 语言要在任何对话框之前定下来；主窗口内部会先以中文源文案建界面，
+    # 再切到这里的同一个结果（见 gui/main_window.py 的构造顺序）。
+    prefs = UiPreferences()
+    ui_languages = QLocale.system().uiLanguages()
+    initial_language = i18n.resolve_language(
+        prefs.language() or settings.language, override=language,
+        ui_languages=ui_languages, platform=sys.platform)
+    i18n.set_language(initial_language)
+
     # 串口只能有一个所有者：第二个实例不打开串口，只把已有窗口提到前台。
     guard = InstanceGuard()
     if not guard.acquire():
-        print("LiteArm Tool 已在运行，已切换到已有窗口。", file=sys.stderr)
+        print(i18n.tr("LiteArm Tool 已在运行，已切换到已有窗口。"), file=sys.stderr)
         QMessageBox.information(
             None, "LiteArm Tool",
-            "已有实例在运行，已为你切换到该窗口。\n"
-            "同一时间只允许一个上位机占用串口。")
+            i18n.tr("已有实例在运行，已为你切换到该窗口。\n"
+                    "同一时间只允许一个上位机占用串口。"))
         return 0
     if guard.lock_error:
         # 建不出锁不阻止启动，但必须留痕：否则用户会以为"单实例保护生效了"。
-        print(f"[WARN] 单实例锁不可用: {guard.lock_error}", file=sys.stderr)
+        print(i18n.tr("[WARN] 单实例锁不可用: {why}", why=guard.lock_error),
+              file=sys.stderr)
 
     factory = None
     if fake:
         from litetool.fake import build_fake_arm_factory
         factory = build_fake_arm_factory()
-    win = MainWindow(settings, arm_factory=factory, fake=fake)
+    win = MainWindow(settings, arm_factory=factory, fake=fake,
+                     prefs=prefs, language=language)
     guard.activated.connect(win.activate)
     win.show()
     return app.exec_()

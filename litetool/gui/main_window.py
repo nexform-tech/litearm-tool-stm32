@@ -10,7 +10,9 @@
 """
 from __future__ import annotations
 
-from PyQt5.QtCore import QTimer, Qt
+import sys
+
+from PyQt5.QtCore import QLocale, QTimer, Qt
 from PyQt5.QtWidgets import (QApplication, QCheckBox, QComboBox, QFrame,
                              QHBoxLayout, QLabel, QMainWindow, QMessageBox,
                              QPushButton, QScrollArea, QSplitter,
@@ -20,11 +22,15 @@ import litearm as pa
 
 from litetool import checks
 from litetool import dfu
+from litetool import i18n
 from litetool import obs
 from litetool import pose_math
 from litetool.diagnostics import build_diag_package, save_diag_package
 from litetool import ports as ports_mod
+from litetool.gui import i18n_ui
 from litetool.gui.bridge import GuiBridge
+from litetool.gui.i18n_ui import TrButton, TrCheckBox, TrLabel, tr_tooltip
+from litetool.gui.prefs import UiPreferences
 from litetool.gui.pages.capture_page import CapturePage
 from litetool.gui.pages.activation_page import ActivationPage
 from litetool.gui.pages.cart_page import CartPage
@@ -40,22 +46,34 @@ from litetool.gui.pages.machine_page import MachinePage
 from litetool.gui.pages.overview_page import OverviewPage
 from litetool.gui.pages.params_page import ParamsPage
 from litetool.gui.pages.scene_page import ScenePage
+from litetool.gui.pages.settings_page import SettingsPage
 from litetool.gui.pages.zerog_page import ZeroGPage
 from litetool.gui.widgets import LogPanel, NavList, StatusStrip
 from litetool.sdk_worker import SdkWorker, exit_zero_g_and_hold
 
 TICK_MS = 50          # 20Hz：状态条/表格刷新
 PLOT_MS = 33          # 30Hz：曲线重绘
-OFFLINE_TEXT = "● 离线"
-ONLINE_TEXT = "● 在线"
 
 
 class MainWindow(QMainWindow):
     def __init__(self, settings, parent=None, *, log_dir=None,
-                 arm_factory=None, fake: bool = False):
+                 arm_factory=None, fake: bool = False, prefs=None,
+                 language: str | None = None):
         super().__init__(parent)
         self._settings = settings
         self._fake = bool(fake)
+        self._prefs = prefs or UiPreferences()
+        #: `--lang` 只覆盖本次运行；设置页里改语言会落盘并解除这个覆盖。
+        self._language_override = language
+        ui_languages = QLocale.system().uiLanguages()
+        self._system_language = i18n.detect_language(ui_languages=ui_languages,
+                                                     platform=sys.platform)
+        #: `auto` 真正落到的语言：config.yaml > 系统检测。
+        self._default_language = (i18n.normalize_language(settings.language)
+                                  or self._system_language)
+        self._target_language = i18n.resolve_language(
+            self._prefs.language() or settings.language,
+            override=language, ui_languages=ui_languages, platform=sys.platform)
         self._armed = False
         self._fault_blocked = False
         self._n = 0
@@ -64,6 +82,9 @@ class MainWindow(QMainWindow):
         self._last_port: str | None = None
         self._log_tail: list = []       # 诊断包用：最近 200 行
         self._last_error = None         # 最近一次失败（SDK ErrorText）
+        self._last_exc = None           # 产生 _last_error 的原始异常（切语言时重译）
+        self._last_fault_axis = None    # 最近一次写进顶栏红框的 (轴, 原因码)
+        self._estop_state = None        # (ok, why) —— 切语言时重写急停提示
         self._fault_snapshot: set = set()   # 已记录过的 (轴, 原因)，用于事件去重
         self._last_fault_bits = 0           # 上次查询时的 joint_fault 位图
         self._fault_query_inflight = False  # 防止同一故障重复查询
@@ -81,10 +102,21 @@ class MainWindow(QMainWindow):
             plot_window_s=settings.plot_window_s,
         )
 
-        self._build_ui()
+        # 静态文案以中文源串构造，随后统一切到目标语言（见 gui/i18n_ui.py）。
+        with i18n.source_language():
+            self._build_ui()
+        i18n.set_language(self._target_language)
+        i18n_ui.retranslate_all()
+        self.nav.retranslate()
+        # 静态控件已由登记表重写；动态/目录类文案由各页按状态重写一遍
+        # （参数行标题、调参指南 HTML、授权同意书…）。
+        for page in self.pages.values():
+            hook = getattr(page, "retranslate", None)
+            if callable(hook):
+                hook()
         self._wire()
         self._refresh_ports()
-        self._apply_online(False, "未连接")
+        self._apply_online(False, i18n.tr("未连接"))
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -93,11 +125,11 @@ class MainWindow(QMainWindow):
         self._ptimer.timeout.connect(self._tick_plot)
         self._ptimer.start(PLOT_MS)
 
-        self._log("[INFO] LiteArm Tool STM32 —— 交互层经 litearm；"
-                  "硬防护权威仍在固件")
+        self._log(i18n.tr("[INFO] LiteArm Tool STM32 —— 交互层经 litearm；"
+                          "硬防护权威仍在固件"))
         if self._fake:
             self.setWindowTitle("LiteArm Tool STM32 — FAKE")
-            self._log("[INFO] --fake 模式：SDK 假传输，不连接真实串口")
+            self._log(i18n.tr("[INFO] --fake 模式：SDK 假传输，不连接真实串口"))
             QTimer.singleShot(0, self.connect_fake)
 
     # ================= 界面 =================
@@ -108,31 +140,32 @@ class MainWindow(QMainWindow):
         bar = QWidget()
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(8, 4, 8, 4)
-        bl.addWidget(QLabel("串口:"))
+        bl.addWidget(TrLabel("串口:"))
         self.combo = QComboBox()
         self.combo.setMinimumWidth(300)
         bl.addWidget(self.combo)
-        btn_refresh = QPushButton("刷新")
+        btn_refresh = TrButton("刷新")
         btn_refresh.clicked.connect(self._refresh_ports)
         bl.addWidget(btn_refresh)
-        self.btn_conn = QPushButton("连接")
+        self.btn_conn = TrButton("连接")
         self.btn_conn.clicked.connect(self._toggle_connect)
         bl.addWidget(self.btn_conn)
-        self.dot = QLabel(OFFLINE_TEXT)
+        self.dot = QLabel(i18n.tr("● 离线"))
         self.dot.setStyleSheet("color:#b0b0b0;font-weight:bold;")
         bl.addWidget(self.dot)
-        self.fw_lbl = QLabel("固件: —")
+        self.fw_lbl = QLabel(i18n.tr("固件: —"))
         bl.addWidget(self.fw_lbl)
         bl.addSpacing(12)
-        self.unlock_cb = QCheckBox("我已确认机械臂周围无障碍、急停可及")
-        self.unlock_cb.setToolTip(
+        self.unlock_cb = TrCheckBox("我已确认机械臂周围无障碍、急停可及")
+        tr_tooltip(
+            self.unlock_cb,
             "运动类页面（整机的回零 / 关节 / 笛卡尔 / 零重力）在此勾选前一律锁定。\n"
             "断线、急停、FAULT、复位会自动重新锁定。")
         self.unlock_cb.toggled.connect(self._on_unlock)
         bl.addWidget(self.unlock_cb)
         bl.addStretch(1)
-        self.btn_estop = QPushButton("⛔ 急停")
-        self.btn_estop.setFixedSize(96, 40)
+        self.btn_estop = TrButton("⛔ 急停")
+        self.btn_estop.setFixedSize(108, 40)
         self.btn_estop.setStyleSheet(
             "QPushButton{background:#b33a3a;color:white;font-weight:bold;"
             "font-size:16px;border-radius:4px;}"
@@ -147,7 +180,7 @@ class MainWindow(QMainWindow):
         # 最近一次失败的码 + 标题。点一下复制诊断包（白名单 JSON）。
         self.err_btn = QPushButton("")
         self.err_btn.setVisible(False)
-        self.err_btn.setToolTip("点击复制诊断包")
+        tr_tooltip(self.err_btn, "点击复制诊断包")
         self.err_btn.setStyleSheet(
             "QPushButton{color:#ffb454;background:transparent;"
             "border:1px solid #ffb454;border-radius:4px;padding:4px 8px;}"
@@ -196,6 +229,12 @@ class MainWindow(QMainWindow):
         self._add_page("firmware", "固件升级",
                        "USB DFU (0483:DF11) —— 选镜像 / 烧录 / 回读校验",
                        FirmwarePage())
+        # `--lang` 是本次运行的覆盖：设置页把它显示成当前选项，但不动已保存选择；
+        # 操作员真在页里改一次才会落盘（并解除覆盖）。
+        settings_pref = self._prefs.language() or \
+            (i18n.normalize_language(self._language_override) or "")
+        self._add_page("settings", "设置", "界面语言与运行偏好",
+                       SettingsPage(settings_pref, self._default_language))
         self.nav.select("overview")
 
         body = QWidget()
@@ -247,7 +286,8 @@ class MainWindow(QMainWindow):
                "操作": ("machine", "fault", "joint", "cart", "zerog", "gripper"),
                # ⚠ 新页 key 必须登记在这里: `_group_for` 用的是无默认值的 next(),
                # 漏登记会在 __init__ 期间抛 StopIteration -> 崩启动。
-               "参数": ("params", "install", "activation", "firmware", "guide", "diag")}
+               "参数": ("params", "install", "activation", "firmware", "guide",
+                        "diag", "settings")}
 
     def _group_for(self, key: str):
         title = next(t for t, keys in self._GROUPS.items() if key in keys)
@@ -306,6 +346,7 @@ class MainWindow(QMainWindow):
         fw.set_upgrading_cb(self._set_upgrading)
         fw.reconnect_requested.connect(self._reconnect_after_upgrade)
         self.nav.navigated.connect(self._on_page_changed)
+        self.pages["settings"].language_changed.connect(self._on_language_changed)
 
     def _on_nav(self, key: str):
         scroll = self.scrolls.get(key)
@@ -323,6 +364,37 @@ class MainWindow(QMainWindow):
         self.nav.select("guide")
         self._on_nav("guide")
         self.pages["guide"].reveal(key)
+
+    # ================= 界面语言 =================
+    def _on_language_changed(self, preference: str):
+        """设置页的选择：落盘 + 立即切换（不重启）。"""
+        self._prefs.set_language(preference)
+        self._language_override = None
+        target = i18n.resolve_language(
+            preference or self._settings.language,
+            ui_languages=QLocale.system().uiLanguages(), platform=sys.platform)
+        self._target_language = target
+        i18n.set_language(target)
+        self.retranslate()
+
+    def retranslate(self):
+        """切换语言后重写静态文案，再让各页按当前状态重写动态文案。
+
+        顺序不能反：`i18n_ui` 会先把每个静态控件恢复成**构造时的源文案**翻成的
+        新语言，页面钩子随后覆盖状态相关的那些（连接中/使能/故障…）。
+        """
+        i18n_ui.retranslate_all()
+        self.nav.retranslate()
+        for page in self.pages.values():
+            hook = getattr(page, "retranslate", None)
+            if callable(hook):
+                hook()
+        self.log_panel.retranslate()
+        self._apply_online(self._connected,
+                           "" if self._connected else i18n.tr("未连接"))
+        self._render_estop()
+        self._render_last_error()
+        self._tick()
 
     # ================= 日志 / 任务 =================
     _LEVEL_PREFIX = (("[TRACE]", "TRACE"), ("[DEBUG]", "DEBUG"),
@@ -348,9 +420,12 @@ class MainWindow(QMainWindow):
     def _log_from_worker(self, msg: str):
         """SDK 所有者线程的日志 —— 只做分类，不碰任何控件。"""
         text = str(msg)
-        if text.startswith("[OK] 已连接"):
+        low = text.lower()
+        if text.startswith("[OK]") and ("已连接" in text or "connected" in low):
             event = "session.connect.succeeded"
-        elif text.startswith("[ERR] 离线") or text.startswith("[WARN] 链路"):
+        elif (text.startswith("[ERR]") and ("离线" in text or "offline" in low)) or \
+                (text.startswith("[WARN]") and
+                 ("链路" in text or "link" in low)):
             event = "session.link.lost"
         else:
             event = "session.log"
@@ -368,20 +443,17 @@ class MainWindow(QMainWindow):
                                 getattr(pa, "MotionSupersededError", ()))
         err = None
         if not res.ok and not superseded:
-            try:
-                err = pa.describe_exc(res.error)
-                self._last_error = err
-                self.err_btn.setText(f"[{err.code}] {err.title}")
-                self.err_btn.setVisible(True)
-            except Exception:  # noqa: BLE001 - 老 SDK 无 describe_exc 时降级
-                self._last_error = None
+            self._last_exc = res.error
+            self._last_fault_axis = None
+            self._render_last_error()
         if res.ok:
-            event, text = "command.ok", f"[OK] {res.text}"
+            event, text = "command.ok", i18n.tr("[OK] {text}", text=res.text)
         elif superseded:
             # 被新的运动接管不是故障：规划按预期作废，别把红框留给用户。
-            event, text = "command.superseded", f"[WARN] {res.text}（已被新的运动接管）"
+            event, text = "command.superseded", i18n.tr(
+                "[WARN] {text}（已被新的运动接管）", text=res.text)
         else:
-            event, text = "command.failed", f"[ERR] {res.text}"
+            event, text = "command.failed", i18n.tr("[ERR] {text}", text=res.text)
         self._log(text, category="command", event=event,
                   fields={"name": res.name, "ok": bool(res.ok),
                           "code": getattr(err, "code", None),
@@ -406,10 +478,10 @@ class MainWindow(QMainWindow):
             import json
             QApplication.clipboard().setText(
                 json.dumps(pkg, ensure_ascii=False, indent=2))
-            self._log(f"[OK] 诊断包已复制并保存: {path}",
+            self._log(i18n.tr("[OK] 诊断包已复制并保存: {path}", path=path),
                       category="diagnostics", event="diagnostics.saved")
         except Exception as e:  # noqa: BLE001 - 导出失败不能拖垮界面
-            self._log(f"[ERR] 诊断包导出失败: {e}",
+            self._log(i18n.tr("[ERR] 诊断包导出失败: {err}", err=e),
                       category="diagnostics", event="diagnostics.failed")
 
     def _after_simple(self, res):
@@ -417,13 +489,13 @@ class MainWindow(QMainWindow):
 
     def _after_move(self, res):
         if res.ok:
-            self._log("[OK] 已到位")
+            self._log(i18n.tr("[OK] 已到位"))
 
     # ================= 串口 =================
     def _refresh_ports(self):
         if self._fake:
             self.combo.clear()
-            self.combo.addItem("假设备 (--fake)", "fake")
+            self.combo.addItem(i18n.tr("假设备 (--fake)"), "fake")
             return
         cur = self.combo.currentData()
         self.combo.clear()
@@ -451,14 +523,16 @@ class MainWindow(QMainWindow):
             return
         port = self._current_device()
         if not port:
-            QMessageBox.warning(self, "无可选串口", "未发现串口设备，请检查 USB 连接。")
+            QMessageBox.warning(self, i18n.tr("无可选串口"),
+                                i18n.tr("未发现串口设备，请检查 USB 连接。"))
             return
         self.btn_conn.setEnabled(False)
         self._last_port = port
         try:
             self.worker.open(port)
         except Exception as e:  # noqa: BLE001 - SDK 的连接期异常都在这提示
-            self._log(f"[ERR] 连接失败: {e}", category="session",
+            self._log(i18n.tr("[ERR] 连接失败: {err}", err=e),
+                      category="session",
                       event="session.connect.failed", fields={"reason": str(e)})
             hint = ""
             try:
@@ -466,20 +540,21 @@ class MainWindow(QMainWindow):
                 # 这句话是 issue #152 的落点：不说清，操作员会去换线、换口、重装驱动，
                 # 而它只想被烧一次。
                 if dfu.engine.available() and dfu.engine.find_device() is not None:
-                    hint = ("\n\n检测到一块停在 bootloader (DFU) 里的控制器：它没有"
-                            "应用态可连，「连接」不会成功。请到「参数 → 固件升级」"
-                            "直接烧录，或断电重新上电。")
+                    hint = i18n.tr(
+                        "\n\n检测到一块停在 bootloader (DFU) 里的控制器：它没有"
+                        "应用态可连，「连接」不会成功。请到「参数 → 固件升级」"
+                        "直接烧录，或断电重新上电。")
             except Exception:  # noqa: BLE001 - 连接失败提示不该再炸一次
                 hint = ""
-            QMessageBox.critical(self, "连接失败", f"{e}{hint}")
+            QMessageBox.critical(self, i18n.tr("连接失败"), f"{e}{hint}")
             self._apply_online(False, str(e))
         finally:
             self.btn_conn.setEnabled(not self._upgrading)
 
     def _disconnect(self):
         self.worker.close()
-        self._apply_online(False, "已断开")
-        self._log("[INFO] 已断开（用户操作）", category="session",
+        self._apply_online(False, i18n.tr("已断开"))
+        self._log(i18n.tr("[INFO] 已断开（用户操作）"), category="session",
                   event="session.disconnected", fields={"reason": "用户断开"})
 
     def _on_online(self, ok: bool, why: str):
@@ -492,32 +567,33 @@ class MainWindow(QMainWindow):
 
     def _on_reconnect(self, attempt: int, why: str):
         """自动重连的每次尝试 —— 顶栏必须说"正在重连"，不能只留一个"离线"。"""
-        self.dot.setText(f"● 重连中({attempt})")
+        self.dot.setText(i18n.tr("● 重连中({n})", n=attempt))
         self.dot.setStyleSheet("color:#ffd166;font-weight:bold;")
-        self.fw_lbl.setText("固件: —")
+        self.fw_lbl.setText(i18n.tr("固件: —"))
         self._log(f"[WARN] {why}")
 
     def _apply_online(self, onl: bool, why: str = ""):
         self._connected = onl
-        self.btn_conn.setText("断开" if onl else "连接")
+        self.btn_conn.setText(i18n.tr("断开") if onl else i18n.tr("连接"))
         if self._upgrading:
-            self.btn_conn.setText("连接")
+            self.btn_conn.setText(i18n.tr("连接"))
             self.btn_conn.setEnabled(False)
             self.unlock_cb.setEnabled(False)
-            self.dot.setText("● 升级中")
+            self.dot.setText(i18n.tr("● 升级中"))
             self.dot.setStyleSheet("color:#ffd166;font-weight:bold;")
-            self.fw_lbl.setText("固件: 升级中")
+            self.fw_lbl.setText(i18n.tr("固件: 升级中"))
         else:
             self.btn_conn.setEnabled(True)
             self.unlock_cb.setEnabled(True)
-            self.dot.setText(ONLINE_TEXT if onl else OFFLINE_TEXT)
+            self.dot.setText(i18n.tr("● 在线") if onl else i18n.tr("● 离线"))
             self.dot.setStyleSheet(
                 f"color:{'#6fdd8b' if onl else '#b0b0b0'};font-weight:bold;")
-            self.fw_lbl.setText(f"固件: {self.worker.firmware}" if onl else "固件: —")
+            self.fw_lbl.setText(i18n.tr("固件: {version}", version=self.worker.firmware)
+                                if onl else i18n.tr("固件: —"))
         if not onl:
             self.strip.reset()
             # 断线必须回到锁定态 —— 否则重连后第一下手就是未确认的运动
-            self._relock("链路断开")
+            self._relock(i18n.tr("链路断开"))
         # 授权页连上即自动读一次 —— 先把固件版本喂进去，旧固件才能直接提示"升级固件"。
         self.pages["activation"].set_firmware(self.worker.firmware)
         self.pages["firmware"].set_link_info(self._last_port or "", self.worker.firmware)
@@ -541,15 +617,15 @@ class MainWindow(QMainWindow):
         if active:
             self.btn_conn.setEnabled(False)
             self.unlock_cb.setEnabled(False)
-            self._relock("固件升级")
-            self.btn_conn.setText("连接")
-            self.dot.setText("● 升级中")
+            self._relock(i18n.tr("固件升级"))
+            self.btn_conn.setText(i18n.tr("连接"))
+            self.dot.setText(i18n.tr("● 升级中"))
             self.dot.setStyleSheet("color:#ffd166;font-weight:bold;")
-            self.fw_lbl.setText("固件: 升级中")
-            self._log("[INFO] 固件升级期间：连接/解锁已禁用，升级结束后自动恢复")
+            self.fw_lbl.setText(i18n.tr("固件: 升级中"))
+            self._log(i18n.tr("[INFO] 固件升级期间：连接/解锁已禁用，升级结束后自动恢复"))
         else:
             self.unlock_cb.setEnabled(True)
-            self._apply_online(self.worker.online, "升级结束")
+            self._apply_online(self.worker.online, i18n.tr("升级结束"))
 
     def _upgrade_candidates(self, hint: str | None) -> list:
         """升级后重连候选：上次的端口 → 板载 CDC。端口名重枚举后会变，所以必须发现。"""
@@ -570,7 +646,7 @@ class MainWindow(QMainWindow):
         try:
             self.worker.close()
         except Exception as e:  # noqa: BLE001
-            self._log(f"[WARN] 升级重连前关闭串口失败: {e}")
+            self._log(i18n.tr("[WARN] 升级重连前关闭串口失败: {err}", err=e))
         last = ""
         for port in self._upgrade_candidates(hint or self._last_port):
             try:
@@ -578,24 +654,26 @@ class MainWindow(QMainWindow):
                 self.worker.open(port)
             except Exception as e:  # noqa: BLE001 - 设备还没回来是预期结局
                 last = f"{port}: {type(e).__name__}: {e}"
-                self._log(f"[WARN] 升级后重连失败 {last}")
+                self._log(i18n.tr("[WARN] 升级后重连失败 {detail}", detail=last))
                 continue
             self._refresh_ports()
             fw.reconnect_finished(True, port, self.worker.firmware, "")
-            self._log(f"[OK] 升级后已重新连接: {port} · {self.worker.firmware}")
+            self._log(i18n.tr("[OK] 升级后已重新连接: {port} · {fw}",
+                              port=port, fw=self.worker.firmware))
             return
-        fw.reconnect_finished(False, "", "",
-                              last or "没有发现 STM32 CDC 设备")
-        self._log(f"[ERR] 升级后重连失败: {last or '没有发现 STM32 CDC 设备'}")
+        missing = i18n.tr("没有发现 STM32 CDC 设备")
+        fw.reconnect_finished(False, "", "", last or missing)
+        self._log(i18n.tr("[ERR] 升级后重连失败: {detail}", detail=last or missing))
 
     # ================= 运动解锁（全局一把） =================
     def _on_unlock(self, checked: bool):
         if checked and not self._connected:
-            self._log("[WARN] 未连接，解锁无效")
+            self._log(i18n.tr("[WARN] 未连接，解锁无效"))
             self.unlock_cb.setChecked(False)
             return
         self._set_armed(bool(checked))
-        self._log("[WARN] 运动控制已解锁" if checked else "[INFO] 运动控制已锁定")
+        self._log(i18n.tr("[WARN] 运动控制已解锁") if checked
+                  else i18n.tr("[INFO] 运动控制已锁定"))
 
     def _set_armed(self, on: bool):
         self._armed = on
@@ -612,7 +690,7 @@ class MainWindow(QMainWindow):
             self.unlock_cb.blockSignals(False)
         self._set_armed(False)
         if reason and was:          # 没解锁过就别报"已锁定"——启动那一下会误导
-            self._log(f"[WARN] 运动控制已锁定 — {reason}")
+            self._log(i18n.tr("[WARN] 运动控制已锁定 — {reason}", reason=reason))
 
     # ================= 运动闸门（唯一收口） =================
     def _motion_denied(self, op: str) -> bool:
@@ -624,13 +702,15 @@ class MainWindow(QMainWindow):
         —— 本仓 2026-09-13 评审的"新增守卫是死代码"是同一类问题。
         """
         if not self._connected:
-            self._log(f"[WARN] 拒绝 {op} — 未连接")
+            self._log(i18n.tr("[WARN] 拒绝 {op} — 未连接", op=op))
             return True
         if self._fault_blocked:
-            self._log(f"[WARN] 拒绝 {op} — FAULT/急停锁存中，先 [清故障] 或 [复位]")
+            self._log(i18n.tr("[WARN] 拒绝 {op} — FAULT/急停锁存中，先 [清故障] 或 [复位]",
+                              op=op))
             return True
         if not self._armed:
-            self._log(f"[WARN] 拒绝 {op} — 运动未解锁（先勾选顶栏的确认项）")
+            self._log(i18n.tr("[WARN] 拒绝 {op} — 运动未解锁（先勾选顶栏的确认项）",
+                              op=op))
             return True
         return False
 
@@ -648,27 +728,65 @@ class MainWindow(QMainWindow):
         # 收掉零重力保活 + 丢弃排队任务 —— 急停的语义是"停下"，不是"先做完手上的"
         dropped = self.worker.drop_pending()
         zg_err = self.worker.stop_zero_g_now()
-        self._relock("急停")
+        self._relock(i18n.tr("急停"))
         if dropped:
-            self._log(f"[WARN] 急停：已丢弃 {dropped} 条排队中的命令",
+            self._log(i18n.tr("[WARN] 急停：已丢弃 {n} 条排队中的命令", n=dropped),
                       category="command", event="command.emergency_stop",
                       fields={"sent": bool(ok), "dropped": int(dropped)})
         if zg_err:
-            self._log(f"[WARN] 急停：零重力会话未能正常收尾（{zg_err}）",
+            self._log(i18n.tr("[WARN] 急停：零重力会话未能正常收尾（{err}）",
+                              err=zg_err),
                       category="command", event="command.emergency_stop",
                       fields={"sent": bool(ok), "zero_g_error": str(zg_err)})
+        self._estop_state = (bool(ok), str(why))
+        self._render_estop()
         if ok:
-            self.estop_lbl.setText("急停帧已发出 — 请目视确认臂已停止")
-            self.estop_lbl.setStyleSheet("color:#ffd166;font-weight:bold;")
-            self._log("[WARN] 急停帧已发出 —— 请目视确认臂已停止（帧发出≠固件已执行）",
-                      category="command", event="command.emergency_stop",
-                      fields={"sent": True, "dropped": int(dropped)})
+            self._log(i18n.tr(
+                "[WARN] 急停帧已发出 —— 请目视确认臂已停止（帧发出≠固件已执行）"),
+                category="command", event="command.emergency_stop",
+                fields={"sent": True, "dropped": int(dropped)})
         else:
-            self.estop_lbl.setText("⚠ 急停未发出 — 请立即用硬件急停/断电")
-            self.estop_lbl.setStyleSheet("color:#ff6b6b;font-weight:bold;")
-            self._log(f"[ERR] 急停未发出（{why}）—— 请立即用硬件急停/断电",
+            self._log(i18n.tr("[ERR] 急停未发出（{why}）—— 请立即用硬件急停/断电",
+                              why=why),
                       category="command", event="command.emergency_stop",
                       fields={"sent": False, "dropped": int(dropped), "reason": str(why)})
+
+    def _render_estop(self):
+        """顶栏急停结果 —— 切语言时也要按同样的事实重写。"""
+        if self._estop_state is None:
+            self.estop_lbl.setText("")
+            return
+        ok, _why = self._estop_state
+        if ok:
+            self.estop_lbl.setText(i18n.tr("急停帧已发出 — 请目视确认臂已停止"))
+            self.estop_lbl.setStyleSheet("color:#ffd166;font-weight:bold;")
+        else:
+            self.estop_lbl.setText(i18n.tr("⚠ 急停未发出 — 请立即用硬件急停/断电"))
+            self.estop_lbl.setStyleSheet("color:#ff6b6b;font-weight:bold;")
+
+    def _render_last_error(self):
+        """顶栏错误红框 —— 故障原因走 ``describe_fault``，本地异常走 ``describe_exc``。"""
+        err = None
+        prefix = ""
+        if self._last_fault_axis is not None:
+            axis, reason = self._last_fault_axis
+            try:
+                err = pa.describe_fault(reason, locale=i18n.sdk_locale())
+                prefix = f"J{axis + 1} "
+            except Exception:  # noqa: BLE001
+                err = None
+        elif self._last_exc is not None:
+            try:
+                err = pa.describe_exc(self._last_exc, locale=i18n.sdk_locale())
+            except Exception:  # noqa: BLE001 - 老 SDK 无 describe_exc 时降级
+                err = None
+        if err is None:
+            self.err_btn.setVisible(False)
+            self._last_error = None
+            return
+        self._last_error = err
+        self.err_btn.setText(f"[{err.code}] {prefix}{err.title}")
+        self.err_btn.setVisible(True)
 
     # ================= 周期刷新 =================
     def _tick(self):
@@ -677,7 +795,7 @@ class MainWindow(QMainWindow):
             self._n = st.n
             self.pages["overview"].set_joints(st.n)
             self.pages["joint"].set_joints(st.n)
-            self._log(f"[INFO] 识别到 {st.n} 个关节")
+            self._log(i18n.tr("[INFO] 识别到 {n} 个关节", n=st.n))
 
         fps = self.worker.model.rate()
         drops = self.worker.drops
@@ -704,11 +822,12 @@ class MainWindow(QMainWindow):
             set(getattr(st, "fault_reasons", []) or []) if st is not None else set()
         for a, r in sorted(cur - self._fault_snapshot):
             try:
-                title = pa.describe_fault(r).title
+                title = pa.describe_fault(r, locale=i18n.sdk_locale()).title
             except Exception:  # noqa: BLE001
-                title = f"原因 {r}"
-            self.pages["fault"].add_event(f"J{a + 1} {title}")
-            self._log(f"[WARN] 故障 J{a + 1} {title}", category="fault",
+                title = i18n.tr("原因 {reason}", reason=r)
+            self.pages["fault"].add_event(int(a), int(r))
+            self._log(i18n.tr("[WARN] 故障 J{axis} {title}",
+                              axis=a + 1, title=title), category="fault",
                       event="fault.detected",
                       fields={"joint": int(a) + 1, "reason": int(r)})
         self._fault_snapshot = cur
@@ -727,21 +846,18 @@ class MainWindow(QMainWindow):
                 self.pages[key].set_fault_blocked(faulted)
             self._set_armed(self._armed)
             if faulted and self._armed:
-                self._relock("检测到 FAULT/急停锁存")
+                self._relock(i18n.tr("检测到 FAULT/急停锁存"))
             elif faulted:
-                self._log(f"[WARN] 故障: {self._fault_summary(st) or st.fault_detail}")
+                self._log(i18n.tr("[WARN] 故障: {detail}",
+                                  detail=self._fault_summary(st) or st.fault_detail))
             d = self._fault_detail
             pairs = list(getattr(d, "fault_reasons", []) or []) if d else \
                 list(getattr(st, "fault_reasons", []) or [])
             if faulted and pairs:
                 a, r = pairs[0]
-                try:
-                    t = pa.describe_fault(r)
-                    self._last_error = t
-                    self.err_btn.setText(f"[{t.code}] J{a + 1} {t.title}")
-                    self.err_btn.setVisible(True)
-                except Exception:  # noqa: BLE001 - 老 SDK 无 describe_fault
-                    pass
+                self._last_fault_axis = (int(a), int(r))
+                self._last_exc = None
+                self._render_last_error()
 
         self._sync_zero_g(st)
         self._apply_busy()
@@ -773,39 +889,42 @@ class MainWindow(QMainWindow):
     # ================= 整机命令 =================
     def _on_ctrl_cmd(self, name: str):
         if name == "home":
-            if self._motion_denied("回零 home"):
+            if self._motion_denied(i18n.tr("回零 home")):
                 return
             if not self._confirm_home():
                 return
-            self._submit("回零 home", lambda arm: arm.home(), self._after_move)
+            self._submit(i18n.tr("回零 home"), lambda arm: arm.home(), self._after_move)
         elif name == "clear_faults":
             if not self._confirm_clear_faults():
                 return
-            self._submit("清故障 clear_faults",
+            self._submit(i18n.tr("清故障 clear_faults"),
                          lambda arm: arm.clear_faults(), self._after_simple)
         elif name == "reset":
             if not self._confirm_reset():
                 return
-            self._submit("复位 reset", lambda arm: arm.reset(), self._after_reset)
+            self._submit(i18n.tr("复位 reset"), lambda arm: arm.reset(), self._after_reset)
         elif name == "enable":
-            self._submit("使能 enable", lambda arm: arm.enable(), self._after_simple)
+            self._submit(i18n.tr("使能 enable"), lambda arm: arm.enable(),
+                         self._after_simple)
         elif name == "disable":
-            self._submit("失能 disable", lambda arm: arm.disable(), self._after_simple)
+            self._submit(i18n.tr("失能 disable"), lambda arm: arm.disable(),
+                         self._after_simple)
 
     def _after_reset(self, res):
         if res.ok:
             # 复位退出 EMERGENCY 后必须重新锁定：旧解锁态不该跨过急停继续有效
-            self._relock("已复位")
+            self._relock(i18n.tr("已复位"))
 
     def _confirm_home(self) -> bool:
         cur = ""
         st = self.worker.state
         if st is not None and st.joints:
-            cur = "\n\n当前各轴: " + "  ".join(f"{v:+.3f}" for v in st.q)
+            cur = i18n.tr("\n\n当前各轴: {q}",
+                          q="  ".join(f"{v:+.3f}" for v in st.q))
         return QMessageBox.question(
-            self, "确认回零 home",
-            "各臂轴将回到 URDF 零位（固件把速度写死为 0.10 的低速）。" + cur +
-            "\n\n确认下发？",
+            self, i18n.tr("确认回零 home"),
+            i18n.tr("各臂轴将回到 URDF 零位（固件把速度写死为 0.10 的低速）。{q}"
+                    "\n\n确认下发？", q=cur),
             QMessageBox.Ok | QMessageBox.Cancel,
             QMessageBox.Cancel) == QMessageBox.Ok
 
@@ -830,7 +949,7 @@ class MainWindow(QMainWindow):
             return
         self._last_fault_bits = jf
         self._fault_query_inflight = True
-        self._submit("读故障详情", lambda arm: arm.get_fault_detail(),
+        self._submit(i18n.tr("读故障详情"), lambda arm: arm.get_fault_detail(),
                      self._on_fault_detail)
 
     def _on_fault_detail(self, res):
@@ -839,7 +958,7 @@ class MainWindow(QMainWindow):
             self._fault_detail = res.value
             self.pages["fault"].update_from(self.worker.state, self._fault_detail)
         else:
-            self._log(f"[WARN] 故障详情不可用: {res.text}")
+            self._log(i18n.tr("[WARN] 故障详情不可用: {text}", text=res.text))
 
     def _fault_summary(self, st=None) -> str:
         """故障轴 + 原因，例 `J4: CAN 反馈丢失`。
@@ -855,35 +974,38 @@ class MainWindow(QMainWindow):
         parts = []
         for a, r in pairs:
             try:
-                parts.append(f"J{a + 1}: {pa.describe_fault(r).title}")
+                parts.append(i18n.tr("J{axis}: {title}", axis=a + 1,
+                                     title=pa.describe_fault(
+                                         r, locale=i18n.sdk_locale()).title))
             except Exception:  # noqa: BLE001
-                parts.append(f"J{a + 1}: 原因 {r}")
-        return "；".join(parts)
+                parts.append(i18n.tr("J{axis}: 原因 {reason}", axis=a + 1, reason=r))
+        return i18n.tr("；").join(parts)
 
     def _confirm_clear_faults(self) -> bool:
         st = self.worker.state
         axes = ""
         if st is not None and st.joint_fault:
             summary = self._fault_summary(st)
-            axes = "\n\n将被恢复出力的轴: " + (summary.replace("；", "、")
-                                               or "、".join(
-                                                   f"J{a + 1}" for a in st.fault_axes))
+            axes = i18n.tr("\n\n将被恢复出力的轴: {axes}",
+                           axes=summary.replace(i18n.tr("；"), i18n.tr("、"))
+                           or i18n.tr("、").join(f"J{a + 1}" for a in st.fault_axes))
         return QMessageBox.question(
-            self, "确认清故障 clear_faults",
-            "清除故障锁存。若臂处于使能态，被锁轴会重新出力。" + axes +
-            "\n\n确认下发？",
+            self, i18n.tr("确认清故障 clear_faults"),
+            i18n.tr("清除故障锁存。若臂处于使能态，被锁轴会重新出力。{axes}"
+                    "\n\n确认下发？", axes=axes),
             QMessageBox.Ok | QMessageBox.Cancel,
             QMessageBox.Cancel) == QMessageBox.Ok
 
     def _confirm_reset(self) -> bool:
         return QMessageBox.question(
-            self, "确认复位 reset",
-            "复位会清除故障并退出急停锁存 —— 之后固件不再阻止运动。\n\n确认下发？",
+            self, i18n.tr("确认复位 reset"),
+            i18n.tr("复位会清除故障并退出急停锁存 —— 之后固件不再阻止运动。"
+                    "\n\n确认下发？"),
             QMessageBox.Ok | QMessageBox.Cancel,
             QMessageBox.Cancel) == QMessageBox.Ok
 
     def _on_set_speed(self, percent: int):
-        self._submit(f"全局限速 {percent}%",
+        self._submit(i18n.tr("全局限速 {percent}%", percent=percent),
                      lambda arm: arm.set_speed(int(percent)), self._after_simple)
 
     def _on_status_now(self):
@@ -895,7 +1017,8 @@ class MainWindow(QMainWindow):
         # ⚠ 2.0 起 `get_status_now`/`get_tcp`/`kin_bench` 返回 `Msg` 信封 ——
         # `TaskResult.value` 记的是 fn 的**原样**返回值, 故解信封必须在 fn 里做,
         # 否则 `done` 拿到的会是信封 (下面 `.seq` 会 AttributeError)。
-        self._submit("读状态", lambda arm: arm.get_status_now().value, done)
+        self._submit(i18n.tr("读状态"),
+                     lambda arm: arm.get_status_now().value, done)
 
     # ================= 关节运动 =================
     def _delta_ok(self, op: str, cur, targets) -> bool:
@@ -906,7 +1029,8 @@ class MainWindow(QMainWindow):
         最容易手滑的时刻。宁可让用户等一帧。
         """
         if cur is None or len(cur) != len(targets):
-            self._log(f"[WARN] 拒绝 {op} — 拿不到当前关节角作基线（等一帧状态再试）")
+            self._log(i18n.tr(
+                "[WARN] 拒绝 {op} — 拿不到当前关节角作基线（等一帧状态再试）", op=op))
             return False
         plan = checks.plan_motion(cur, targets, self._settings.confirm_threshold)
         return (not plan.needs_confirm) or self._confirm_motion(plan)
@@ -921,21 +1045,23 @@ class MainWindow(QMainWindow):
             # 旁路写帧：在途的 move_l(wait=True) 会把所有者线程占住，排队等于等它走完。
             ok, why = self.worker.takeover_movej(qs, speed)
             if ok:
-                self._log(f"[WARN] 接管 movej 已发出（sp={speed:.2f}）—— "
-                          "固件会作废在途点动/直线规划")
+                self._log(i18n.tr("[WARN] 接管 movej 已发出（sp={speed:.2f}）—— "
+                                  "固件会作废在途点动/直线规划", speed=speed))
             else:
-                self._log(f"[ERR] 接管 movej 未发出: {why}")
+                self._log(i18n.tr("[ERR] 接管 movej 未发出: {why}", why=why))
             return
         if supersede:
-            self._log("[INFO] 当前没有在途运动，按普通 movej 下发")
-        self._submit(f"movej sp={speed:.2f}",
+            self._log(i18n.tr("[INFO] 当前没有在途运动，按普通 movej 下发"))
+        self._submit(i18n.tr("movej sp={speed:.2f}", speed=speed),
                      lambda arm: arm.movej(qs, speed), self._after_move)
 
     def _confirm_motion(self, plan) -> bool:
         return QMessageBox.warning(
-            self, "确认运动幅度",
-            f"以下关节与当前位置差异超过 {plan.threshold} rad：\n\n"
-            + "\n".join(checks.confirm_lines(plan)) + "\n\n确认下发？",
+            self, i18n.tr("确认运动幅度"),
+            i18n.tr("以下关节与当前位置差异超过 {threshold} rad：\n\n{lines}"
+                    "\n\n确认下发？",
+                    threshold=plan.threshold,
+                    lines="\n".join(checks.confirm_lines(plan))),
             QMessageBox.Ok | QMessageBox.Cancel,
             QMessageBox.Cancel) == QMessageBox.Ok
 
@@ -973,7 +1099,7 @@ class MainWindow(QMainWindow):
     def _on_get_tcp(self):
         def done(res):
             self.pages["cart"].show_tcp(res.value if res.ok else None)
-        self._submit("读 TCP", lambda arm: arm.get_tcp().value, done)
+        self._submit(i18n.tr("读 TCP"), lambda arm: arm.get_tcp().value, done)
 
     def _on_ik(self, pose, seed):
         # SDK 的 IK 种子恒为**模型 7 轴**（与关节数解耦）。台架 1J 上实测角只有 N 个，
@@ -985,11 +1111,11 @@ class MainWindow(QMainWindow):
         def done(res):
             if res.ok:
                 self.pages["cart"].show_ik(res.value)
-                self._log("[OK] IK 求解成功: "
-                          + " ".join(f"{v:+.3f}" for v in res.value))
+                self._log(i18n.tr("[OK] IK 求解成功: {q}",
+                                  q=" ".join(f"{v:+.3f}" for v in res.value)))
             else:
                 self.pages["cart"].show_ik_error(str(res.error))
-        self._submit("ik", lambda arm: arm.ik(pose, seed), done)
+        self._submit(i18n.tr("ik"), lambda arm: arm.ik(pose, seed), done)
 
     def _on_movep(self, pose, speed):
         if self._motion_denied("movep"):
@@ -998,16 +1124,17 @@ class MainWindow(QMainWindow):
         if cur is None:
             # 没有基线就判不了幅度。与其放行，不如顺手读一次 TCP 再回来判 ——
             # 比让用户自己想起去点 [读取当前末端位姿] 更稳。
-            self._log("[INFO] 尚无当前位姿基线，先读一次 TCP 再判幅度")
-            self._submit("读 TCP（movep 前置）", lambda arm: arm.get_tcp().value,
+            self._log(i18n.tr("[INFO] 尚无当前位姿基线，先读一次 TCP 再判幅度"))
+            self._submit(i18n.tr("读 TCP（movep 前置）"), lambda arm: arm.get_tcp().value,
                          lambda res: self._movep_after_tcp(res, pose, speed))
             return
         self._movep_confirm_and_send(pose, speed, cur)
 
     def _movep_after_tcp(self, res, pose, speed):
         if not res.ok or res.value is None:
-            self._log(f"[WARN] 拒绝 movep — 读不到当前 TCP，无法判断幅度"
-                      f"（{res.error if not res.ok else '固件无应答'}）")
+            self._log(i18n.tr(
+                "[WARN] 拒绝 movep — 读不到当前 TCP，无法判断幅度（{why}）",
+                why=res.error if not res.ok else i18n.tr("固件无应答")))
             return
         self.pages["cart"].show_tcp(res.value)
         self._movep_confirm_and_send(pose, speed, res.value)
@@ -1017,12 +1144,13 @@ class MainWindow(QMainWindow):
                                 self._settings.pose_confirm_rot)
         if plan.needs_confirm:
             if QMessageBox.warning(
-                    self, "确认位姿幅度",
-                    f"movep 目标与当前位姿：\n\n{plan.summary()}\n\n确认下发？",
+                    self, i18n.tr("确认位姿幅度"),
+                    i18n.tr("movep 目标与当前位姿：\n\n{summary}\n\n确认下发？",
+                            summary=plan.summary()),
                     QMessageBox.Ok | QMessageBox.Cancel,
                     QMessageBox.Cancel) != QMessageBox.Ok:
                 return
-        self._submit(f"movep sp={speed:.2f}",
+        self._submit(i18n.tr("movep sp={speed:.2f}", speed=speed),
                      lambda arm: arm.move_p(pose, speed), self._after_move)
 
     # ================= 笛卡尔直线 / 点动 =================
@@ -1031,16 +1159,17 @@ class MainWindow(QMainWindow):
             return
         cur = self.pages["cart"]._tcp
         if cur is None:
-            self._log("[INFO] 尚无当前位姿基线，先读一次 TCP 再判幅度")
-            self._submit("读 TCP（movel 前置）", lambda arm: arm.get_tcp().value,
+            self._log(i18n.tr("[INFO] 尚无当前位姿基线，先读一次 TCP 再判幅度"))
+            self._submit(i18n.tr("读 TCP（movel 前置）"), lambda arm: arm.get_tcp().value,
                          lambda res: self._movel_after_tcp(res, pose, speed))
             return
         self._movel_confirm_and_send(pose, speed, cur)
 
     def _movel_after_tcp(self, res, pose, speed):
         if not res.ok or res.value is None:
-            self._log(f"[WARN] 拒绝 movel — 读不到当前 TCP，无法判断幅度"
-                      f"（{res.error if not res.ok else '固件无应答'}）")
+            self._log(i18n.tr(
+                "[WARN] 拒绝 movel — 读不到当前 TCP，无法判断幅度（{why}）",
+                why=res.error if not res.ok else i18n.tr("固件无应答")))
             return
         self.pages["cart"].show_tcp(res.value)
         self._movel_confirm_and_send(pose, speed, res.value)
@@ -1050,12 +1179,13 @@ class MainWindow(QMainWindow):
                                 self._settings.pose_confirm_rot)
         if plan.needs_confirm:
             if QMessageBox.warning(
-                    self, "确认位姿幅度",
-                    f"movel 目标与当前位姿：\n\n{plan.summary()}\n\n确认下发？",
+                    self, i18n.tr("确认位姿幅度"),
+                    i18n.tr("movel 目标与当前位姿：\n\n{summary}\n\n确认下发？",
+                            summary=plan.summary()),
                     QMessageBox.Ok | QMessageBox.Cancel,
                     QMessageBox.Cancel) != QMessageBox.Ok:
                 return
-        self._submit(f"movel sp={speed:.2f}",
+        self._submit(i18n.tr("movel sp={speed:.2f}", speed=speed),
                      lambda arm: arm.move_l(pose, speed), self._after_movel)
 
     def _after_movel(self, res):
@@ -1065,29 +1195,29 @@ class MainWindow(QMainWindow):
         settled = bool(getattr(plan, "settled", True))
         err = float(getattr(plan, "settle_err_rad", 0.0) or 0.0)
         if settled:
-            self._log("[OK] movel 到位")
+            self._log(i18n.tr("[OK] movel 到位"))
         else:
-            self._log(f"[WARN] movel 规划完成但未停在目标"
-                      f"（settled=False，settle_err={err:.3f} rad）")
+            self._log(i18n.tr("[WARN] movel 规划完成但未停在目标"
+                              "（settled=False，settle_err={err:.3f} rad）", err=err))
         # 运动结束后把真实落点读回来 —— 别让页面停在"计划目标"上。
-        self._submit("读 TCP（movel 后）", lambda arm: arm.get_tcp().value,
+        self._submit(i18n.tr("读 TCP（movel 后）"), lambda arm: arm.get_tcp().value,
                      lambda r: self.pages["cart"].show_tcp(r.value if r.ok else None))
 
     def _on_jog_step(self, axis: str, kind: str, amount: float, frame: str,
                      speed: float, gen: int):
         """点动的一步：读实测 TCP → 算一小步 → move_l。"""
-        if self._motion_denied(f"点动 {axis}"):
+        if self._motion_denied(i18n.tr("点动 {axis}", axis=axis)):
             self.pages["cart"].jog_result(gen, None)
             return
 
         def fn(arm):
             tcp = arm.get_tcp().value
             if tcp is None:
-                raise pa.InvalidCommandError("读不到当前 TCP，点动中止")
+                raise pa.InvalidCommandError(i18n.tr("读不到当前 TCP，点动中止"))
             target = pose_math.jog_pose(tcp, axis, kind, amount, frame)
             return tcp, target, arm.move_l(target, speed)
 
-        self._submit(f"点动 {axis}", fn,
+        self._submit(i18n.tr("点动 {axis}", axis=axis), fn,
                      lambda res: self.pages["cart"].jog_result(gen, res))
 
     def _on_stop_jog(self):
@@ -1098,28 +1228,28 @@ class MainWindow(QMainWindow):
         """
         ok, why = self.worker.stop_jog_now()
         if ok:
-            self._log("[WARN] 受控停止帧已发出 —— 在途点动/直线规划将被固件作废")
+            self._log(i18n.tr("[WARN] 受控停止帧已发出 —— 在途点动/直线规划将被固件作废"))
         else:
-            self._log(f"[ERR] 受控停止未发出: {why}")
+            self._log(i18n.tr("[ERR] 受控停止未发出: {why}", why=why))
 
     # ================= 零重力 =================
     def _on_zero_g(self, on: bool):
         period = self.pages["zerog"].period_value()
         # 退出永远放行 —— 把用户锁在零重力里比放行更危险
-        if on and self._motion_denied("零重力进入"):
+        if on and self._motion_denied(i18n.tr("零重力进入")):
             return
         if on:
             def done(res):
                 if not res.ok:
                     self.pages["zerog"].set_state(False, None)
-            self._submit(f"零重力进入 (保活 {period:.3f}s)",
+            self._submit(i18n.tr("零重力进入 (保活 {period:.3f}s)", period=period),
                          lambda arm: arm.zero_g_start(period), done)
         else:
             # 退出后必须补一条零位移 movej 保持：只发 off 的话，0.1 s 后命令
             # 看门狗会进 fail-soft (tau=0, kp=0.6×)，臂按 G/(0.6·kp) 下沉。
             # 显式退出不是 PC 掉线；movej 到当前 q 会把模式留在 MOVE_J，
             # 固件在该模式每拍自动 kick 看门狗 + 持续重力前馈。
-            self._submit("零重力退出 + 保持",
+            self._submit(i18n.tr("零重力退出 + 保持"),
                          lambda arm: exit_zero_g_and_hold(arm), self._after_simple)
 
     # ================= 诊断 =================
@@ -1127,7 +1257,7 @@ class MainWindow(QMainWindow):
         def done(res):
             if res.ok:
                 self.pages["diag"].set_bench(res.value)
-                self._log("[OK] KIN_BENCH 完成")
+                self._log(i18n.tr("[OK] KIN_BENCH 完成"))
             else:
                 self.pages["diag"].set_bench_error(str(res.error))
         self._submit("KIN_BENCH", lambda arm: arm.diag.kin_bench().value, done)
@@ -1147,9 +1277,9 @@ class MainWindow(QMainWindow):
         fw = self.pages.get("firmware")
         if fw is not None and fw.is_running():
             reply = QMessageBox.warning(
-                self, "固件升级进行中",
-                "固件正在烧录/升级。现在退出会中断升级，可能让板子停在 "
-                "bootloader 或导致变砖。\n\n确定要退出吗？",
+                self, i18n.tr("固件升级进行中"),
+                i18n.tr("固件正在烧录/升级。现在退出会中断升级，可能让板子停在 "
+                        "bootloader 或导致变砖。\n\n确定要退出吗？"),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply != QMessageBox.Yes:
                 ev.ignore()

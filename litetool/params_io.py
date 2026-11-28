@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import litearm as pa
 import yaml
 
+from litetool import i18n
 from litetool import param_catalog as C
 
 # ERR 码中文映射（固件 `RSP_ERR` payload = [echoed_cmd, code]）
@@ -37,8 +38,8 @@ Result = Tuple[bool, Optional[int]]
 
 def err_text(code: Optional[int]) -> str:
     if code is None:
-        return "超时/无应答"
-    return ERR_TEXT.get(code, f"code 0x{code:02X}")
+        return i18n.tr("超时/无应答")
+    return i18n.tr(ERR_TEXT.get(code, f"code 0x{code:02X}"))
 
 
 def _call(fn: Callable[[], Any]) -> Result:
@@ -133,10 +134,10 @@ def _probe_vec(arm) -> Dict[int, List[float]]:
         first = arm.get_ff_vec(1, timeout=0.5).value
     except pa.CommandRejectedError as e:
         if _is_unsupported(e):
-            raise OSError("固件不支持参数读回 (0x2B) —— 需更新固件") from e
-        raise OSError(f"get_ff_vec item 1 读回被拒: {e}") from e
+            raise OSError(i18n.tr("固件不支持参数读回 (0x2B) —— 需更新固件")) from e
+        raise OSError(i18n.tr("get_ff_vec item 1 读回被拒: {err}", err=e)) from e
     except Exception as e:  # noqa: BLE001
-        raise OSError(f"参数读回无应答 (get_ff_vec item 1): {e}") from e
+        raise OSError(i18n.tr("参数读回无应答 (get_ff_vec item 1): {err}", err=e)) from e
     out: Dict[int, List[float]] = {1: list(first)}
     for item in range(2, PROBE_MAX_ITEM + 1):
         try:
@@ -144,9 +145,9 @@ def _probe_vec(arm) -> Dict[int, List[float]]:
         except pa.CommandRejectedError as e:
             if _is_unsupported(e):
                 continue
-            raise OSError(f"get_ff_vec item {item} 读回被拒: {e}") from e
+            raise OSError(i18n.tr("get_ff_vec item {item} 读回被拒: {err}", item=item, err=e)) from e
         except Exception as e:  # noqa: BLE001
-            raise OSError(f"get_ff_vec item {item} 读回失败: {e}") from e
+            raise OSError(i18n.tr("get_ff_vec item {item} 读回失败: {err}", item=item, err=e)) from e
     return out
 
 
@@ -159,10 +160,10 @@ def _probe_scalar(arm) -> Dict[int, float]:
         first = arm.get_ff_scalar(1, 0, timeout=0.5).value
     except pa.CommandRejectedError as e:
         if _is_unsupported(e):
-            raise OSError("固件不支持参数读回 (0x2C) —— 需更新固件") from e
-        raise OSError(f"get_ff_scalar item 1 读回被拒: {e}") from e
+            raise OSError(i18n.tr("固件不支持参数读回 (0x2C) —— 需更新固件")) from e
+        raise OSError(i18n.tr("get_ff_scalar item 1 读回被拒: {err}", err=e)) from e
     except Exception as e:  # noqa: BLE001
-        raise OSError(f"参数读回无应答 (get_ff_scalar item 1): {e}") from e
+        raise OSError(i18n.tr("参数读回无应答 (get_ff_scalar item 1): {err}", err=e)) from e
     out: Dict[int, float] = {1: float(first)}
     for item in range(2, PROBE_MAX_ITEM + 1):
         if item == C.FF_MASK_SCALAR_ITEM:
@@ -172,9 +173,9 @@ def _probe_scalar(arm) -> Dict[int, float]:
         except pa.CommandRejectedError as e:
             if _is_unsupported(e):
                 continue
-            raise OSError(f"get_ff_scalar item {item} 读回被拒: {e}") from e
+            raise OSError(i18n.tr("get_ff_scalar item {item} 读回被拒: {err}", item=item, err=e)) from e
         except Exception as e:  # noqa: BLE001
-            raise OSError(f"get_ff_scalar item {item} 读回失败: {e}") from e
+            raise OSError(i18n.tr("get_ff_scalar item {item} 读回失败: {err}", item=item, err=e)) from e
     return out
 
 
@@ -201,7 +202,7 @@ def read_snapshot(arm) -> Dict[str, Any]:
             # 信封, 取原值一律走 `.value` (下同; 信封里另两个字段本模块不消费)。
             jp = arm.params.get_joint_param(j).value
         except Exception as e:  # noqa: BLE001
-            raise OSError(f"J{j + 1} 读回失败 (get_joint_param): {e}") from e
+            raise OSError(i18n.tr("J{axis} 读回失败 (get_joint_param): {err}", axis=j + 1, err=e)) from e
         joints[j].update(kp=jp.kp, kd=jp.kd, tau_max=jp.tau_max,
                          q_min=jp.q_min, q_max=jp.q_max)
 
@@ -223,14 +224,14 @@ def read_snapshot(arm) -> Dict[str, Any]:
                 glob[gp.key] = [arm.get_ff_scalar(gp.item, sub, timeout=0.5).value
                                 for sub in gp.subs]
             except Exception as e:  # noqa: BLE001
-                raise OSError(f"{gp.key} 读回失败 (get_ff_scalar): {e}") from e
+                raise OSError(i18n.tr("{key} 读回失败 (get_ff_scalar): {err}", key=gp.key, err=e)) from e
         else:
             v = scalar[gp.item]
             glob[gp.key] = int(round(v)) if gp.model else float(v)
     try:
         glob["ff_mask"] = int(arm.get_ff_mask(timeout=0.5)) & C.FF_ALL_MASK
     except Exception as e:  # noqa: BLE001
-        raise OSError(f"ff_mask 读回失败 (get_ff_mask): {e}") from e
+        raise OSError(i18n.tr("ff_mask 读回失败 (get_ff_mask): {err}", err=e)) from e
     return {"joints": joints, "global": glob,
             "supported": {"vec": sorted(vec), "scalar": sorted(scalar)}}
 

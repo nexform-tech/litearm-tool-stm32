@@ -12,6 +12,9 @@ GUI 侧先按此表校验提示, 固件仍兜底钳制/拒绝。
 """
 from dataclasses import dataclass, replace
 
+from litetool import i18n
+from litetool import param_catalog_en as EN
+
 NUM_JOINTS = 7          # 调参页列数 (J1..J7; 整臂 7J)
 
 # ---------------------------------------------------------------------------
@@ -82,6 +85,25 @@ def ff_bit_label(i: int) -> str:
     return f"BIT{i}"
 
 
+def ff_label_text(i: int) -> str:
+    """界面显示用的位含义（英文表缺失时回落中文）。"""
+    if i18n.language() == "en" and 0 <= i < len(EN.FF_LABELS):
+        return EN.FF_LABELS[i] or FF_BITS[i][2]
+    return FF_BITS[i][2] if 0 <= i < len(FF_BITS) else ""
+
+
+def ff_detail_text(i: int) -> str:
+    if i18n.language() == "en" and 0 <= i < len(EN.FF_DETAILS):
+        return EN.FF_DETAILS[i] or FF_BIT_DETAIL[i]
+    return FF_BIT_DETAIL[i] if 0 <= i < len(FF_BIT_DETAIL) else ""
+
+
+def model_body_label_text(i: int) -> str:
+    if i18n.language() == "en" and i < len(EN.MODEL_BODY_LABELS):
+        return EN.MODEL_BODY_LABELS[i] or MODEL_BODY_LABELS[i]
+    return MODEL_BODY_LABELS[i] if i < len(MODEL_BODY_LABELS) else ""
+
+
 # ---------------------------------------------------------------------------
 # 逐关节参数目录 (表行顺序)。kind:
 #   'ctrl'   -> 0x22 写 (kp/kd/tau_max 按关节成组)
@@ -106,6 +128,30 @@ class JointParam:
     def range_text(self) -> str:
         return f"[{_fmt(self.lo)}, {_fmt(self.hi)}] {self.unit}"
 
+    def label_text(self) -> str:
+        return self._en("LABELS", self.label)
+
+    def role_text(self) -> str:
+        return self._en_meta(0, self.role)
+
+    def hint_text(self) -> str:
+        return self._en_meta(1, self.hint)
+
+    def detail_text(self) -> str:
+        return self._en_meta(2, self.detail)
+
+    def _en(self, table: str, fallback: str) -> str:
+        if i18n.language() == "en":
+            return getattr(EN, table, {}).get(self.key) or fallback
+        return fallback
+
+    def _en_meta(self, index: int, fallback: str) -> str:
+        if i18n.language() == "en":
+            hit = EN.META.get(self.key)
+            if hit and index < len(hit) and hit[index]:
+                return hit[index]
+        return fallback
+
 
 @dataclass(frozen=True)
 class GlobalParam:
@@ -129,8 +175,32 @@ class GlobalParam:
 
     def range_text(self) -> str:
         if self.model:
-            return "{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}"
+            return i18n.tr("{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}")
         return f"[{_fmt(self.lo)}, {_fmt(self.hi)}] {self.unit}".strip()
+
+    def label_text(self) -> str:
+        return self._en("LABELS", self.label)
+
+    def role_text(self) -> str:
+        return self._en_meta(0, self.role)
+
+    def hint_text(self) -> str:
+        return self._en_meta(1, self.hint)
+
+    def detail_text(self) -> str:
+        return self._en_meta(2, self.detail)
+
+    def _en(self, table: str, fallback: str) -> str:
+        if i18n.language() == "en":
+            return getattr(EN, table, {}).get(self.key) or fallback
+        return fallback
+
+    def _en_meta(self, index: int, fallback: str) -> str:
+        if i18n.language() == "en":
+            hit = EN.META.get(self.key)
+            if hit and index < len(hit) and hit[index]:
+                return hit[index]
+        return fallback
 
 
 def _fmt(v: float) -> str:
@@ -426,17 +496,21 @@ FF_VEC_LEN = 7
 # ---------------------------------------------------------------------------
 # 数值校验/钳制
 # ---------------------------------------------------------------------------
-def check_value(lo: float, hi: float, v, model: bool = False, label: str = "值") -> str | None:
+def check_value(lo: float, hi: float, v, model: bool = False,
+                label: str = "") -> str | None:
     """返回错误信息 (None=合法)。model=True 时只允许 0/1。"""
+    label = label or i18n.tr("值")
     if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return f"{label} 须为数值"
+        return i18n.tr("{label} 须为数值", label=label)
     f = float(v)
     if f != f:                                   # NaN
-        return f"{label} 为 NaN"
+        return i18n.tr("{label} 为 NaN", label=label)
     if model:
-        return None if f in (0.0, 1.0, 2.0) else f"{label} 摩擦模型仅允许 0/1/2"
+        return None if f in (0.0, 1.0, 2.0) else \
+            i18n.tr("{label} 摩擦模型仅允许 0/1/2", label=label)
     if not (lo <= f <= hi):
-        return f"{label}={_fmt(f)} 超出范围 [{_fmt(lo)}, {_fmt(hi)}]"
+        return i18n.tr("{label}={value} 超出范围 [{lo}, {hi}]",
+                       label=label, value=_fmt(f), lo=_fmt(lo), hi=_fmt(hi))
     return None
 
 
@@ -460,7 +534,8 @@ def check_joint_limits_relation(joint: dict) -> str | None:
     """给定一个关节的参数 dict, 校验 q_min < q_max。"""
     qmin, qmax = joint.get("q_min"), joint.get("q_max")
     if qmin is not None and qmax is not None and float(qmin) >= float(qmax):
-        return f"关节限位非法: q_min({qmin}) ≥ q_max({qmax})"
+        return i18n.tr("关节限位非法: q_min({qmin}) ≥ q_max({qmax})",
+                       qmin=qmin, qmax=qmax)
     return None
 
 
@@ -497,17 +572,20 @@ def normalize_snapshot(raw) -> dict:
     只做结构 + 数值类型 + 数值范围 校验; 不校验 q_min<q_max (在关节级 list)。
     """
     if not isinstance(raw, dict):
-        raise ValueError("参数文件顶层须为对象 (joints + global)")
+        raise ValueError(i18n.tr("参数文件顶层须为对象 (joints + global)"))
     joints_raw = raw.get("joints")
     if not isinstance(joints_raw, (list, tuple)) or len(joints_raw) != NUM_JOINTS:
-        raise ValueError(f"joints 须为长度 {NUM_JOINTS} 的数组 (J1..J7, 顺序即关节号)")
+        raise ValueError(i18n.tr(
+            "joints 须为长度 {n} 的数组 (J1..J7, 顺序即关节号)", n=NUM_JOINTS))
     joints = []
     for i, jr in enumerate(joints_raw):
         if not isinstance(jr, dict):
-            raise ValueError(f"joints[{i}] 须为对象")
+            raise ValueError(i18n.tr("joints[{i}] 须为对象", i=i))
         name = jr.get("name")
         if name is not None and str(name) != f"J{i + 1}":
-            raise ValueError(f"joints[{i}].name 应为 J{i + 1}, 实际 {name!r}")
+            raise ValueError(i18n.tr(
+                "joints[{i}].name 应为 J{axis}, 实际 {name}",
+                i=i, axis=i + 1, name=repr(name)))
         jd = joint_default(jr)
         for p in JOINT_PARAMS:
             v = jd[p.key]
@@ -525,7 +603,7 @@ def normalize_snapshot(raw) -> dict:
 
     gr = raw.get("global")
     if not isinstance(gr, dict):
-        raise ValueError("global 须为对象")
+        raise ValueError(i18n.tr("global 须为对象"))
     glob = {}
     for key in SCALAR_KEYS:
         gp = GLOBAL_BY_KEY[key]
@@ -541,7 +619,8 @@ def normalize_snapshot(raw) -> dict:
             continue
         arr = gr.get(key)
         if not isinstance(arr, (list, tuple)) or len(arr) != len(gp.subs):
-            raise ValueError(f"global.{key} 须为长度 {len(gp.subs)} 的数组")
+            raise ValueError(i18n.tr("global.{key} 须为长度 {n} 的数组",
+                                     key=key, n=len(gp.subs)))
         vals = []
         for k, v in enumerate(arr):
             err = check_value(gp.lo, gp.hi, v, label=f"global.{key}[{k}]")
@@ -558,10 +637,12 @@ def normalize_snapshot(raw) -> dict:
     if "ff_mask" in gr:
         fm = gr["ff_mask"]
         if isinstance(fm, bool) or not isinstance(fm, (int, float)):
-            raise ValueError("global.ff_mask 须为整数")
+            raise ValueError(i18n.tr("global.ff_mask 须为整数"))
         fmi = int(fm)
         if fmi != float(fm) or not (0 <= fmi <= FF_ALL_MASK):
-            raise ValueError(f"global.ff_mask 须为 [0, {FF_ALL_MASK}] 的整数, 实际 {fm}")
+            raise ValueError(i18n.tr(
+                "global.ff_mask 须为 [0, {mask}] 的整数, 实际 {value}",
+                mask=FF_ALL_MASK, value=fm))
         glob["ff_mask"] = fmi
     return {"joints": joints, "global": glob}
 

@@ -22,9 +22,12 @@ from PyQt5.QtWidgets import (QAbstractItemView, QCheckBox, QComboBox, QDialog,
                              QWidget)
 
 from litetool import hyy_config as HY
+from litetool import i18n
 from litetool import model_io as MIO
 from litetool import param_catalog as C
 from litetool import params_io as PIO
+from litetool.gui.i18n_ui import (TrButton, TrGroupBox, TrLabel, tr_header,
+                                  tr_items, tr_tooltip)
 
 ROLE_VAL = Qt.UserRole + 1          # 单元格 float 值 (显示文本只作编辑入口)
 BG = {0: QColor("#ffffff"), 1: QColor("#fff3bf"),
@@ -96,41 +99,45 @@ class ParamsPage(QWidget):
         lay.setSpacing(6)
 
         bar = QHBoxLayout()
-        self.btn_refresh = QPushButton("刷新当前")
+        self.btn_refresh = TrButton("刷新当前")
         self.btn_refresh.clicked.connect(self._on_refresh)
-        self.btn_apply_row = QPushButton("下发选中行")
+        self.btn_apply_row = TrButton("下发选中行")
         self.btn_apply_row.clicked.connect(lambda: self._apply_rows_selected())
-        self.btn_apply_all = QPushButton("下发全部")
+        self.btn_apply_all = TrButton("下发全部")
         self.btn_apply_all.clicked.connect(lambda: self._apply_rows_selected(all_rows=True))
-        self.btn_import = QPushButton("导入…")
-        self.btn_import.setToolTip("从 YAML/JSON 导入整套参数（须先 [刷新当前]）")
+        self.btn_import = TrButton("导入…")
+        tr_tooltip(self.btn_import, "从 YAML/JSON 导入整套参数（须先 [刷新当前]）")
         self.btn_import.clicked.connect(self._on_import)
-        self.btn_import_hyy = QPushButton("从 HYY 配置导入…")
-        self.btn_import_hyy.setToolTip(
+        self.btn_import_hyy = TrButton("从 HYY 配置导入…")
+        tr_tooltip(
+            self.btn_import_hyy,
             "解析 HYY/SE1 控制器辨识出的 DeviceConfig.yaml, 把参数 + 动力学模型\n"
             "写进固件 (无需重新编译固件)。\n"
             "映射: 摩擦三元组 / 软限位(与 URDF 硬限位取交集) / tau_max / 重力向量\n"
             "      + 模型段 (m/com/I/jm)。\n"
             "需先 [刷新当前] 建立基线 (未映射字段从基线取)。")
         self.btn_import_hyy.clicked.connect(self._on_import_hyy)
-        self.btn_revert_model = QPushButton("回退模型")
-        self.btn_revert_model.setToolTip(
+        self.btn_revert_model = TrButton("回退模型")
+        tr_tooltip(
+            self.btn_revert_model,
             "CMD_REVERT_MODEL (0x37): 只把动力学模型回退到出厂编译期常量,\n"
             "不动其它参数、也不动 flash。\n"
             "⚠ 需失能; 且 flash 里的导入模型仍在 (重新上电会复活),\n"
             "   此后**不要再点固化** —— 那会永久删除它。")
         self.btn_revert_model.clicked.connect(self._on_revert_model)
-        self.btn_export = QPushButton("导出当前")
+        self.btn_export = TrButton("导出当前")
         self.btn_export.clicked.connect(self._on_export)
-        self.btn_save = QPushButton("固化 Flash…")
+        self.btn_save = TrButton("固化 Flash…")
         self.btn_save.clicked.connect(self._on_save_flash)
-        self.btn_reset = QPushButton("恢复出厂…")
-        self.btn_reset.setToolTip(
+        self.btn_reset = TrButton("恢复出厂…")
+        tr_tooltip(
+            self.btn_reset,
             "固件 PARAM_RESET (0x36)：恢复出厂默认 + 失效 flash。\n"
             "固件要求失能态（擦写窗口 CPU 停顿），enable 态会回 ERR 0x04。")
         self.btn_reset.clicked.connect(self._on_reset_factory)
-        self.btn_guide = QPushButton("❓ 调参指南")
-        self.btn_guide.setToolTip("打开[调参指南]页并跳到选中行的参数详解 (纯说明, 无需连接)")
+        self.btn_guide = TrButton("❓ 调参指南")
+        tr_tooltip(self.btn_guide,
+                   "打开[调参指南]页并跳到选中行的参数详解 (纯说明, 无需连接)")
         self.btn_guide.clicked.connect(self._on_open_guide)
         for b in (self.btn_refresh, self.btn_apply_row, self.btn_apply_all,
                   self.btn_import, self.btn_import_hyy, self.btn_revert_model,
@@ -147,10 +154,10 @@ class ParamsPage(QWidget):
         col.setContentsMargins(0, 0, 0, 0)
 
         # 逐关节表
-        g1 = QGroupBox("逐关节参数 (双击编辑; 黄=已改未下发; 红=越界/下发失败)")
+        g1 = TrGroupBox("逐关节参数 (双击编辑; 黄=已改未下发; 红=越界/下发失败)")
         v1 = QVBoxLayout(g1)
         self.table = QTableWidget(len(C.JOINT_PARAMS), 1 + C.NUM_JOINTS)
-        self.table.setHorizontalHeaderLabels(["参数"] + [f"J{i + 1}" for i in range(C.NUM_JOINTS)])
+        tr_header(self.table, ["参数"] + [f"J{i + 1}" for i in range(C.NUM_JOINTS)])
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.DoubleClicked
@@ -161,7 +168,7 @@ class ParamsPage(QWidget):
         for c in range(1, 1 + C.NUM_JOINTS):
             hdr.setSectionResizeMode(c, QHeaderView.Stretch)
         for ri, p in enumerate(C.JOINT_PARAMS):
-            head = QTableWidgetItem(p.label)
+            head = QTableWidgetItem(p.label_text())
             head.setFlags(Qt.ItemIsEnabled)
             head.setToolTip(self._row_tooltip(p))
             head.setBackground(QColor("#eceff4"))
@@ -175,18 +182,19 @@ class ParamsPage(QWidget):
                 self.table.setItem(ri, 1 + j, it)
         self.table.itemChanged.connect(self._on_cell_changed)
         v1.addWidget(self.table)
-        tip = QLabel("提示: [kp/kd/tau_max] 与 [q_min/q_max] 成组下发 (选中任一组员即整组下发);"
-                     " 标 (v2) 的摩擦参数在 friction_model=1 时生效; 行首悬停见写口/范围。")
+        tip = TrLabel("提示: [kp/kd/tau_max] 与 [q_min/q_max] 成组下发 (选中任一组员即整组下发);"
+                      " 标 (v2) 的摩擦参数在 friction_model=1 时生效; 行首悬停见写口/范围。")
         tip.setWordWrap(True)
         v1.addWidget(tip)
         col.addWidget(g1)
 
         # 全局标量 —— 紧凑多列网格 (每格=小标题+控件; 悬停有详解)
-        g2 = QGroupBox("全局参数 (写 0x28 / 读 0x2C) — 悬停各项看详解")
+        g2 = TrGroupBox("全局参数 (写 0x28 / 读 0x2C) — 悬停各项看详解")
         gg = QGridLayout(g2)
         gg.setHorizontalSpacing(8)
         gg.setVerticalSpacing(6)
         self._g_spins = {}
+        self._g_captions = {}
         self._g_model = None
         NCOL = 3
 
@@ -206,14 +214,15 @@ class ParamsPage(QWidget):
             if gp.key == "friction_model":
                 cap = _cap("friction_model 0=v1 / 1=v2 / 2=drag", tt)
                 self._g_model = QComboBox()
-                self._g_model.addItem("v1 — 误差方向 tanh")
-                self._g_model.addItem("v2 — SE1 速度方向")
-                self._g_model.addItem("v2-drag — 拖动专用(零速无增益)")
+                tr_items(self._g_model, [
+                    ("v1 — 误差方向 tanh", 0),
+                    ("v2 — SE1 速度方向", 1),
+                    ("v2-drag — 拖动专用(零速无增益)", 2)])
                 self._g_model.setToolTip(tt)
                 cv.addWidget(cap)
                 cv.addWidget(self._g_model)
             elif gp.is_array:
-                cap = _cap(f"{gp.label}  (x, y, z)", tt)
+                cap = _cap(i18n.tr("{label}  (x, y, z)", label=gp.label_text()), tt)
                 hb = QHBoxLayout()
                 hb.setContentsMargins(0, 0, 0, 0)
                 hb.setSpacing(2)
@@ -221,35 +230,40 @@ class ParamsPage(QWidget):
                 for ax in ("x", "y", "z"):
                     sp = self._mk_spin(gp)
                     sp.setFixedWidth(100)
-                    sp.setToolTip(f"{ax} 分量\n\n{tt}\n\n范围 {gp.range_text()}")
+                    sp.setObjectName(ax)
+                    sp.setToolTip(i18n.tr("{axis} 分量\n\n{detail}\n\n范围 {range}",
+                                          axis=ax, detail=tt,
+                                          range=gp.range_text()))
                     spins.append(sp)
                     hb.addWidget(sp)
                 self._g_spins[gp.key] = spins
                 cv.addWidget(cap)
                 cv.addLayout(hb)
             else:
-                cap = _cap(gp.label, tt)
+                cap = _cap(gp.label_text(), tt)
                 sp = self._mk_spin(gp)
                 sp.setFixedWidth(150)
                 self._g_spins[gp.key] = sp
                 cv.addWidget(cap)
                 cv.addWidget(sp)
+            self._g_captions[gp.key] = cap
             return cell
 
         for k, gp in enumerate(C.GLOBAL_PARAMS):
             cell = _mk_global_cell(gp)
             self._g_cells[gp.key] = cell
             gg.addWidget(cell, k // NCOL, k % NCOL)
-        self.btn_global = QPushButton("下发全局\n(含 ff_mask)")
+        self.btn_global = TrButton("下发全局\n(含 ff_mask)")
         self.btn_global.setMinimumHeight(44)
         self.btn_global.clicked.connect(self._on_apply_global)
-        self.btn_global.setToolTip("把上表全局标量 + 右侧 ff_mask 一次性下发 RAM (0x28/0x27, 每写等 ACK)")
+        tr_tooltip(self.btn_global,
+                   "把上表全局标量 + 右侧 ff_mask 一次性下发 RAM (0x28/0x27, 每写等 ACK)")
         gg.addWidget(self.btn_global, len(C.GLOBAL_PARAMS) // NCOL,
                      len(C.GLOBAL_PARAMS) % NCOL, Qt.AlignTop)
         col.addWidget(g2)
 
         # ff_mask 位 —— 一排小复选框, 缩写显示, 悬停看全名+含义
-        g3 = QGroupBox("ff_mask 前馈使能位 (写 0x27) — 缩写 M/G/I/C/F/Intg/Wall/Q/V, 悬停看含义")
+        g3 = TrGroupBox("ff_mask 前馈使能位 (写 0x27) — 缩写 M/G/I/C/F/Intg/Wall/Q/V, 悬停看含义")
         ffg = QHBoxLayout(g3)
         ffg.setSpacing(8)
         shorts = {"MASTER": "M", "G": "G", "INERTIA": "I", "CORIOLIS": "C",
@@ -268,7 +282,8 @@ class ParamsPage(QWidget):
         # [2026-09-14] "模型来源"常驻显示 —— 操作员唯一能看见"当前在用什么模型"的地方
         # (`store_from_flash` 只在 KIN_BENCH 文本应答里, 不在 100Hz 状态帧)。
         self.lbl_model = QLabel("模型: — (未读)")
-        self.lbl_model.setToolTip(
+        tr_tooltip(
+            self.lbl_model,
             "动力学模型来源。\n"
             "  出厂 = 编译期常量 (dyn_model_data.h / dyn_jm_default.h)\n"
             "  导入 = 经 0x30/0x32/0x33 写入的辨识参数\n"
@@ -289,29 +304,37 @@ class ParamsPage(QWidget):
     @staticmethod
     def _write_desc(p) -> str:
         if p.kind == "ctrl":
-            return "0x22 (kp/kd/tau_max 按关节成组)"
+            return i18n.tr("0x22 (kp/kd/tau_max 按关节成组)")
         if p.kind == "limits":
-            return "0x23 (q_min/q_max 成组, 须 q_min<q_max)"
-        return f"0x26 item {p.item} (7 关节整组)"
+            return i18n.tr("0x23 (q_min/q_max 成组, 须 q_min<q_max)")
+        return i18n.tr("0x26 item {item} (7 关节整组)", item=p.item)
 
     @staticmethod
     def _param_tooltip(p) -> str:
         """role/hint/detail 三合一详细悬停 (与[调参指南]逐项同源)。"""
-        return "\n".join(x for x in (p.role, p.hint, p.detail) if x)
+        return "\n".join(x for x in (p.role_text(), p.hint_text(),
+                                      p.detail_text()) if x)
 
     def _row_tooltip(self, p) -> str:
-        return (f"{p.label} ({p.key}) · 写口 {self._write_desc(p)} · 范围 {p.range_text()}"
-                f"\n\n{self._param_tooltip(p)}")
+        return i18n.tr("{label} ({key}) · 写口 {write} · 范围 {range}\n\n{detail}",
+                       label=p.label_text(), key=p.key,
+                       write=self._write_desc(p), range=p.range_text(),
+                       detail=self._param_tooltip(p))
 
     def _cell_tooltip(self, p, v) -> str:
         base = self._param_tooltip(p)
-        return f"{p.key} = {v!r}\n\n{base}" if v is not None else base
+        return (i18n.tr("{key} = {value}\n\n{detail}", key=p.key,
+                        value=repr(v), detail=base)
+                if v is not None else base)
 
     @staticmethod
     def _ff_tooltip(i, mask, name, label) -> str:
-        detail = C.FF_BIT_DETAIL[i] if i < len(C.FF_BIT_DETAIL) else label
-        return (f"{name}  (bit{i} · 0x{mask:02X})\n{label}\n\n"
-                f"{detail}\n\n改后需 [下发全局] 才生效 (发送前有确认)")
+        detail = C.ff_detail_text(i) if i < len(C.FF_BITS) else label
+        return i18n.tr(
+            "{name}  (bit{bit} · 0x{mask:02X})\n{label}\n\n{detail}\n\n"
+            "改后需 [下发全局] 才生效 (发送前有确认)",
+            name=name, bit=i, mask=mask, label=C.ff_label_text(i),
+            detail=detail)
 
     def _mk_spin(self, gp) -> QDoubleSpinBox:
         sp = QDoubleSpinBox()
@@ -319,7 +342,8 @@ class ParamsPage(QWidget):
         sp.setDecimals(gp.decimals)
         sp.setSingleStep(max((gp.hi - gp.lo) / 100.0, 1e-4))
         tt = self._param_tooltip(gp)
-        sp.setToolTip(f"{tt}\n\n范围 {gp.range_text()}")
+        sp.setToolTip(i18n.tr("{detail}\n\n范围 {range}",
+                              detail=tt, range=gp.range_text()))
         return sp
 
     # ================= 状态 / 会话 =================
@@ -368,7 +392,8 @@ class ParamsPage(QWidget):
                 # 到达前就已经收到 set_online(False), 忙态会短暂卡住; 显式清一次是
                 # 零成本的保险 (本项目已被"页面永久卡死只能重启进程"坑过一次)。
                 self._busy = False
-                self.status.setText("离线 — 断开或 500ms 无状态帧; 重连后自动恢复")
+                self.status.setText(i18n.tr(
+                    "离线 — 断开或 500ms 无状态帧; 重连后自动恢复"))
             self._refresh_state()
 
     def _model_source_text(self, text: str):
@@ -387,7 +412,7 @@ class ParamsPage(QWidget):
 
     def _refresh_state(self):
         if self._submit is None:
-            self.status.setText("未连接 — 连接后可用（参数读写经 litearm）")
+            self.status.setText(i18n.tr("未连接 — 连接后可用（参数读写经 litearm）"))
             self._set_ops_enabled(False)
             return
         if not self._online:
@@ -397,8 +422,8 @@ class ParamsPage(QWidget):
         self._set_ops_enabled(idle)
         if idle and not self._device_synced:
             # Critical-1: 未读回设备数据前禁一切下发 (防控件默认值盲发)
-            self.status.setText("已连接 — 尚未读取设备参数, 请先 [刷新当前];"
-                                " 在此之前禁下发/编辑")
+            self.status.setText(i18n.tr(
+                "已连接 — 尚未读取设备参数, 请先 [刷新当前]; 在此之前禁下发/编辑"))
 
     def _set_ops_enabled(self, on: bool):
         """on=在线且空闲; 还需 _device_synced 才允许需要设备基线的下发/编辑。"""
@@ -428,16 +453,18 @@ class ParamsPage(QWidget):
 
     def _pre_op(self, what: str) -> bool:
         if self._submit is None:
-            self.status.setText("未连接")
+            self.status.setText(i18n.tr("未连接"))
             return False
         if not self._online:
-            self.status.setText("离线, 忽略操作")
+            self.status.setText(i18n.tr("离线, 忽略操作"))
             return False
         if self._busy:
-            self.status.setText(f"忙: 前一条调参操作仍在执行, 已忽略 {what}")
+            self.status.setText(i18n.tr("忙: 前一条调参操作仍在执行, 已忽略 {what}",
+                                        what=what))
             return False
         if self._ext_busy:
-            self.status.setText("忙: 运动/控制命令在途 (MainWindow), 已忽略调参操作")
+            self.status.setText(i18n.tr(
+                "忙: 运动/控制命令在途 (MainWindow), 已忽略调参操作"))
             return False
         return True
 
@@ -448,14 +475,14 @@ class ParamsPage(QWidget):
         if not self._pre_op(what):
             return
         self._set_busy_ui(True)
-        self.status.setText(f"执行中: {what} …")
-        self._submit(f"调参[{what}]", worker,
+        self.status.setText(i18n.tr("执行中: {what} …", what=what))
+        self._submit(i18n.tr("调参[{what}]", what=what), worker,
                      lambda res: self._unpack(res, what, sig))
 
     def _unpack(self, res, what, sig):
         if res is None or not res.ok:
-            self._log(f"[ERR] 调参[{what}] 失败: "
-                      f"{res.error if res is not None else '未执行'}")
+            self._log(i18n.tr("[ERR] 调参[{what}] 失败: {err}", what=what,
+                              err=res.error if res is not None else i18n.tr("未执行")))
             sig.emit(None)
             return
         sig.emit(res.value)
@@ -463,37 +490,39 @@ class ParamsPage(QWidget):
     # ================= 读回 =================
     # ================= [2026-09-14] 从 HYY 配置导入 =================
     def _on_import_hyy(self):
-        if not self._pre_op("导入 HYY 配置"):
+        if not self._pre_op(i18n.tr("导入 HYY 配置")):
             return
-        if not self._require_device_sync("导入 HYY 配置"):
+        if not self._require_device_sync(i18n.tr("导入 HYY 配置")):
             return
         self._model_supported = self._model_supported   # 保留既有三态
         if self._model_supported is False:
             QMessageBox.critical(
-                self, "固件不支持",
-                "本固件的动力学模型是编译期常量, 没有在线导入能力 (0x34 不可用)。\n\n"
-                "请先升级固件到含 0x30/0x32/0x33/0x34/0x35 命令的版本。")
+                self, i18n.tr("固件不支持"),
+                i18n.tr("本固件的动力学模型是编译期常量, 没有在线导入能力 (0x34 不可用)。"
+                        "\n\n请先升级固件到含 0x30/0x32/0x33/0x34/0x35 命令的版本。"))
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择 HYY/SE1 辨识配置", "", "DeviceConfig (*.yaml *.yml);;所有文件 (*)")
+            self, i18n.tr("选择 HYY/SE1 辨识配置"), "",
+            i18n.tr("DeviceConfig (*.yaml *.yml);;所有文件 (*)"))
         if not path:
             return
         try:
             cfg = HY.parse_hyy_config(path)
         except Exception as e:                      # noqa: BLE001
-            QMessageBox.critical(self, "配置解析失败", str(e))
-            self._log(f"[ERR] 调参[导入HYY] {e}")
+            QMessageBox.critical(self, i18n.tr("配置解析失败"), str(e))
+            self._log(i18n.tr("[ERR] 调参[导入HYY] {err}", err=e))
             return
         try:
             snap, model, notes = HY.to_snapshot(cfg, self._baseline)
         except Exception as e:                      # noqa: BLE001
-            QMessageBox.critical(self, "映射失败", str(e))
-            self._log(f"[ERR] 调参[导入HYY] {e}")
+            QMessageBox.critical(self, i18n.tr("映射失败"), str(e))
+            self._log(i18n.tr("[ERR] 调参[导入HYY] {err}", err=e))
             return
         errs = MIO.validate_model(model)
         if errs:
-            QMessageBox.critical(self, "模型参数非法",
-                                 "以下项不合法, 已拒绝导入:\n  " + "\n  ".join(errs[:12]))
+            QMessageBox.critical(self, i18n.tr("模型参数非法"),
+                                 i18n.tr("以下项不合法, 已拒绝导入:\n  {items}",
+                                         items="\n  ".join(errs[:12])))
             return
         unmapped = HY.unmapped_report(cfg)
 
@@ -504,18 +533,21 @@ class ParamsPage(QWidget):
         asym = HY.suspicious_joints(cfg)
         if asym:
             if not self._confirm_friction_asymmetry(asym):
-                self.status.setText("导入已取消 —— 摩擦不对称告警")
-                self._log("[WARN] 调参[导入HYY] 操作员因摩擦不对称**取消**导入: "
-                          + ", ".join(f"J{x.joint}" for x in asym))
+                self.status.setText(i18n.tr("导入已取消 —— 摩擦不对称告警"))
+                self._log(i18n.tr(
+                    "[WARN] 调参[导入HYY] 操作员因摩擦不对称**取消**导入: {joints}",
+                    joints=", ".join(f"J{x.joint}" for x in asym)))
                 return
             notes = list(notes) + [
-                "⚠ 摩擦严重不对称 (操作员已确认继续): "
-                + " · ".join(f"J{x.joint} {x.ratio:.2f}×" for x in asym)]
+                i18n.tr("⚠ 摩擦严重不对称 (操作员已确认继续): {items}",
+                        items=" · ".join(f"J{x.joint} {x.ratio:.2f}×" for x in asym))]
 
         with open(path, "r", encoding="utf-8") as f:
             src_text = f.read()
-        self._log(f"[INFO] 调参[导入HYY] {os.path.basename(path)} "
-                  f"sha={cfg.sha256_16} v{cfg.version} — 未映射 {len(unmapped)} 项")
+        self._log(i18n.tr(
+            "[INFO] 调参[导入HYY] {name} sha={sha} v{version} — 未映射 {n} 项",
+            name=os.path.basename(path), sha=cfg.sha256_16,
+            version=cfg.version, n=len(unmapped)))
         self._do_import_hyy(path, snap, model, notes, unmapped)
 
     def _confirm_friction_asymmetry(self, items) -> bool:
@@ -527,23 +559,24 @@ class ParamsPage(QWidget):
         head, detail = HY.asymmetry_message(items)
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Critical)
-        box.setWindowTitle("⚠ 机械臂硬件可能异常")
+        box.setWindowTitle(i18n.tr("⚠ 机械臂硬件可能异常"))
         box.setText(head)
         # 全是富文本: `detail` 由 asymmetry_message 产出 (已含 <br>/<b>), 故此处的
         # 换行也必须用 <br> —— 见该函数 docstring 里的说明 (纯文本模式 vs 富文本模式)。
         box.setInformativeText(
-            f"{detail}<br><br>"
-            "同一关节正、反两向的摩擦力本应大致对称。相差超过一倍, 通常意味着"
-            "机械上已经出了问题:"
-            "<br>&nbsp;&nbsp;&nbsp;&nbsp;· 轴承发卡 / 减速器磨损 / 异物"
-            "<br>&nbsp;&nbsp;&nbsp;&nbsp;· 预紧异常"
-            "<br>&nbsp;&nbsp;&nbsp;&nbsp;· 或辨识时该关节被外力干扰 "
-            "—— 那种情况下本次参数本身也不可信"
-            "<br><br><b>⚠ 导入参数不会修好机械问题。</b>"
-            "<br>建议先人工检查这些关节 (手动转动感受阻力、听异响、测温升), 再决定是否继续。"
-            "<br><br>继续导入不会造成额外损害; 取消则可先去排查。")
-        btn_go = box.addButton("我已知晓，仍要导入", QMessageBox.AcceptRole)
-        btn_cancel = box.addButton("取消 (先去排查)", QMessageBox.RejectRole)
+            detail + "<br><br>" + i18n.tr(
+                "同一关节正、反两向的摩擦力本应大致对称。相差超过一倍, 通常意味着"
+                "机械上已经出了问题:"
+                "<br>&nbsp;&nbsp;&nbsp;&nbsp;· 轴承发卡 / 减速器磨损 / 异物"
+                "<br>&nbsp;&nbsp;&nbsp;&nbsp;· 预紧异常"
+                "<br>&nbsp;&nbsp;&nbsp;&nbsp;· 或辨识时该关节被外力干扰 "
+                "—— 那种情况下本次参数本身也不可信"
+                "<br><br><b>⚠ 导入参数不会修好机械问题。</b>"
+                "<br>建议先人工检查这些关节 (手动转动感受阻力、听异响、测温升), "
+                "再决定是否继续。"
+                "<br><br>继续导入不会造成额外损害; 取消则可先去排查。"))
+        btn_go = box.addButton(i18n.tr("我已知晓，仍要导入"), QMessageBox.AcceptRole)
+        btn_cancel = box.addButton(i18n.tr("取消 (先去排查)"), QMessageBox.RejectRole)
         box.setDefaultButton(btn_cancel)
         box.setEscapeButton(btn_cancel)
         # 把「继续」做得不像是随手可点的那一个
@@ -551,9 +584,11 @@ class ParamsPage(QWidget):
                           "QLabel{font-size:13px;}")
         box.exec_()
         go = box.clickedButton() is btn_go
-        self._log("[WARN] 调参[导入HYY] 摩擦不对称 "
-                  + ("—— 操作员选择**继续**" if go else "—— 操作员选择取消")
-                  + ": " + ", ".join(f"J{x.joint}({x.ratio:.2f}×)" for x in items))
+        self._log(i18n.tr(
+            "[WARN] 调参[导入HYY] 摩擦不对称 {choice}: {items}",
+            choice=(i18n.tr("—— 操作员选择**继续**") if go
+                    else i18n.tr("—— 操作员选择取消")),
+            items=", ".join(f"J{x.joint}({x.ratio:.2f}×)" for x in items)))
         return go
 
     def _do_import_hyy(self, path, snap, model, notes, unmapped):
@@ -563,10 +598,10 @@ class ParamsPage(QWidget):
         st = self._st
         if st is not None and getattr(st, "enabled", False):
             QMessageBox.warning(
-                self, "需先失能",
-                "动力学模型 commit 要求失能态 (固件 0x32 门控)。\n\n"
-                "请先在 [控制] 页失能, 再重跑导入。\n"
-                "（本次未发出任何 0x30 帧, 暂存区未被污染。）")
+                self, i18n.tr("需先失能"),
+                i18n.tr("动力学模型 commit 要求失能态 (固件 0x32 门控)。\n\n"
+                        "请先在 [控制] 页失能, 再重跑导入。\n"
+                        "（本次未发出任何 0x30 帧, 暂存区未被污染。）"))
             return
 
         # 2) 三段 diff (关节 / 全局 / 模型)
@@ -575,41 +610,44 @@ class ParamsPage(QWidget):
                               model_diffs=mdiff, model_baseline=self._model_baseline,
                               model_new=model, notes=notes, unmapped=unmapped)
         if dlg.exec_() != QDialog.Accepted:
-            self.status.setText("导入已取消")
+            self.status.setText(i18n.tr("导入已取消"))
             return
         flash_save = dlg.save_checkbox.isChecked()
-        self._log(f"[INFO] 调参[导入HYY] 差异 {len(dlg.diffs)} 项 + 模型 {len(mdiff)} 项, "
-                  f"固化={flash_save}")
+        self._log(i18n.tr(
+            "[INFO] 调参[导入HYY] 差异 {diffs} 项 + 模型 {models} 项, 固化={save}",
+            diffs=len(dlg.diffs), models=len(mdiff), save=flash_save))
         self._apply_hyy_snapshot(snap, model, flash_save=flash_save)
 
     def _on_revert_model(self):
-        if not self._pre_op("回退模型"):
+        if not self._pre_op(i18n.tr("回退模型")):
             return
-        if not self._require_device_sync("回退模型"):
+        if not self._require_device_sync(i18n.tr("回退模型")):
             return
         if QMessageBox.warning(
-                self, "确认回退模型",
-                "把动力学模型回退到**出厂编译期常量** (含 jm)。\n\n"
-                "· 不动其它参数、不动 flash\n"
-                "· ⚠ flash 里的导入模型仍在 —— **重新上电会复活**\n"
-                "· ⚠ 此后不要再点 [固化 Flash] —— 那会永久删除 flash 里的导入模型\n"
-                "· 需失能态",
+                self, i18n.tr("确认回退模型"),
+                i18n.tr("把动力学模型回退到**出厂编译期常量** (含 jm)。\n\n"
+                        "· 不动其它参数、不动 flash\n"
+                        "· ⚠ flash 里的导入模型仍在 —— **重新上电会复活**\n"
+                        "· ⚠ 此后不要再点 [固化 Flash] —— 那会永久删除 flash 里的导入模型\n"
+                        "· 需失能态"),
                 QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Cancel) != QMessageBox.Ok:
             return
-        self._start("回退模型", lambda arm: MIO.revert_model(arm), self._sig_model_revert)
+        self._start(i18n.tr("回退模型"), lambda arm: MIO.revert_model(arm),
+                    self._sig_model_revert)
 
     def _on_model_revert_done(self, res):
         self._set_busy_ui(False)
         ok, code = res if isinstance(res, tuple) else (False, None)
         if ok:
-            self.status.setText("模型已回退到出厂编译期常量 (RAM)。⚠ 不要再点固化 —— "
-                                "那会永久删除 flash 里的导入模型。")
-            self._log("[OK] 调参[回退模型] 完成")
+            self.status.setText(i18n.tr(
+                "模型已回退到出厂编译期常量 (RAM)。⚠ 不要再点固化 —— "
+                "那会永久删除 flash 里的导入模型。"))
+            self._log(i18n.tr("[OK] 调参[回退模型] 完成"))
         else:
-            self.status.setText(f"回退失败: {MIO.err_text(code)}")
-            self._log(f"[ERR] 调参[回退模型] {MIO.err_text(code)}")
+            self.status.setText(i18n.tr("回退失败: {err}", err=MIO.err_text(code)))
+            self._log(i18n.tr("[ERR] 调参[回退模型] {err}", err=MIO.err_text(code)))
         self._model_baseline = None
-        self._start("读模型状态", MIO.read_model, self._sig_model_after_revert)
+        self._start(i18n.tr("读模型状态"), MIO.read_model, self._sig_model_after_revert)
 
     def _on_model_after_revert(self, m):
         self._set_busy_ui(False)
@@ -625,7 +663,7 @@ class ParamsPage(QWidget):
             # "任何一项读不到即抛 OSError ⇒ 整页死掉", 而模型是**可选**能力,
             # 不能让它把 [刷新当前] 拖垮 (那是 D14 的教训)。
             return {"snap": snap, "model": MIO.read_model_safe(arm)}
-        self._start("刷新当前", worker, self._sig_refreshed)
+        self._start(i18n.tr("刷新当前"), worker, self._sig_refreshed)
 
     def _on_refreshed(self, res):
         self._set_busy_ui(False)
@@ -638,11 +676,12 @@ class ParamsPage(QWidget):
         snap = res
         if snap is None:
             if self._pending_export:
-                self.status.setText("导出失败 — 读回为空 (固件需 27961a1+)")
+                self.status.setText(i18n.tr("导出失败 — 读回为空 (固件需 27961a1+)"))
                 self._pending_export = None
             else:
-                self.status.setText("刷新失败 — 请检查串口/固件 (读回需固件 27961a1+);"
-                                    " 设备参数未确认前禁下发")
+                self.status.setText(i18n.tr(
+                    "刷新失败 — 请检查串口/固件 (读回需固件 27961a1+);"
+                    " 设备参数未确认前禁下发"))
             return
         self._apply_supported(snap.get("supported"))
         self._loading = True
@@ -663,17 +702,21 @@ class ParamsPage(QWidget):
             path, self._pending_export = self._pending_export, None
             try:
                 PIO.dump_snapshot(snap, path)
-                self.status.setText(f"已导出到 {path} — 同文件再导入时 diff 应为空")
-                self._log(f"[OK] 调参[导出] 写 {path}")
+                self.status.setText(i18n.tr(
+                    "已导出到 {path} — 同文件再导入时 diff 应为空", path=path))
+                self._log(i18n.tr("[OK] 调参[导出] 写 {path}", path=path))
             except Exception as e:  # noqa: BLE001
-                self.status.setText(f"导出写入失败: {e}")
-                self._log(f"[ERR] 调参[导出] {e}")
+                self.status.setText(i18n.tr("导出写入失败: {err}", err=e))
+                self._log(i18n.tr("[ERR] 调参[导出] {err}", err=e))
             return
         n_j = len([r for r in snap["joints"] if r.get("kp") is not None])
-        self.status.setText(f"刷新完成 — {n_j} 关节 × {len(C.JOINT_PARAMS)} 项 + 全局"
-                            f" (ff_mask={snap['global']['ff_mask']} = 0x"
-                            f"{snap['global']['ff_mask']:X}); 已允许编辑/下发")
-        self._log("[OK] 调参[刷新] 读回全量完成")
+        self.status.setText(i18n.tr(
+            "刷新完成 — {n} 关节 × {params} 项 + 全局"
+            " (ff_mask={mask} = 0x{mask_hex}); 已允许编辑/下发",
+            n=n_j, params=len(C.JOINT_PARAMS),
+            mask=snap['global']['ff_mask'],
+            mask_hex=f"{snap['global']['ff_mask']:X}"))
+        self._log(i18n.tr("[OK] 调参[刷新] 读回全量完成"))
 
     def _on_model_probe(self, val):
         """模型能力探测回调 —— 保留 (当前实现把读模型并进了 [刷新当前] 的 worker)。"""
@@ -687,18 +730,67 @@ class ParamsPage(QWidget):
         if self._model_baseline is not None:
             st = self._model_baseline.get("status")
         if self._model_supported is False:
-            self._model_source_text("模型: 固件不支持在线导入 (0x34 不可用) —— 请升级固件")
+            self._model_source_text(i18n.tr(
+                "模型: 固件不支持在线导入 (0x34 不可用) —— 请升级固件"))
             return
         if st is None:
-            self._model_source_text("模型: — (未读)")
+            self._model_source_text(i18n.tr("模型: — (未读)"))
             return
-        src = "导入/覆盖" if st.override else "出厂(编译期常量)"
+        src = i18n.tr("导入/覆盖") if st.override else i18n.tr("出厂(编译期常量)")
         extra = []
         if st.staged_mask:
-            extra.append(f"暂存 0x{st.staged_mask:03X}")
+            extra.append(i18n.tr("暂存 0x{mask:03X}", mask=st.staged_mask))
         if st.dirty:
-            extra.append("未固化")
-        self._model_source_text(f"模型: {src}" + (f" · {' · '.join(extra)}" if extra else ""))
+            extra.append(i18n.tr("未固化"))
+        self._model_source_text(
+            i18n.tr("模型: {src}", src=src)
+            + (i18n.tr(" · {extra}", extra=" · ".join(extra)) if extra else ""))
+
+    def retranslate(self) -> None:
+        """切语言：重写行标题/单元格 tooltip/全局格标题，再按状态刷新标签。"""
+        for ri, p in enumerate(C.JOINT_PARAMS):
+            head = self.table.item(ri, 0)
+            if head is not None:
+                head.setText(p.label_text())
+                head.setToolTip(self._row_tooltip(p))
+            for j in range(C.NUM_JOINTS):
+                val = self._cell_val(ri, j)
+                item = self.table.item(ri, 1 + j)
+                if item is not None:
+                    item.setToolTip(self._cell_tooltip(p, val) if val is not None
+                                    else (self._param_tooltip(p)
+                                          if not item.text() == "—" else
+                                          i18n.tr("本机没有这个关节（台架 1J 只有 J1）")))
+        if self._g_model is not None:
+            self._g_model.setToolTip(self._param_tooltip(C.GLOBAL_BY_KEY["friction_model"]))
+        for gp in C.GLOBAL_PARAMS:
+            cap = self._g_captions.get(gp.key)
+            if cap is None:
+                continue
+            if gp.key == "friction_model":
+                cap.setText("friction_model 0=v1 / 1=v2 / 2=drag")
+            elif gp.is_array:
+                cap.setText(i18n.tr("{label}  (x, y, z)", label=gp.label_text()))
+            else:
+                cap.setText(gp.label_text())
+            cap.setToolTip(self._param_tooltip(gp))
+            spins = self._g_spins.get(gp.key)
+            for sp in (spins if isinstance(spins, list) else [spins]):
+                if sp is None:
+                    continue
+                if gp.is_array:
+                    sp.setToolTip(i18n.tr(
+                        "{axis} 分量\n\n{detail}\n\n范围 {range}",
+                        axis=sp.objectName() or "x", detail=self._param_tooltip(gp),
+                        range=gp.range_text()))
+                else:
+                    sp.setToolTip(i18n.tr("{detail}\n\n范围 {range}",
+                                          detail=self._param_tooltip(gp),
+                                          range=gp.range_text()))
+        for i, (mask, name, label) in enumerate(C.FF_BITS):
+            self._ff_cbs[i].setToolTip(self._ff_tooltip(i, mask, name, label))
+        self._update_model_label()
+        self._refresh_state()
 
     def _apply_global_to_ui(self, g: dict):
         self._synced_glob = {k: (list(v) if isinstance(v, list) else v)
@@ -768,7 +860,7 @@ class ParamsPage(QWidget):
             it.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)   # 去掉 Editable
             it.setForeground(QColor("#9aa4ae"))
             it.setBackground(QColor("#f2f4f6"))
-            it.setToolTip("本机没有这个关节（台架 1J 只有 J1）")
+            it.setToolTip(i18n.tr("本机没有这个关节（台架 1J 只有 J1）"))
             return
         it.setFlags(Qt.ItemIsEnabled | Qt.ItemIsEditable | Qt.ItemIsSelectable)
         it.setText(f"{float(val):.{p.decimals}f}")
@@ -835,7 +927,7 @@ class ParamsPage(QWidget):
         cur = C.bits_to_mask([cb.isChecked() for cb in self._ff_cbs])
         base = self._synced_glob["ff_mask"] if self._synced_glob else None
         if base is not None and cur != base:
-            self.status.setText("ff_mask 已改动 — 下发全局时将弹确认框")
+            self.status.setText(i18n.tr("ff_mask 已改动 — 下发全局时将弹确认框"))
 
     # ================= 逐关节矩阵 & 下发 =================
     def _ui_matrix(self) -> list:
@@ -855,13 +947,16 @@ class ParamsPage(QWidget):
                     continue          # 板子没有这项: 不显示也不校验
                 v = row[p.key]
                 if v is None:
-                    raise ValueError(f"J{j + 1}.{p.key} 为空 — 请先 [刷新当前]")
+                    raise ValueError(i18n.tr(
+                        "J{axis}.{key} 为空 — 请先 [刷新当前]",
+                        axis=j + 1, key=p.key))
                 err = C.check_joint(p, v, joint_idx=j)
                 if err:
                     raise ValueError(err)
             rel = C.check_joint_limits_relation(row)
             if rel:
-                raise ValueError(f"J{j + 1}: {rel}")
+                raise ValueError(i18n.tr("J{axis}: {detail}", axis=j + 1,
+                                         detail=rel))
             mat.append(row)
         return mat
 
@@ -881,7 +976,8 @@ class ParamsPage(QWidget):
 
     def _require_device_sync(self, what: str) -> bool:
         if not self._device_synced:
-            self.status.setText(f"未读取设备数据 — 请先 [刷新当前], 已拒绝 {what}")
+            self.status.setText(i18n.tr(
+                "未读取设备数据 — 请先 [刷新当前], 已拒绝 {what}", what=what))
             return False
         return True
 
@@ -892,12 +988,14 @@ class ParamsPage(QWidget):
         # 不等于安全，只等于"不知道"。（状态流 100Hz，实践中几乎不会走到这里。）
         if st is None or st.enabled:
             if QMessageBox.warning(
-                    self, "臂已使能 — 写确认",
-                    f"{desc}\n\n机械臂处于 enable 态, 该写入会立即作用于控制律/前馈"
-                    " (限位墙/积分/摩擦等随写即变)。\n确认继续?",
+                    self, i18n.tr("臂已使能 — 写确认"),
+                    i18n.tr("{desc}\n\n机械臂处于 enable 态, "
+                            "该写入会立即作用于控制律/前馈"
+                            " (限位墙/积分/摩擦等随写即变)。\n确认继续?",
+                            desc=desc),
                     QMessageBox.Ok | QMessageBox.Cancel,
                     QMessageBox.Cancel) != QMessageBox.Ok:
-                self.status.setText("已取消 — enable 态写确认未通过")
+                self.status.setText(i18n.tr("已取消 — enable 态写确认未通过"))
                 return False
         return True
 
@@ -907,7 +1005,8 @@ class ParamsPage(QWidget):
         if st is None or not st.joints:
             # 拿不到当前 q 就没法确认新限位包含它 —— 拒绝，而不是"交给固件"。
             # 限位写一旦即刻越限会直接 POS_VIOL/FAULT，不能靠猜。
-            return "拿不到当前关节角，无法校验新限位是否包含当前 q — 等一帧状态再试"
+            return i18n.tr(
+                "拿不到当前关节角，无法校验新限位是否包含当前 q — 等一帧状态再试")
 
         n = min(st.n, C.NUM_JOINTS, len(mat))
         for j in range(n):
@@ -916,8 +1015,10 @@ class ParamsPage(QWidget):
             qmin, qmax = mat[j]["q_min"], mat[j]["q_max"]
             q = st.joints[j].q
             if not (qmin <= q <= qmax):
-                return (f"J{j + 1} 当前 q={q:.4f} rad 不在新限位 [{qmin:.4f}, {qmax:.4f}]"
-                        " 内 — 拒绝下发 (防即时 POS_VIOL/FAULT)")
+                return i18n.tr(
+                    "J{axis} 当前 q={q:.4f} rad 不在新限位 [{qmin:.4f}, {qmax:.4f}]"
+                    " 内 — 拒绝下发 (防即时 POS_VIOL/FAULT)",
+                    axis=j + 1, q=q, qmin=qmin, qmax=qmax)
         return None
 
     def _apply_rows_selected(self, all_rows: bool = False):
@@ -925,13 +1026,14 @@ class ParamsPage(QWidget):
             return
         keys = self._supported_joint_keys() if all_rows else self._selected_row_keys()
         if not keys:
-            self.status.setText("未选中行 — 请先点选一行 (或用 [下发全部])")
+            self.status.setText(i18n.tr(
+                "未选中行 — 请先点选一行 (或用 [下发全部])"))
             return
         try:
             mat = self._ui_matrix()
         except ValueError as e:
-            QMessageBox.warning(self, "下发校验未通过", str(e))
-            self.status.setText(f"校验未通过: {e}")
+            QMessageBox.warning(self, i18n.tr("下发校验未通过"), str(e))
+            self.status.setText(i18n.tr("校验未通过: {err}", err=e))
             return
         group = set(keys)
         for k in list(keys):
@@ -942,13 +1044,14 @@ class ParamsPage(QWidget):
         if "limits" in kinds:
             err = self._limits_error(mat)
             if err:
-                QMessageBox.warning(self, "限位写被拒绝", err)
+                QMessageBox.warning(self, i18n.tr("限位写被拒绝"), err)
                 self.status.setText(err)
                 return
-        if not self._confirm_enabled_write("逐关节/成组参数下发 (0x22/0x23/0x26)"):
+        if not self._confirm_enabled_write(
+                i18n.tr("逐关节/成组参数下发 (0x22/0x23/0x26)")):
             return
         ops = self._build_row_ops(group, mat, self._sup_vec)
-        self._start(f"下发 {len(group)} 行",
+        self._start(i18n.tr("下发 {n} 行", n=len(group)),
                     lambda arm: PIO.run_ops(arm, ops), self._sig_rows_done)
 
     @staticmethod
@@ -1008,12 +1111,15 @@ class ParamsPage(QWidget):
         for (rk, j), code in failc.items():
             self._paint(JOINT_KEYS.index(rk), j, 3)
             txt = PIO.err_text(code)
-            self._log(f"[ERR] 调参[下发] {rk} J{j + 1}: {txt}")
+            self._log(i18n.tr("[ERR] 调参[下发] {key} J{axis}: {text}",
+                              key=rk, axis=j + 1, text=txt))
         if failc:
-            self.status.setText(f"下发完成: 成功 {len(okc)} 项, 失败 {len(failc)} 项 (格已标红)")
+            self.status.setText(i18n.tr(
+                "下发完成: 成功 {ok} 项, 失败 {fail} 项 (格已标红)",
+                ok=len(okc), fail=len(failc)))
         else:
-            self.status.setText(f"下发完成 — {len(okc)} 项全部 ACK")
-            self._log(f"[OK] 调参[下发] {len(okc)} 项全部 ACK")
+            self.status.setText(i18n.tr("下发完成 — {n} 项全部 ACK", n=len(okc)))
+            self._log(i18n.tr("[OK] 调参[下发] {n} 项全部 ACK", n=len(okc)))
 
     # ================= 全局下发 =================
     def _global_from_ui(self) -> dict:
@@ -1031,23 +1137,25 @@ class ParamsPage(QWidget):
         return g
 
     def _on_apply_global(self):
-        if not self._require_device_sync("下发全局"):
+        if not self._require_device_sync(i18n.tr("下发全局")):
             return
         g = self._global_from_ui()
-        if not self._confirm_enabled_write("全局参数/前馈下发 (0x28 + ff_mask 0x27)"):
+        if not self._confirm_enabled_write(
+                i18n.tr("全局参数/前馈下发 (0x28 + ff_mask 0x27)")):
             return
         base = self._synced_glob
         mask_changed = base is None or base["ff_mask"] != g["ff_mask"]
         if mask_changed:
             if QMessageBox.warning(
-                    self, "确认 ff_mask 改动",
-                    f"ff_mask 将改为 {g['ff_mask']} (0x{g['ff_mask']:X})\n\n"
-                    "前馈位改动会立即影响控制律输出, 确认下发?",
+                    self, i18n.tr("确认 ff_mask 改动"),
+                    i18n.tr("ff_mask 将改为 {mask} (0x{mask_hex})\n\n"
+                            "前馈位改动会立即影响控制律输出, 确认下发?",
+                            mask=g['ff_mask'], mask_hex=f"{g['ff_mask']:X}"),
                     QMessageBox.Ok | QMessageBox.Cancel,
                     QMessageBox.Cancel) != QMessageBox.Ok:
-                self.status.setText("已取消 ff_mask 下发")
+                self.status.setText(i18n.tr("已取消 ff_mask 下发"))
                 return
-        self._start("下发全局",
+        self._start(i18n.tr("下发全局"),
                     lambda arm: PIO.send_global(arm, g), self._sig_global_done)
 
     def _on_global_done(self, res):
@@ -1087,21 +1195,24 @@ class ParamsPage(QWidget):
         if not mask_ok:
             fails.append("ff_mask")
         if not fails:
-            self.status.setText("全局下发完成 — 全部 ACK")
-            self._log("[OK] 调参[全局] 全部 ACK")
+            self.status.setText(i18n.tr("全局下发完成 — 全部 ACK"))
+            self._log(i18n.tr("[OK] 调参[全局] 全部 ACK"))
         else:
-            self.status.setText(f"全局下发部分失败: {', '.join(fails)}")
-            self._log(f"[ERR] 调参[全局] 失败项: {', '.join(fails)}")
+            self.status.setText(i18n.tr("全局下发部分失败: {items}",
+                                        items=", ".join(fails)))
+            self._log(i18n.tr("[ERR] 调参[全局] 失败项: {items}",
+                              items=", ".join(fails)))
 
     # ================= 导入 / 批量 =================
     def _on_import(self):
-        if not self._pre_op("导入"):
+        if not self._pre_op(i18n.tr("导入")):
             return
         # 先把闸门说清楚, 别等用户选完文件、看完 diff 才拒绝
-        if not self._require_device_sync("导入"):
+        if not self._require_device_sync(i18n.tr("导入")):
             return
         path, _ = QFileDialog.getOpenFileName(
-            self, "选择参数文件", "", "参数文件 (*.yaml *.yml *.json);;所有文件 (*)")
+            self, i18n.tr("选择参数文件"), "",
+            i18n.tr("参数文件 (*.yaml *.yml *.json);;所有文件 (*)"))
         if not path:
             return
         try:
@@ -1109,50 +1220,59 @@ class ParamsPage(QWidget):
                 raw = yaml.safe_load(f)
             snap = C.normalize_snapshot(raw)
         except Exception as e:  # noqa: BLE001
-            QMessageBox.critical(self, "导入失败", str(e))
+            QMessageBox.critical(self, i18n.tr("导入失败"), str(e))
             return
         dlg = ParamDiffDialog(self, self._baseline, snap)
         if dlg.exec_() != QDialog.Accepted:
-            self.status.setText("导入已取消")
+            self.status.setText(i18n.tr("导入已取消"))
             return
         flash_save = dlg.save_checkbox.isChecked()
         if flash_save:
             if QMessageBox.warning(
-                    self, "确认下发后固化 Flash",
-                    "将先下发整套参数到 RAM, 随后调用 param_save 固化到 Flash。\n\n"
-                    "固件要求关节处于 disable 态才会执行擦写 (enable 态返回 ERR 0x04)。\n"
-                    "请确认已先在 [控制] 页 [失能]?",
+                    self, i18n.tr("确认下发后固化 Flash"),
+                    i18n.tr("将先下发整套参数到 RAM, 随后调用 param_save 固化到 Flash。"
+                            "\n\n固件要求关节处于 disable 态才会执行擦写 "
+                            "(enable 态返回 ERR 0x04)。\n"
+                            "请确认已先在 [控制] 页 [失能]?"),
                     QMessageBox.Ok | QMessageBox.Cancel,
                     QMessageBox.Cancel) != QMessageBox.Ok:
                 flash_save = False
-                self.status.setText("已取消固化选项, 仅下发 RAM")
-        self._log(f"[INFO] 调参[导入] {path}: 差异 {len(dlg.diffs)} 项,"
-                  f" 固化={flash_save}")
+                self.status.setText(i18n.tr("已取消固化选项, 仅下发 RAM"))
+        self._log(i18n.tr(
+            "[INFO] 调参[导入] {path}: 差异 {n} 项, 固化={save}",
+            path=path, n=len(dlg.diffs), save=flash_save))
         self._apply_full_snapshot(snap, flash_save=flash_save)
 
     def _apply_hyy_snapshot(self, snap: dict, model: dict, flash_save: bool = False):  # noqa: D401
         """HYY 导入的下发: 与 `_apply_full_snapshot` 同一道闸, **多一段模型 + 读回闸**。"""
-        if not self._require_device_sync("HYY 导入下发"):
+        if not self._require_device_sync(i18n.tr("HYY 导入下发")):
             return
         if QMessageBox.warning(
-                self, "确认导入下发",
-                f"**只导动力学辨识的产物**, 其余一项不碰:\n"
-                f"  · 摩擦三元组 fv/fc0/fc1 (0x26 item 9/10/11, {C.NUM_JOINTS} 轴各一组)\n"
-                f"  · **动力学模型** body1..7 + jm (0x30/0x33) → commit (0x32, 须失能)\n"
-                f"  · 读回逐项比对 (不一致则**中止, 不固化**)\n"
-                + ("  · **随后固化到 Flash** (param_save, 须失能, 擦写期间 CPU 停 ~1s)\n"
-                   if flash_save else
-                   "  · ⚠ **不会固化到 Flash** —— 本次改动只在 RAM, 掉电即回退\n")
-                + "\n"
-                f"不动: kp/kd/tau_max/软限位/全局标量/ff_mask —— 它们是设备自身口径,\n"
-                f"      yaml 里对应的 smin-smax / torque_max / gravity 是 HYY 控制器配置,\n"
-                f"      不是辨识结果 (见未映射清单)。\n\n"
-                "模型是力矩前馈的输入 —— 请确认臂已失能且有人看护。",
+                self, i18n.tr("确认导入下发"),
+                i18n.tr(
+                    "**只导动力学辨识的产物**, 其余一项不碰:\n"
+                    "  · 摩擦三元组 fv/fc0/fc1 (0x26 item 9/10/11, {joints} 轴各一组)\n"
+                    "  · **动力学模型** body1..7 + jm (0x30/0x33) → commit (0x32, 须失能)\n"
+                    "  · 读回逐项比对 (不一致则**中止, 不固化**)\n"
+                    "{save_line}"
+                    "\n"
+                    "不动: kp/kd/tau_max/软限位/全局标量/ff_mask —— 它们是设备自身口径,\n"
+                    "      yaml 里对应的 smin-smax / torque_max / gravity 是 HYY 控制器配置,\n"
+                    "      不是辨识结果 (见未映射清单)。\n\n"
+                    "模型是力矩前馈的输入 —— 请确认臂已失能且有人看护。",
+                    joints=C.NUM_JOINTS,
+                    save_line=(
+                        i18n.tr("  · **随后固化到 Flash** "
+                                "(param_save, 须失能, 擦写期间 CPU 停 ~1s)\n")
+                        if flash_save else
+                        i18n.tr("  · ⚠ **不会固化到 Flash** —— "
+                                "本次改动只在 RAM, 掉电即回退\n"))),
                 QMessageBox.Ok | QMessageBox.Cancel, QMessageBox.Cancel) != QMessageBox.Ok:
-            self.status.setText("导入下发已取消")
+            self.status.setText(i18n.tr("导入下发已取消"))
             return
         mat = snap["joints"]
-        if not self._confirm_enabled_write("HYY 导入 (0x26 item9-11 + 0x30/0x33/0x32)"):
+        if not self._confirm_enabled_write(
+                i18n.tr("HYY 导入 (0x26 item9-11 + 0x30/0x33/0x32)")):
             return
         # [2026-09-14 范围收窄] 只发**实际变了的那几项**: 摩擦三元组。
         # 不发 kp/kd/tau_max/限位 (0x22/0x23) —— 它们与设备当前值相同, 重写一遍是纯粹的
@@ -1172,7 +1292,7 @@ class ParamsPage(QWidget):
                 try:
                     diffs = MIO.readback_compare(arm, model, MIO.MASK_WRITTEN)
                 except Exception as e:              # noqa: BLE001
-                    diffs = [("读回失败", None, str(e))]
+                    diffs = [(i18n.tr("读回失败"), None, str(e))]
             # ⑤ 只有闸全绿才固化
             save_ok = None
             if flash_save and mres["commit"][0] and not diffs:
@@ -1185,7 +1305,7 @@ class ParamsPage(QWidget):
                     "dyn_model": mres, "model_diffs": diffs, "model_now": mnow,
                     "save_ok": save_ok}
 
-        self._start("HYY 导入下发", worker, self._sig_hyy_done)
+        self._start(i18n.tr("HYY 导入下发"), worker, self._sig_hyy_done)
 
     def _on_hyy_done(self, res):
         self._on_batch_done(res)
@@ -1194,26 +1314,29 @@ class ParamsPage(QWidget):
         # 与 [下发全部]/[下发全局] 同一道闸: 未成功 [刷新当前] 前不整套下发。
         # 否则导入路径可绕过安全闸, 且 diff 对话框的"设备当前值"列全空, 用户
         # 无法核对将被覆盖的真实值 (默认控件值盲发的同类风险)。
-        if not self._require_device_sync("整套下发"):
+        if not self._require_device_sync(i18n.tr("整套下发")):
             return
         if QMessageBox.warning(
-                self, "确认批量下发",
-                f"将按固件写口顺序逐条下发整套参数\n"
-                f"  · 关节 {C.NUM_JOINTS} × {len(C.JOINT_PARAMS)} 项 (0x22/0x23/0x26)\n"
-                f"  · 全局标量 + friction_model + ff_mask (0x28/0x27)\n\n"
-                "下发生效为即时 RAM 修改 (刚度/限位/前馈), 请确认当前安全。",
+                self, i18n.tr("确认批量下发"),
+                i18n.tr(
+                    "将按固件写口顺序逐条下发整套参数\n"
+                    "  · 关节 {joints} × {params} 项 (0x22/0x23/0x26)\n"
+                    "  · 全局标量 + friction_model + ff_mask (0x28/0x27)\n\n"
+                    "下发生效为即时 RAM 修改 (刚度/限位/前馈), 请确认当前安全。",
+                    joints=C.NUM_JOINTS, params=len(C.JOINT_PARAMS)),
                 QMessageBox.Ok | QMessageBox.Cancel,
                 QMessageBox.Cancel) != QMessageBox.Ok:
-            self.status.setText("批量下发已取消")
+            self.status.setText(i18n.tr("批量下发已取消"))
             return
         mat = snap["joints"]
         # 限位写前: 新 [q_min,q_max] 必须包含当前 q (全量必含 0x23 组)
         err = self._limits_error(mat)
         if err:
-            QMessageBox.warning(self, "限位写被拒绝", err)
+            QMessageBox.warning(self, i18n.tr("限位写被拒绝"), err)
             self.status.setText(err)
             return
-        if not self._confirm_enabled_write("批量整套参数下发 (0x22/0x23/0x26/0x28/0x27)"):
+        if not self._confirm_enabled_write(
+                i18n.tr("批量整套参数下发 (0x22/0x23/0x26/0x28/0x27)")):
             return
         ops = self._build_row_ops(set(self._supported_joint_keys()), mat, self._sup_vec)
         glob = snap["global"]
@@ -1228,7 +1351,7 @@ class ParamsPage(QWidget):
                     "leaf_ok": leaf_ok, "fre_model_ok": fre_model_ok, "mask_ok": mask_ok,
                     "save_ok": save_ok}
 
-        self._start("批量下发", worker, self._sig_batch_done)
+        self._start(i18n.tr("批量下发"), worker, self._sig_batch_done)
 
     def _rebuild_baseline(self, mat, sg, model_now):
         """基线重建的**单一收口** —— 手写字面量最容易漏键。
@@ -1254,7 +1377,8 @@ class ParamsPage(QWidget):
         for (rk, j), code in failc.items():
             self._paint(JOINT_KEYS.index(rk), j, 3)
             txt = PIO.err_text(code)
-            self._log(f"[ERR] 调参[批量] {rk} J{j + 1}: {txt}")
+            self._log(i18n.tr("[ERR] 调参[批量] {key} J{axis}: {text}",
+                              key=rk, axis=j + 1, text=txt))
         # `glob is None` = 本次**没写 global** (HYY 导入只发摩擦三元组 + 模型段)。
         # 那就一个 global 叶也不动 —— 不碰 `_synced_glob`、不碰 `_baseline["global"]`,
         # 也不重建 UI 控件 (它们的值本来就是对的)。
@@ -1296,11 +1420,15 @@ class ParamsPage(QWidget):
         model_diffs = res.get("model_diffs") or []
         dyn_ok = True if dyn_model is None else bool(dyn_model["commit"][0])
         if not dyn_ok:
-            self._log(f"[ERR] 调参[模型] commit 被拒: "
-                      f"{MIO.err_text(dyn_model['commit'][1])}"
-                      + (f" ({dyn_model['aborted']})" if dyn_model.get('aborted') else ""))
+            self._log(i18n.tr(
+                "[ERR] 调参[模型] commit 被拒: {err}{aborted}",
+                err=MIO.err_text(dyn_model['commit'][1]),
+                aborted=(f" ({dyn_model['aborted']})"
+                         if dyn_model.get('aborted') else "")))
         for lab, want, got in model_diffs:
-            self._log(f"[ERR] 调参[模型] 读回不一致 {lab}: 期望 {want!r} 实际 {got!r}")
+            self._log(i18n.tr(
+                "[ERR] 调参[模型] 读回不一致 {label}: 期望 {want} 实际 {got}",
+                label=lab, want=repr(want), got=repr(got)))
         gfail = sum(1 for k, ok in leaf_ok.items() if not ok) \
             + (0 if fre_model_ok else 1) + (0 if mask_ok else 1) \
             + (0 if dyn_ok else 1) + (1 if model_diffs else 0)
@@ -1317,36 +1445,40 @@ class ParamsPage(QWidget):
                 for j in range(C.NUM_JOINTS):
                     self._refresh_cell_color(ri, j)
             self._refresh_state()
-        msg = (f"批量下发完成: 关节成功 {len(okc)}/失败 {len(failc)}, "
-               f"全局失败 {gfail}") if wrote_global else \
-              (f"导入下发完成: 摩擦项成功 {len(okc)}/失败 {len(failc)}, "
-               f"模型 {'成功' if dyn_ok else '失败'}")
+        msg = (i18n.tr("批量下发完成: 关节成功 {ok}/失败 {fail}, 全局失败 {gfail}",
+                       ok=len(okc), fail=len(failc), gfail=gfail)
+               if wrote_global else
+               i18n.tr("导入下发完成: 摩擦项成功 {ok}/失败 {fail}, 模型 {model}",
+                       ok=len(okc), fail=len(failc),
+                       model=i18n.tr("成功") if dyn_ok else i18n.tr("失败")))
         # [2026-09-14] 固化的三种结局都要说清楚 —— 尤其**未固化**这一支。
         # 固件侧 0x30/0x32/0x33/0x26 全都只写 RAM (0x32 只 flash_store_mark_dirty() 标脏),
         # 唯一的落盘入口是 0x25 PARAM_SAVE。所以"没勾固化"= 掉电即回退整次导入,
         # 而原实现在这一支**什么都不说** —— 操作员会以为已经生效并归档。
         unsaved = False
         if res["save_ok"] is True:
-            msg += "; 已固化到 Flash"
+            msg += i18n.tr("; 已固化到 Flash")
         elif res["save_ok"] is False:
-            msg += "; 固化失败 (enable 态会返回 0x04 须先失能)"
+            msg += i18n.tr("; 固化失败 (enable 态会返回 0x04 须先失能)")
         else:
             unsaved = True
-            msg += ("; ⚠ **未固化** —— 本次改动只在 RAM, 掉电即回退。"
-                    "请勾选『下发后固化到 Flash』重跑, 或点 [固化 Flash…]")
+            msg += i18n.tr("; ⚠ **未固化** —— 本次改动只在 RAM, 掉电即回退。"
+                           "请勾选『下发后固化到 Flash』重跑, 或点 [固化 Flash…]")
         self.status.setText(msg)
         self.status.setStyleSheet(
             "background:#4a2020;color:#ffd0d0;padding:5px 8px;border-radius:3px;"
             if unsaved else
             "background:#23232a;color:#d8d8e0;padding:5px 8px;border-radius:3px;")
-        self._log(f"[{'OK' if not failc and gfail == 0 else 'ERR'}] 调参[批量] {msg}")
+        self._log(f"[{'OK' if not failc and gfail == 0 else 'ERR'}] "
+                  + i18n.tr("调参[批量] {msg}", msg=msg))
 
     # ================= 导出 =================
     def _on_export(self):
-        if not self._pre_op("导出"):
+        if not self._pre_op(i18n.tr("导出")):
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出当前参数", "litearm_params.yaml", "参数文件 (*.yaml)")
+            self, i18n.tr("导出当前参数"), "litearm_params.yaml",
+            i18n.tr("参数文件 (*.yaml)"))
         if not path:
             return
         self._pending_export = os.path.abspath(path)
@@ -1355,57 +1487,58 @@ class ParamsPage(QWidget):
 
     # ================= param_save (二次确认) =================
     def _on_save_flash(self):
-        if not self._pre_op("固化"):
+        if not self._pre_op(i18n.tr("固化")):
             return
         if QMessageBox.question(
-                self, "固化到 Flash (1/2)",
-                "将把当前 RAM 参数写入 Flash 持久化 (涉及扇区擦除)。\n\n"
-                "固件要求关节处于 disable 态 (enable 态返回 ERR 0x04)。",
+                self, i18n.tr("固化到 Flash (1/2)"),
+                i18n.tr("将把当前 RAM 参数写入 Flash 持久化 (涉及扇区擦除)。\n\n"
+                        "固件要求关节处于 disable 态 (enable 态返回 ERR 0x04)。"),
                 QMessageBox.Ok | QMessageBox.Cancel,
                 QMessageBox.Cancel) != QMessageBox.Ok:
             return
         if QMessageBox.warning(
-                self, "再次确认固化 (2/2)",
-                "Flash 参数在下电后仍生效, 固件会整体重钳一遍所有参数。\n\n"
-                "确认现在固化?",
+                self, i18n.tr("再次确认固化 (2/2)"),
+                i18n.tr("Flash 参数在下电后仍生效, 固件会整体重钳一遍所有参数。"
+                        "\n\n确认现在固化?"),
                 QMessageBox.Ok | QMessageBox.Cancel,
                 QMessageBox.Cancel) != QMessageBox.Ok:
-            self.status.setText("固化已取消")
+            self.status.setText(i18n.tr("固化已取消"))
             return
         def worker(arm):
             ok, code = PIO.save_params(arm, 6.0)
             if ok:
-                return True, "固化成功 (已写 Flash)"
-            return False, f"固件拒绝: {PIO.err_text(code)}"
+                return True, i18n.tr("固化成功 (已写 Flash)")
+            return False, i18n.tr("固件拒绝: {err}", err=PIO.err_text(code))
 
-        self._start("固化到 Flash", worker, self._sig_saved)
+        self._start(i18n.tr("固化到 Flash"), worker, self._sig_saved)
 
     # ================= 恢复出厂 (0x36) =================
     def _on_reset_factory(self):
-        if not self._pre_op("恢复出厂"):
+        if not self._pre_op(i18n.tr("恢复出厂")):
             return
         if QMessageBox.warning(
-                self, "恢复出厂 (1/2)",
-                "将把全部运行时参数改回固件出厂默认，并失效 Flash 里已保存的参数。\n\n"
-                "当前 RAM 与 Flash 的改动都会丢失。固件要求关节处于 disable 态。",
+                self, i18n.tr("恢复出厂 (1/2)"),
+                i18n.tr("将把全部运行时参数改回固件出厂默认，并失效 Flash 里已保存的参数。"
+                        "\n\n当前 RAM 与 Flash 的改动都会丢失。"
+                        "固件要求关节处于 disable 态。"),
                 QMessageBox.Ok | QMessageBox.Cancel,
                 QMessageBox.Cancel) != QMessageBox.Ok:
             return
         if QMessageBox.warning(
-                self, "再次确认恢复出厂 (2/2)",
-                "确认现在恢复出厂？",
+                self, i18n.tr("再次确认恢复出厂 (2/2)"),
+                i18n.tr("确认现在恢复出厂？"),
                 QMessageBox.Ok | QMessageBox.Cancel,
                 QMessageBox.Cancel) != QMessageBox.Ok:
-            self.status.setText("恢复出厂已取消")
+            self.status.setText(i18n.tr("恢复出厂已取消"))
             return
 
         def worker(arm):
             ok, code = PIO.reset_factory(arm)
             if ok:
-                return True, "已恢复出厂默认 (Flash 参数已失效)"
-            return False, f"固件拒绝: {PIO.err_text(code)}"
+                return True, i18n.tr("已恢复出厂默认 (Flash 参数已失效)")
+            return False, i18n.tr("固件拒绝: {err}", err=PIO.err_text(code))
 
-        self._start("恢复出厂", worker, self._sig_factory_done)
+        self._start(i18n.tr("恢复出厂"), worker, self._sig_factory_done)
 
     def _on_factory_done(self, ok: bool, text: str):
         """成功后**作废设备基线** —— 表里/控件里显示的都是已被覆盖的旧值。
@@ -1417,14 +1550,16 @@ class ParamsPage(QWidget):
         # 先刷控件可用性再写状态行 —— 反过来的话 _refresh_state 的
         # "请先 [刷新当前]" 提示会把这里的结论盖掉
         self._refresh_state()
-        self.status.setText(text + " —— 设备参数已变更, 请重新 [刷新当前]"
+        self.status.setText(text + i18n.tr(" —— 设备参数已变更, 请重新 [刷新当前]")
                             if ok else text)
-        self._log(f"[{'OK' if ok else 'ERR'}] 调参[恢复出厂] {text}")
+        self._log(f"[{'OK' if ok else 'ERR'}] "
+                  + i18n.tr("调参[恢复出厂] {text}", text=text))
 
     def _on_saved(self, ok, text):
         self._set_busy_ui(False)
         self.status.setText(text)
-        self._log(f"[{'OK' if ok else 'ERR'}] 调参[固化] {text}")
+        self._log(f"[{'OK' if ok else 'ERR'}] "
+                  + i18n.tr("调参[固化] {text}", text=text))
 
 
 # ================= diff 预览对话框 =================
@@ -1447,7 +1582,7 @@ class ParamDiffDialog(QDialog):
     def __init__(self, parent, old_snap, new_snap, model_diffs=None,
                  model_baseline=None, model_new=None, notes=None, unmapped=None):
         super().__init__(parent)
-        self.setWindowTitle("参数导入 — 差异预览")
+        self.setWindowTitle(i18n.tr("参数导入 — 差异预览"))
         self.resize(880, 560)
         self.new_snap = new_snap
         self.diffs = C.diff_snapshots(old_snap, new_snap)
@@ -1459,17 +1594,20 @@ class ParamDiffDialog(QDialog):
         # --- 恒定横幅 ---
         banner = QLabel()
         if self.has_model:
-            banner.setText("本文件**含动力学模型段** —— 将写入连杆动力学 (m/com/I) 与电机转子惯量 jm。")
+            banner.setText(i18n.tr(
+                "本文件**含动力学模型段** —— 将写入连杆动力学 (m/com/I) 与电机转子惯量 jm。"))
             banner.setStyleSheet("background:#2a3a2a;color:#c8f0c8;padding:6px 8px;border-radius:3px;")
         else:
-            banner.setText("本文件**不含动力学模型段** —— 关节与全局参数会下发，"
-                           "**动力学模型不会被改动**。")
+            banner.setText(i18n.tr(
+                "本文件**不含动力学模型段** —— 关节与全局参数会下发，"
+                "**动力学模型不会被改动**。"))
             banner.setStyleSheet("background:#3a3320;color:#f0e0b0;padding:6px 8px;border-radius:3px;")
         banner.setWordWrap(True)
         lay.addWidget(banner)
 
         if old_snap is None:
-            tip = QLabel("尚无设备基线 (未刷新过) — 下表为待导入全量参数, 请逐项核对。")
+            tip = QLabel(i18n.tr(
+                "尚无设备基线 (未刷新过) — 下表为待导入全量参数, 请逐项核对。"))
             tip.setWordWrap(True)
             lay.addWidget(tip)
 
@@ -1477,16 +1615,20 @@ class ParamDiffDialog(QDialog):
         rows = []
         joint_sub = [d for d in self.diffs if d[0].startswith("J")]
         glob_sub = [d for d in self.diffs if d[0].startswith("global.")]
-        for grp, sub in (("关节参数", joint_sub), ("全局参数", glob_sub)):
+        for grp, sub in ((i18n.tr("关节参数"), joint_sub),
+                         (i18n.tr("全局参数"), glob_sub)):
             if sub:
                 rows.append(("__hdr__", grp, None, None))
                 rows.extend((d[0], d[1], d[2], None) for d in sub)
         if self.model_diffs:
-            rows.append(("__hdr__", f"动力学模型 ({len(self.model_diffs)} 项)", None, None))
+            rows.append(("__hdr__",
+                         i18n.tr("动力学模型 ({n} 项)", n=len(self.model_diffs)),
+                         None, None))
             rows.extend((lab, old, new, None) for lab, old, new in self.model_diffs)
 
         tb = QTableWidget(len(rows), 4)
-        tb.setHorizontalHeaderLabels(["参数", "旧值 (设备当前)", "新值 (导入)", "说明"])
+        tb.setHorizontalHeaderLabels([i18n.tr("参数"), i18n.tr("旧值 (设备当前)"),
+                                      i18n.tr("新值 (导入)"), i18n.tr("说明")])
         tb.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         tb.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         tb.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
@@ -1504,9 +1646,9 @@ class ParamDiffDialog(QDialog):
                 tb.setSpan(ri, 0, 1, 4)
                 continue
             is_safety = bool(C.IS_SAFETY_KEY.get(lab.split(".", 1)[-1], False))
-            note = "新增" if old is None else "修改"
+            note = i18n.tr("新增") if old is None else i18n.tr("修改")
             if is_safety:
-                note = f"⚠ {note} — 安全类字段 (控制包络)"
+                note = i18n.tr("⚠ {kind} — 安全类字段 (控制包络)", kind=note)
             row = [QTableWidgetItem(lab),
                    QTableWidgetItem(C.fmt_value(lab, old)),
                    QTableWidgetItem(C.fmt_value(lab, new)),
@@ -1521,7 +1663,9 @@ class ParamDiffDialog(QDialog):
         extra = list(notes or [])
         if unmapped:
             lines = [f"  · {k}  →  {r}" for k, r in unmapped]
-            extra.append(f"未映射字段 {len(unmapped)} 项 (yaml 里有、stm32 无处落, 未导入):")
+            extra.append(i18n.tr(
+                "未映射字段 {n} 项 (yaml 里有、stm32 无处落, 未导入):",
+                n=len(unmapped)))
             extra.extend(lines)
         if extra:
             txt = QPlainTextEdit("\n".join(extra))
@@ -1535,13 +1679,14 @@ class ParamDiffDialog(QDialog):
         # 0x25; 而产线上"导入完就是要固化"是常态 —— 默认不勾时一次漏勾就白做一台。
         # 代价: 擦写 sector 7 有 ~1s 的 CPU 停顿且须失能, 所以**保留**下发前的二次确认
         # (见 _on_import / _apply_hyy_snapshot 的确认框文案)。
-        self.save_checkbox = QCheckBox("下发后固化到 Flash (param_save; 须先失能)")
+        self.save_checkbox = QCheckBox(i18n.tr(
+            "下发后固化到 Flash (param_save; 须先失能)"))
         self.save_checkbox.setChecked(True)
         bottom.addWidget(self.save_checkbox)
         bottom.addStretch(1)
-        b_ok = QPushButton("应用")
+        b_ok = QPushButton(i18n.tr("应用"))
         b_ok.clicked.connect(self.accept)
-        b_cancel = QPushButton("取消")
+        b_cancel = QPushButton(i18n.tr("取消"))
         b_cancel.clicked.connect(self.reject)
         bottom.addWidget(b_ok)
         bottom.addWidget(b_cancel)

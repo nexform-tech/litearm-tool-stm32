@@ -8,6 +8,8 @@ from __future__ import annotations
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (QLabel, QPushButton, QVBoxLayout, QWidget)
 
+from litetool import i18n
+from litetool.gui.i18n_ui import TrButton, TrLabel, tr_tooltip
 from litetool.gui.pages.common import LockBanner, group, hint, note, row, spin
 
 
@@ -21,14 +23,16 @@ class ZeroGPage(QWidget):
         self._armed = False
         self._fault_blocked = False
         self._active = False
+        self._error = None
 
-        self.btn = QPushButton("进入零重力拖动")
+        self.btn = TrButton("进入零重力拖动")
         self.btn.setMinimumHeight(40)
         self.btn.setCheckable(True)
         self.btn.clicked.connect(lambda: self.zg.emit(self.btn.isChecked()))
 
         self.period = spin(0.005, 0.099, 0.04, 0.005)
-        self.period.setToolTip(
+        tr_tooltip(
+            self.period,
             "保活周期。固件看门狗超时 0.10s，必须 <0.10 才有余量；\n"
             "SDK 默认 0.04s（2.5 倍余量）。")
 
@@ -40,8 +44,8 @@ class ZeroGPage(QWidget):
 
         g = group("零重力拖动（拖动示教）",
                   row(self.btn),
-                  row(QLabel("保活周期 (s)"), self.period),
-                  row(QLabel("状态"), self.state_lbl),
+                  row(TrLabel("保活周期 (s)"), self.period),
+                  row(TrLabel("状态"), self.state_lbl),
                   self.err_lbl,
                   note("进入后臂进入重力补偿，可用手自由拖动；松手由虚拟弹簧保持位置。"),
                   note("⚠ 固件侧靠看门狗保活：SDK 后台线程按上面的周期重发命令，"
@@ -88,16 +92,23 @@ class ZeroGPage(QWidget):
     def set_state(self, active: bool, error=None):
         """由主窗口按**实际**状态回写（固件可能因看门狗/急停自行退出）。"""
         self._active = bool(active)
+        self._error = error
         self.btn.blockSignals(True)
         self.btn.setChecked(self._active)
         self.btn.blockSignals(False)
-        self.btn.setText("退出零重力拖动" if self._active else "进入零重力拖动")
-        self.state_lbl.setText("拖动中（保活运行）" if self._active else "未进入")
+        self.btn.setText(i18n.tr("退出零重力拖动") if self._active
+                         else i18n.tr("进入零重力拖动"))
+        self.state_lbl.setText(i18n.tr("拖动中（保活运行）") if self._active
+                               else i18n.tr("未进入"))
         self.state_lbl.setStyleSheet(
             "color:#61afef;font-weight:bold;" if self._active
             else "color:#b0b0b0;font-weight:bold;")
-        self.err_lbl.setText("" if error is None else f"⚠ 保活中断: {error}")
+        self.err_lbl.setText("" if error is None else
+                             i18n.tr("⚠ 保活中断: {err}", err=error))
         self._refresh()
+
+    def retranslate(self):
+        self.set_state(self._active, self._error)
 
     def period_value(self) -> float:
         return self.period.value()

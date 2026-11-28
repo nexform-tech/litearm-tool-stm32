@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from litetool import i18n
+
 from typing import Any, Dict, Optional
 
 import litearm as pa
@@ -59,7 +61,7 @@ def write_license(arm: Any, lic: Dict[str, Any]) -> Dict[str, Any]:
             if record.get("supported") is True and record.get("activated") is True:
                 return record
         if cmd == 0x3F and code == 0x04:
-            raise ActivationError("armed", "设备已使能 —— 请先失能，再提交激活") from None
+            raise ActivationError("armed", i18n.tr("设备已使能 —— 请先失能，再提交激活")) from None
         raise ActivationError("rejected", _describe(e)) from None
     return read_record(arm)
 

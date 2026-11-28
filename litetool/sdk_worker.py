@@ -34,6 +34,7 @@ from typing import Any, Callable, Optional
 import litearm as pa
 from litearm import _protocol as _P
 
+from litetool import i18n
 from litetool.plot_model import PlotModel
 
 __all__ = ["SdkWorker", "TaskResult", "StateHookMissing",
@@ -59,9 +60,10 @@ class TaskResult:
     @property
     def text(self) -> str:
         if self.ok:
-            return f"{self.name} 完成"
+            return i18n.tr("{name} 完成", name=self.name)
         code, title = _error_summary(self.error)
-        return f"{self.name} 失败 [{code}]: {title}"
+        return i18n.tr("{name} 失败 [{code}]: {title}",
+                       name=self.name, code=code, title=title)
 
 
 def _error_summary(e: Optional[BaseException]) -> tuple:
@@ -71,10 +73,13 @@ def _error_summary(e: Optional[BaseException]) -> tuple:
     "零重力进行中"，原异常里还有"先 zero_g_stop"）。把原始消息附在标题后。
     """
     try:
-        t = pa.describe_exc(e)
+        t = pa.describe_exc(e, locale=i18n.sdk_locale())
     except Exception:  # noqa: BLE001 - 老 SDK / 异常对象不规整都回退
-        return "E-??", str(e)
-    msg = str(e or "").strip()
+        return "E-??", (i18n.safe_detail(e) or i18n.tr("未预期错误"))
+    if i18n.language() == "en" and i18n.has_chinese(t.title):
+        # 老 SDK / 非结构化异常会把原始中文塞进 E-?? 标题；英文界面用通用文案接管。
+        return "E-??", i18n.tr("未预期错误")
+    msg = i18n.safe_detail(str(e or "").strip())
     if t.code.startswith("E-") and msg and msg not in t.title:
         if len(msg) > 120:
             msg = msg[:117] + "..."
@@ -90,10 +95,10 @@ def _attach_state_hook(arm, on_state: Callable[[Any], None]) -> None:
     """
     ack = getattr(arm, "_a", None)
     if ack is None or not callable(getattr(ack, "_on_status", None)):
-        raise StateHookMissing(
+        raise StateHookMissing(i18n.tr(
             "litearm.Arm 上找不到 _a._on_status 状态钩子缝隙 —— "
             "SDK 内部结构变了。本工具依赖它把运动期间的 100Hz 状态也画到曲线上；"
-            "请更新 litetool/sdk_worker.py::_attach_state_hook 以适配新版 SDK。")
+            "请更新 litetool/sdk_worker.py::_attach_state_hook 以适配新版 SDK。"))
     orig = ack._on_status
 
     def hooked(payload: bytes) -> None:
@@ -224,8 +229,11 @@ class SdkWorker:
         self._online = True
         self._thread = threading.Thread(target=self._loop, name="sdk-worker", daemon=True)
         self._thread.start()
-        self._on_online(True, f"已连接 {port or '自动'} · {self._firmware}")
-        self._log(f"[OK] 已连接 {port or '自动'} · 固件 {self._firmware} · N={self.n_joints}")
+        where = port or i18n.tr("自动")
+        self._on_online(True, i18n.tr("已连接 {port} · {fw}", port=where,
+                                      fw=self._firmware))
+        self._log(i18n.tr("[OK] 已连接 {port} · 固件 {fw} · N={n}",
+                          port=where, fw=self._firmware, n=self.n_joints))
 
     def close(self) -> None:
         """停线程 → 关链路（顺序不能反：先让所有者退出，再释放串口）。"""
@@ -236,20 +244,21 @@ class SdkWorker:
             if th.is_alive():
                 # 在途的 SDK 调用（如十几秒的 movej）不可抢占。放开串口会让它
                 # 带着 TransportError 退出，属可接受降级 —— 但必须留痕。
-                self._log("[WARN] 关闭时所有者线程仍在执行任务（阻塞调用不可抢占），"
-                          "已直接释放串口")
+                self._log(i18n.tr(
+                    "[WARN] 关闭时所有者线程仍在执行任务（阻塞调用不可抢占），"
+                    "已直接释放串口"))
         arm, self._arm = self._arm, None
         if arm is not None:
             try:
                 arm.close()
             except Exception as e:  # noqa: BLE001 - 关闭失败不该阻断退出
-                self._log(f"[WARN] 关闭链路出错: {e}")
+                self._log(i18n.tr("[WARN] 关闭链路出错: {err}", err=e))
         with self._lock:
             self._state = None
             self._last_pushed = None
         if self._online:
             self._online = False
-            self._on_online(False, "已断开")
+            self._on_online(False, i18n.tr("已断开"))
 
     # ================= 快照（线程安全只读） =================
     @property
@@ -312,7 +321,8 @@ class SdkWorker:
                on_done: Optional[Callable[[TaskResult], None]] = None) -> None:
         """把 `fn(arm)` 排进所有者线程执行。`fn` 里可以放任意阻塞的 SDK 调用。"""
         if self._arm is None:
-            res = TaskResult(name, False, error=pa.NotConnectedError("未连接"))
+            res = TaskResult(name, False,
+                             error=pa.NotConnectedError(i18n.tr("未连接")))
             (on_done or self._on_task)(res)
             return
         self._tasks.put((name, fn, on_done))
@@ -330,12 +340,12 @@ class SdkWorker:
         """
         arm = self._arm
         if arm is None:
-            return False, "未连接"
+            return False, i18n.tr("未连接")
         try:
             arm._write_cmd(_P.CMD_EMERGENCY_STOP, guarded=False)
         except Exception as e:  # noqa: BLE001 - 任何失败都必须如实上报
             return False, str(e)
-        return True, "急停帧已发出"
+        return True, i18n.tr("急停帧已发出")
 
     def takeover_movej(self, q, speed: float = 0.15) -> tuple:
         """**旁路**写一条 `movej`：作废在途笛卡尔规划并接管运动。
@@ -352,19 +362,20 @@ class SdkWorker:
         """
         arm = self._arm
         if arm is None:
-            return False, "未连接"
+            return False, i18n.tr("未连接")
         try:
             n = int(getattr(arm, "n", 0) or 0)
             qs = [float(v) for v in q]
             if n and len(qs) != n:
-                return False, f"需要 {n} 个关节角，收到 {len(qs)} 个"
+                return False, i18n.tr("需要 {n} 个关节角，收到 {got} 个",
+                                      n=n, got=len(qs))
             if not 0.0 <= float(speed) <= 1.0:
-                return False, "speed 需 0..1"
+                return False, i18n.tr("speed 需 0..1")
             payload = _P.pack_f32s(qs) + struct.pack("<f", float(speed))
             arm._write_cmd(_P.CMD_MOVE_J, payload, guarded=True)
         except Exception as e:  # noqa: BLE001 - 任何失败都必须如实上报
             return False, str(e)
-        return True, "接管 movej 帧已发出"
+        return True, i18n.tr("接管 movej 帧已发出")
 
     def stop_jog_now(self) -> tuple:
         """受控停止点动：`movej` 到**当前实测关节角**，作废在途笛卡尔规划。
@@ -373,7 +384,7 @@ class SdkWorker:
         """
         st = self.state
         if st is None:
-            return False, "还没有状态帧，无法取当前关节角"
+            return False, i18n.tr("还没有状态帧，无法取当前关节角")
         return self.takeover_movej(list(st.q), 0.1)
 
     def stop_zero_g_now(self) -> Optional[str]:
@@ -396,7 +407,7 @@ class SdkWorker:
             return str(e)
         return None
 
-    def drop_pending(self, reason: str = "急停") -> int:
+    def drop_pending(self, reason: str = "") -> int:
         """丢掉尚未开始执行的任务，返回丢弃条数。
 
         急停之后不该再执行任何排队中的动作 —— 用户按急停的语义就是"停下"。
@@ -408,6 +419,7 @@ class SdkWorker:
         只在 `_on_*_done` 里清除的, 回调不来就**只能重启进程**。急停路径尤其致命:
         参数页按钮全灰, 而用户按急停恰恰是最需要界面还能用的时候。
         """
+        reason = reason or i18n.tr("急停")
         n = 0
         while True:
             try:
@@ -415,8 +427,9 @@ class SdkWorker:
             except queue.Empty:
                 return n
             n += 1
-            res = TaskResult(name, False,
-                             error=RuntimeError(f"任务已被丢弃（{reason}）"))
+            res = TaskResult(
+                name, False,
+                error=RuntimeError(i18n.tr("任务已被丢弃（{reason}）", reason=reason)))
             try:
                 (on_done or self._on_task)(res)
             except Exception:                 # noqa: BLE001 - GUI 回调出错不能拖垮所有者线程
@@ -447,19 +460,20 @@ class SdkWorker:
                                          timeout=self._idle_timeout).value
             except pa.CommandRejectedError as e:
                 # 固件对读状态回 ERR（罕见）：不判离线，记一次继续
-                self._log(f"[WARN] 状态读取被固件拒绝: {e}")
+                self._log(i18n.tr("[WARN] 状态读取被固件拒绝: {err}", err=e))
                 continue
             except pa.LiteArmError as e:
-                self._go_offline(f"链路异常: {e}")
+                self._go_offline(i18n.tr("链路异常: {err}", err=e))
                 continue
             except Exception as e:  # noqa: BLE001 - 线程不能带着异常死掉
-                self._go_offline(f"未预期异常: {e!r}")
+                self._go_offline(i18n.tr("未预期异常: {err}", err=repr(e)))
                 continue
             if st is None:
                 if silent_since is None:
                     silent_since = self._clock()
                 elif self._clock() - silent_since > self._offline_timeout:
-                    self._go_offline(f"状态流静默 >{self._offline_timeout:.1f}s")
+                    self._go_offline(i18n.tr("状态流静默 >{timeout:.1f}s",
+                                             timeout=self._offline_timeout))
                     continue
             else:
                 silent_since = None
@@ -476,7 +490,7 @@ class SdkWorker:
                 if dev and dev not in out:
                     out.append(dev)
         except Exception as e:  # noqa: BLE001 - 枚举失败仍可试上次的口
-            self._log(f"[WARN] 重连时串口枚举失败: {e}")
+            self._log(i18n.tr("[WARN] 重连时串口枚举失败: {err}", err=e))
         return out
 
     def _reconnect(self) -> bool:
@@ -488,7 +502,8 @@ class SdkWorker:
             attempt += 1
             self._reconnect_attempt = attempt
             try:
-                self._on_reconnect(attempt, f"正在自动重连（第 {attempt} 次）…")
+                self._on_reconnect(attempt,
+                                   i18n.tr("正在自动重连（第 {n} 次）…", n=attempt))
             except Exception:  # noqa: BLE001 - 通知失败不能中断重连
                 pass
             for port in self._candidate_ports():
@@ -504,7 +519,8 @@ class SdkWorker:
                             arm.close()
                         except Exception:  # noqa: BLE001
                             pass
-                    self._log(f"[WARN] 重连 {port} 失败: {e}")
+                    self._log(i18n.tr("[WARN] 重连 {port} 失败: {err}",
+                                      port=port, err=e))
                     continue
                 if self._stop.is_set():
                     # 用户在这期间点了断开：不要留下一条新链路。
@@ -523,9 +539,10 @@ class SdkWorker:
                     self._drops = 0
                 self.model.reset()
                 self._online = True
-                self._log(f"[OK] 已重连 {port} · 固件 {self._firmware} · "
-                          f"N={self.n_joints}")
-                self._on_online(True, f"已重连 {port} · {self._firmware}")
+                self._log(i18n.tr("[OK] 已重连 {port} · 固件 {fw} · N={n}",
+                                  port=port, fw=self._firmware, n=self.n_joints))
+                self._on_online(True, i18n.tr("已重连 {port} · {fw}",
+                                              port=port, fw=self._firmware))
                 return True
             delay = min(self._reconnect_max,
                         self._reconnect_initial * (2 ** min(attempt - 1, 10)))
@@ -552,7 +569,7 @@ class SdkWorker:
         # `return`, 于是"断开/关闭时正在跑的那一条"永远等不到回调, 发起方的忙态
         # 卡死。改成照常投递 (只是把 ok 标成 False 并附上原因)。
         if self._stop.is_set() and res.ok:
-            res = TaskResult(name, False, error=RuntimeError("已断开"))
+            res = TaskResult(name, False, error=RuntimeError(i18n.tr("已断开")))
         try:
             (on_done or self._on_task)(res)
         except Exception:  # noqa: BLE001 - GUI 回调出错不能拖垮所有者线程
@@ -578,12 +595,12 @@ class SdkWorker:
                 arm.close()
             except Exception:  # noqa: BLE001 - 关旧句柄失败不影响重连
                 pass
-        dropped = self.drop_pending("断线")
+        dropped = self.drop_pending(i18n.tr("断线"))
         if not was_online and arm is None:
             return
-        self._log(f"[ERR] 离线: {why}")
+        self._log(i18n.tr("[ERR] 离线: {why}", why=why))
         if dropped:
-            self._log(f"[WARN] 断线：已丢弃 {dropped} 条排队中的命令")
+            self._log(i18n.tr("[WARN] 断线：已丢弃 {n} 条排队中的命令", n=dropped))
         self._on_online(False, why)
 
     # ================= 状态流入（所有者线程上下文） =================

@@ -19,6 +19,8 @@ from PyQt5.QtWidgets import (QHBoxLayout, QHeaderView, QLabel, QPlainTextEdit,
                              QPushButton, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
 
+from litetool import i18n
+from litetool.gui.i18n_ui import TrButton, tr_header
 from litetool.gui.pages.common import group, note, row
 
 
@@ -26,10 +28,10 @@ def _fault_text(reason: int):
     """reason -> (title, action)。SDK 不可用时降级，不抛。"""
     try:
         import litearm as pa
-        t = pa.describe_fault(reason)
+        t = pa.describe_fault(reason, locale=i18n.sdk_locale())
         return t.title, t.action
     except Exception:  # noqa: BLE001 - 老 SDK / 未导出
-        return f"原因 {reason}", ""
+        return i18n.tr("原因 {reason}", reason=reason), ""
 
 
 class FaultPage(QWidget):
@@ -39,8 +41,11 @@ class FaultPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._online = False
+        self._st = None
+        self._detail = None
+        self._events = []
 
-        self.head = QLabel("无故障")
+        self.head = QLabel(i18n.tr("无故障"))
         self.head.setStyleSheet("font-size:15px;font-weight:bold;color:#6fdd8b;")
         self.detail = QLabel("—")
         self.detail.setStyleSheet("color:#bbb;")
@@ -52,7 +57,7 @@ class FaultPage(QWidget):
             "故障锁存后运动页面会被禁用；必须清故障或复位才能恢复出力。"))
 
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["轴", "状态", "原因", "处置"])
+        tr_header(self.table, ["轴", "状态", "原因", "处置"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionMode(QTableWidget.NoSelection)
@@ -67,12 +72,13 @@ class FaultPage(QWidget):
         self.hist = QPlainTextEdit()
         self.hist.setReadOnly(True)
         self.hist.setMaximumBlockCount(200)
-        self.hist.setPlaceholderText("本次会话内新出现的故障会按时间记录在这里")
+        from litetool.gui.i18n_ui import tr_placeholder
+        tr_placeholder(self.hist, "本次会话内新出现的故障会按时间记录在这里")
         g_hist = group("事件历史", self.hist)
 
-        self.btn_clear = QPushButton("清故障 clear_faults")
-        self.btn_reset = QPushButton("复位 reset")
-        self.btn_diag = QPushButton("复制诊断包")
+        self.btn_clear = TrButton("清故障 clear_faults")
+        self.btn_reset = TrButton("复位 reset")
+        self.btn_diag = TrButton("复制诊断包")
         self.btn_clear.clicked.connect(lambda: self.cmd.emit("clear_faults"))
         self.btn_reset.clicked.connect(lambda: self.cmd.emit("reset"))
         self.btn_diag.clicked.connect(self.diag_req.emit)
@@ -90,13 +96,35 @@ class FaultPage(QWidget):
         for b in (self.btn_clear, self.btn_reset, self.btn_diag):
             b.setEnabled(onl)
 
-    def add_event(self, text: str):
+    def add_event(self, axis, reason=None):
+        """记一条**新出现**的故障；切语言时按 (轴, 原因码) 重译，不存中文串。
+
+        兼容旧调用 `add_event("文本")`（没有原因码可重译，原样显示）。
+        """
         ts = _dt.datetime.now().strftime("%H:%M:%S")
-        self.hist.appendPlainText(f"{ts}  {text}")
+        if reason is None:
+            self._events.append((ts, None, None))
+            self.hist.appendPlainText(f"{ts}  {axis}")
+            return
+        self._events.append((ts, int(axis), int(reason)))
+        title = _fault_text(reason)[0]
+        self.hist.appendPlainText(f"{ts}  J{axis + 1} {title}")
+
+    def retranslate(self):
+        self.update_from(self._st, self._detail)
+        if self._events:
+            self.hist.clear()
+            for ts, axis, reason in self._events:
+                if axis is None:
+                    continue
+                self.hist.appendPlainText(
+                    f"{ts}  J{axis + 1} {_fault_text(reason)[0]}")
 
     def update_from(self, st, detail=None):
+        self._st = st
+        self._detail = detail
         if st is None:
-            self.head.setText("未连接")
+            self.head.setText(i18n.tr("未连接"))
             self.head.setStyleSheet("font-size:15px;font-weight:bold;color:#888;")
             self.detail.setText("—")
             self.table.setRowCount(0)
@@ -115,22 +143,24 @@ class FaultPage(QWidget):
             faults.append((i, r))
 
         if faults:
-            axes = "、".join(f"J{i + 1}" for i, _ in faults)
-            self.head.setText(f"故障锁存：{axes}")
+            axes = i18n.tr("、").join(f"J{i + 1}" for i, _ in faults)
+            self.head.setText(i18n.tr("故障锁存：{axes}", axes=axes))
             self.head.setStyleSheet("font-size:15px;font-weight:bold;color:#ff6b6b;")
         else:
-            self.head.setText("无故障")
+            self.head.setText(i18n.tr("无故障"))
             self.head.setStyleSheet("font-size:15px;font-weight:bold;color:#6fdd8b;")
 
         drop = int(getattr(detail, "drop_hold_reason", 0) or 0) if detail else 0
         if not drop:
             drop = int(getattr(st, "drop_hold_reason", 0) or 0)
-        drop_txt = "无"
+        drop_txt = i18n.tr("无")
         if drop:
             drop_txt = _fault_text(drop)[0]
-        self.detail.setText(
-            f"模式 {st.mode_name} · {'已使能' if st.enabled else '未使能'}"
-            f" · 整臂持位：{drop_txt}")
+        self.detail.setText(i18n.tr(
+            "模式 {mode} · {enabled} · 整臂持位：{hold}",
+            mode=st.mode_name,
+            enabled=i18n.tr("已使能") if st.enabled else i18n.tr("未使能"),
+            hold=drop_txt))
 
         n = getattr(st, "n", 0)
         self.table.setRowCount(n)
@@ -138,11 +168,12 @@ class FaultPage(QWidget):
             bit = bool(st.joint_fault & (1 << i))
             r = reasons[i] if i < len(reasons) else 0
             if bit:
-                title, action = _fault_text(r) if r else ("原因不可知（旧固件）", "")
-                cells = (f"J{i + 1}", "断轴", title, action)
+                title, action = (_fault_text(r) if r
+                                 else (i18n.tr("原因不可知（旧固件）"), ""))
+                cells = (f"J{i + 1}", i18n.tr("断轴"), title, action)
                 color = "#ff6b6b"
             else:
-                cells = (f"J{i + 1}", "正常", "—", "—")
+                cells = (f"J{i + 1}", i18n.tr("正常"), "—", "—")
                 color = None
             for col, text in enumerate(cells):
                 it = QTableWidgetItem(text)

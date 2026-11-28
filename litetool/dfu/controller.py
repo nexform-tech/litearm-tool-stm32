@@ -15,6 +15,8 @@
 """
 from __future__ import annotations
 
+from litetool import i18n
+
 import threading
 import time
 from typing import Any, Callable, Optional, Tuple
@@ -108,11 +110,12 @@ class UpgradeController:
             if self._find_device() is None:
                 raise job.UpgradeError(
                     "dfu_device_absent",
-                    "没有检测到处于 DFU (0483:DF11) 的板子 —— 它可能刚被拔掉, "
-                    "或已经复位回应用态")
+                    i18n.tr("没有检测到处于 DFU (0483:DF11) 的板子 —— "
+                            "它可能刚被拔掉, 或已经复位回应用态"))
             return
         if not getattr(self._sdk, "online", False):
-            raise job.UpgradeError("not_connected", "机械臂未连接 —— 请先连接设备")
+            raise job.UpgradeError(
+                "not_connected", i18n.tr("机械臂未连接 —— 请先连接设备"))
 
     # ------------------------------------------------------------------ 线程主体
     def _run(self, blob: bytes, base: int, summary: Any, from_dfu: bool) -> None:
@@ -135,19 +138,22 @@ class UpgradeController:
     def disarm(self) -> None:
         """失能，并等状态帧确认。见 `UPGRADE_DISARM_TIMEOUT_S` 的注释。"""
         if not getattr(self._sdk, "online", False):
-            raise job.UpgradeError("not_connected", "机械臂未连接 —— 请先连接设备")
+            raise job.UpgradeError(
+                "not_connected", i18n.tr("机械臂未连接 —— 请先连接设备"))
         try:
-            self._sdk_task("失能机械臂", lambda arm: arm.disable())
+            self._sdk_task(i18n.tr("失能机械臂"), lambda arm: arm.disable())
         except job.UpgradeError:
             raise
         except pa.NotConnectedError as e:
             raise job.UpgradeError("not_connected", str(e)) from None
         except Exception as e:  # noqa: BLE001
-            raise job.UpgradeError("arm_enabled", f"失能失败: {e}") from None
+            raise job.UpgradeError(
+                "arm_enabled", i18n.tr("失能失败: {err}", err=e)) from None
         deadline = time.monotonic() + UPGRADE_DISARM_TIMEOUT_S
         while time.monotonic() < deadline:
             state = self._sdk_task(
-                "读状态", lambda arm: arm.get_state(refresh=True).value)
+                i18n.tr("读状态"),
+                lambda arm: arm.get_state(refresh=True).value)
             if state is None or not bool(getattr(state, "enabled", False)):
                 # 读不到状态帧就不拦：门禁的权威在固件（enabled || enable_pending
                 # 一律回 0x03），本地预检只为可读性。
@@ -155,13 +161,14 @@ class UpgradeController:
             time.sleep(0.05)
         raise job.UpgradeError(
             "arm_enabled",
-            f"机械臂在 {UPGRADE_DISARM_TIMEOUT_S:.0f}s 内没有失能 —— 不冒险进入 DFU "
-            f"(跳转会停 TIM3, 电机 100ms 松开, 有重力负载会下垂)")
+            i18n.tr("机械臂在 {timeout:.0f}s 内没有失能 —— 不冒险进入 DFU "
+                    "(跳转会停 TIM3, 电机 100ms 松开, 有重力负载会下垂)",
+                    timeout=UPGRADE_DISARM_TIMEOUT_S))
 
     def enter_dfu(self) -> None:
         """发 `CMD_ENTER_DFU (0x15)`；成功（或设备已经跳走）后释放 CDC 端口。"""
         try:
-            self._sdk_task("进入 DFU", lambda arm: arm.enter_dfu())
+            self._sdk_task(i18n.tr("进入 DFU"), lambda arm: arm.enter_dfu())
         except pa.InvalidCommandError as e:
             # SDK 的本地预检：使能中不跳，一个字节都没发。
             raise job.UpgradeError("arm_enabled", str(e)) from None
@@ -192,7 +199,7 @@ class UpgradeController:
         denied = False
         while time.monotonic() < deadline:
             if is_cancelled():
-                raise job.UpgradeError("cancelled", "已取消")
+                raise job.UpgradeError("cancelled", i18n.tr("已取消"))
             dev = self._find_device()
             if dev is not None:
                 session = self._engine.DfuDevice(dev)
@@ -210,19 +217,22 @@ class UpgradeController:
         if denied:
             raise job.UpgradeError(
                 "dfu_permission_denied",
-                "DFU 设备在, 但当前用户打不开它 (打开时报 Access denied)。"
-                "Linux 上需要一条 udev 规则："
-                'SUBSYSTEM=="usb", ATTR{idVendor}=="0483", '
-                'ATTR{idProduct}=="df11", MODE="0666"')
+                i18n.tr(
+                    "DFU 设备在, 但当前用户打不开它 (打开时报 Access denied)。"
+                    "Linux 上需要一条 udev 规则："
+                    'SUBSYSTEM=="usb", ATTR{idVendor}=="0483", '
+                    'ATTR{idProduct}=="df11", MODE="0666"'))
         raise job.UpgradeError(
             "dfu_device_absent",
-            f"等 {DFU_APPEAR_TIMEOUT_S:.0f}s 没等到 DFU 设备 (0483:DF11) —— "
-            f"检查 USB 线; Windows 上还需要 ST 的 WinUSB 驱动")
+            i18n.tr("等 {timeout:.0f}s 没等到 DFU 设备 (0483:DF11) —— "
+                    "检查 USB 线; Windows 上还需要 ST 的 WinUSB 驱动",
+                    timeout=DFU_APPEAR_TIMEOUT_S))
 
     def flash(self, blob: bytes, base: int,
               on_progress: Callable[[int, int, str], None]) -> None:
         if self._dfu_session is None:
-            raise job.UpgradeError("dfu_device_absent", "没有可用的 DFU 设备")
+            raise job.UpgradeError("dfu_device_absent",
+                                   i18n.tr("没有可用的 DFU 设备"))
         # `param_policy="abort"`: `image.inspect` 已经拦过一道, 这里让引擎**自己**
         # 再拦一道 —— 许可证与出厂标定只存在于设备上, 擦掉不可恢复。
         self._dfu_session.flash(blob, base, progress=on_progress,
@@ -259,7 +269,8 @@ class UpgradeController:
         last = ""
         while time.monotonic() < deadline:
             if is_cancelled():
-                raise job.UpgradeError("cancelled", "已取消 (镜像已写入)")
+                raise job.UpgradeError("cancelled",
+                                       i18n.tr("已取消 (镜像已写入)"))
             attempts += 1
             ok, port, firmware, error = self._reconnect(self._port_hint)
             if ok:
@@ -268,9 +279,10 @@ class UpgradeController:
             time.sleep(RECONNECT_PERIOD_S)
         raise job.UpgradeError(
             "reconnect_failed",
-            f"固件已写入并通过读回校验, 但 {UPGRADE_RECONNECT_WINDOW_S:.0f}s 内没能"
-            f"重新连上 ({attempts} 次): {last or '没有发现 STM32 CDC 设备'} —— "
-            f"断电重上电即可")
+            i18n.tr("固件已写入并通过读回校验, 但 {window:.0f}s 内没能重新连上 "
+                    "({attempts} 次): {last} —— 断电重上电即可",
+                    window=UPGRADE_RECONNECT_WINDOW_S, attempts=attempts,
+                    last=last or i18n.tr("没有发现 STM32 CDC 设备")))
 
     # ------------------------------------------------------------------ 内部
     def _sdk_task(self, name: str, fn: Callable[[Any], Any],
@@ -285,10 +297,12 @@ class UpgradeController:
 
         self._sdk.submit(name, fn, done)
         if not event.wait(timeout):
-            raise job.UpgradeError("flash_failed", f"{name} 超时")
+            raise job.UpgradeError("flash_failed",
+                                   i18n.tr("{name} 超时", name=name))
         res = box.get("res")
         if res is None:
-            raise job.UpgradeError("flash_failed", f"{name} 没有结果")
+            raise job.UpgradeError("flash_failed",
+                                   i18n.tr("{name} 没有结果", name=name))
         if not res.ok:
             error = getattr(res, "error", None)
             if isinstance(error, Exception):
@@ -300,14 +314,15 @@ class UpgradeController:
         try:
             self._sdk.close()
         except Exception as e:                                      # noqa: BLE001
-            self._on_log(f"[WARN] 关闭串口失败: {e}")
+            self._on_log(i18n.tr("[WARN] 关闭串口失败: {err}", err=e))
 
     def _find_device(self):
         try:
             return self._engine.find_device()
         except Exception as e:                                      # noqa: BLE001
             raise job.UpgradeError("dfu_device_absent",
-                                   f"无法枚举 USB 设备: {type(e).__name__}: {e}") from None
+                                   i18n.tr("无法枚举 USB 设备: {detail}",
+                                           detail=f"{type(e).__name__}: {e}")) from None
 
 
 def _is_permission_error(exc: BaseException) -> bool:

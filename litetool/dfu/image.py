@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+from litetool import i18n
+
 import hashlib
 import re
 from dataclasses import dataclass
@@ -178,8 +180,9 @@ def extract_fw_version(blob: bytes) -> tuple[str | None, str]:
     if len(hits) == 1:
         return hits[0], ""
     if not hits:
-        return None, "镜像里未找到 Litearm* 版本串 (固件过旧? 版本宏被改过?)"
-    return None, f"镜像里有 {len(hits)} 个不同版本串: {', '.join(hits)}"
+        return None, i18n.tr("镜像里未找到 Litearm* 版本串 (固件过旧? 版本宏被改过?)")
+    return None, i18n.tr("镜像里有 {n} 个不同版本串: {hits}",
+                         n=len(hits), hits=", ".join(hits))
 
 
 # --------------------------------------------------------------------------

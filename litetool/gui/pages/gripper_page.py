@@ -14,7 +14,10 @@ from PyQt5.QtWidgets import (QComboBox, QFileDialog, QLabel, QLineEdit,
                              QMessageBox, QPlainTextEdit, QPushButton,
                              QVBoxLayout, QWidget)
 
+from litetool import i18n
 from litetool.gripper import GripperWorker, list_channels
+from litetool.gui.i18n_ui import (TrButton, TrLabel, tr_items, tr_placeholder,
+                                  tr_tooltip)
 from litetool.gui.pages.common import group, hint, note, row, spin
 from litetool.gui.widgets import mono_label
 
@@ -30,6 +33,7 @@ class GripperPage(QWidget):
         self._online = False
         self._worker = worker or GripperWorker(log=self._log)
         self._avail, self._why = self._worker.available()
+        self._calib = None
 
         # ---------------- 连接 / 身份 ----------------
         # 通道默认从内核枚举（/sys/class/net/type == 280）；枚举不到时仍保留 can0，
@@ -38,61 +42,63 @@ class GripperPage(QWidget):
         self.channel.setEditable(True)
         self.channel.setInsertPolicy(QComboBox.NoInsert)
         self.channel.setFixedWidth(110)
-        self.channel.setToolTip("内核枚举到的 CAN 接口；也可以手动输入未列出的名字")
-        self.btn_channels = QPushButton("刷新")
-        self.btn_channels.setToolTip("重新枚举 /sys/class/net 里的 CAN 接口")
+        tr_tooltip(self.channel,
+                   "内核枚举到的 CAN 接口；也可以手动输入未列出的名字")
+        self.btn_channels = TrButton("刷新")
+        tr_tooltip(self.btn_channels, "重新枚举 /sys/class/net 里的 CAN 接口")
         self.btn_channels.clicked.connect(self._refresh_channels)
         self.can_id = spin(1, 127, 8, 1, decimals=0)
         self.mst_id = spin(0, 127, 0, 1, decimals=0)
-        self.mst_id.setToolTip("0 = 自动探测；非 0 时作为状态帧的 master ID")
+        tr_tooltip(self.mst_id, "0 = 自动探测；非 0 时作为状态帧的 master ID")
         self.mount = QComboBox()
-        self.mount.addItem("出厂（正装）", None)
-        self.mount.addItem("正装模板", "normal")
-        self.mount.addItem("反装模板", "reverse")
+        tr_items(self.mount, [("出厂（正装）", None), ("正装模板", "normal"),
+                              ("反装模板", "reverse")])
         self.calib_path = QLineEdit()
-        self.calib_path.setPlaceholderText("可选：标定 JSON（留空则用上面的模板/出厂标定）")
-        self.btn_browse = QPushButton("浏览…")
+        tr_placeholder(self.calib_path,
+                       "可选：标定 JSON（留空则用上面的模板/出厂标定）")
+        self.btn_browse = TrButton("浏览…")
         self.btn_browse.clicked.connect(self._pick_calibration)
-        self.btn_conn = QPushButton("连接")
+        self.btn_conn = TrButton("连接")
         self.btn_conn.clicked.connect(self._toggle_connect)
         self.conn_lbl = QLabel("—")
         self.conn_lbl.setStyleSheet("color:#a0a0a0;")
 
         g_conn = group(
             "连接与身份（更改通道 / CAN ID / MST ID 后需断开重连）",
-            row(QLabel("通道"), self.channel, self.btn_channels,
-                QLabel("CAN ID"), self.can_id,
-                QLabel("MST ID"), self.mst_id,
-                QLabel("安装"), self.mount,
+            row(TrLabel("通道"), self.channel, self.btn_channels,
+                TrLabel("CAN ID"), self.can_id,
+                TrLabel("MST ID"), self.mst_id,
+                TrLabel("安装"), self.mount,
                 self.btn_conn),
-            row(QLabel("标定文件"), self.calib_path, self.btn_browse),
+            row(TrLabel("标定文件"), self.calib_path, self.btn_browse),
             self.conn_lbl,
         )
 
         # ---------------- 动作 ----------------
-        self.btn_enable = QPushButton("使能")
+        self.btn_enable = TrButton("使能")
         self.btn_enable.clicked.connect(self._toggle_enable)
-        self.btn_open = QPushButton("张开")
+        self.btn_open = TrButton("张开")
         self.btn_open.clicked.connect(lambda: self._act("张开", self._worker.open_jaws))
-        self.btn_close = QPushButton("闭合")
+        self.btn_close = TrButton("闭合")
         self.btn_close.clicked.connect(lambda: self._act("闭合", self._worker.close_jaws))
         self.force = spin(0.0, 60.0, 20.0, 1.0)
         self.hold = spin(0.5, 60.0, 3.0, 0.5)
-        self.btn_grasp = QPushButton("抓取")
+        self.btn_grasp = TrButton("抓取")
         self.btn_grasp.clicked.connect(self._on_grasp)
-        self.btn_stop = QPushButton("停止 / 释放")
-        self.btn_stop.setToolTip(
+        self.btn_stop = TrButton("停止 / 释放")
+        tr_tooltip(
+            self.btn_stop,
             "旁路发零力矩帧；若有动作在途，再失能电机以中止它（否则保力循环下一帧\n"
             "就会把力矩写回来），并丢弃排队中的动作。不代替机械臂急停。")
         self.btn_stop.clicked.connect(self._on_stop)
-        self.btn_refresh = QPushButton("刷新状态")
+        self.btn_refresh = TrButton("刷新状态")
         self.btn_refresh.clicked.connect(lambda: self._act("刷新", self._worker.refresh))
 
         g_act = group(
             "动作",
             row(self.btn_enable, self.btn_open, self.btn_close),
-            row(QLabel("抓取力 (N)"), self.force,
-                QLabel("保持 (s)"), self.hold,
+            row(TrLabel("抓取力 (N)"), self.force,
+                TrLabel("保持 (s)"), self.hold,
                 self.btn_grasp, self.btn_stop),
             row(self.btn_refresh),
             hint("⚠ 夹爪与机械臂共用现场空间：抓取前确认手指路径上没有人。"
@@ -108,25 +114,26 @@ class GripperPage(QWidget):
         self.fresh_lbl = mono_label(150)
         g_tel = group(
             "遥测（10Hz 轮询）",
-            row(QLabel("位置 (mm)"), self.pos_lbl,
-                QLabel("夹持力 (N)"), self.force_lbl,
-                QLabel("力矩 (Nm)"), self.tau_lbl),
-            row(QLabel("温度 mos/coil (°C)"), self.temp_lbl,
-                QLabel("错误码"), self.err_lbl),
-            row(QLabel("新鲜度"), self.fresh_lbl),
+            row(TrLabel("位置 (mm)"), self.pos_lbl,
+                TrLabel("夹持力 (N)"), self.force_lbl,
+                TrLabel("力矩 (Nm)"), self.tau_lbl),
+            row(TrLabel("温度 mos/coil (°C)"), self.temp_lbl,
+                TrLabel("错误码"), self.err_lbl),
+            row(TrLabel("新鲜度"), self.fresh_lbl),
         )
 
         # ---------------- 标定 ----------------
         self.calib_lbl = QLabel("—")
         self.calib_lbl.setStyleSheet("font-family:'DejaVu Sans Mono';")
-        self.btn_calib = QPushButton("读取标定")
+        self.btn_calib = TrButton("读取标定")
         self.btn_calib.clicked.connect(self._act_calibration)
-        self.btn_load = QPushButton("加载标定…")
+        self.btn_load = TrButton("加载标定…")
         self.btn_load.clicked.connect(self._load_calibration)
-        self.btn_save = QPushButton("保存标定…")
+        self.btn_save = TrButton("保存标定…")
         self.btn_save.clicked.connect(self._save_calibration)
-        self.btn_zero = QPushButton("写零（不可逆）")
-        self.btn_zero.setToolTip("把当前编码器角写为电机零位，写入电机 Flash。不可逆。")
+        self.btn_zero = TrButton("写零（不可逆）")
+        tr_tooltip(self.btn_zero,
+                   "把当前编码器角写为电机零位，写入电机 Flash。不可逆。")
         self.btn_zero.clicked.connect(self._on_write_zero)
         g_cal = group(
             "标定",
@@ -210,8 +217,9 @@ class GripperPage(QWidget):
                 calibration_path=self.calib_path.text().strip() or None,
             )
         except Exception as e:  # noqa: BLE001 - 用户要看到原因
-            self._log(f"[ERR] 夹爪连接失败: {e}")
-            QMessageBox.critical(self, "夹爪连接失败", str(e))
+            self._log(i18n.tr("[ERR] 夹爪连接失败: {err}", err=e))
+            QMessageBox.critical(self, i18n.tr("夹爪连接失败"),
+                                 i18n.safe_detail(e) or i18n.tr("未知错误"))
         self._refresh()
 
     # ---------------- 动作 ----------------
@@ -228,7 +236,7 @@ class GripperPage(QWidget):
 
     def _act(self, label: str, fn):
         if not self._worker.online:
-            self._log("[WARN] 夹爪未连接")
+            self._log(i18n.tr("[WARN] 夹爪未连接"))
             return
         self._busy = True
         self._refresh()
@@ -246,15 +254,16 @@ class GripperPage(QWidget):
 
     def _on_stop(self):
         ok, why = self._worker.stop_now()
-        self._log(("[WARN] 夹爪停止: " if ok else "[ERR] 夹爪停止未完整生效: ") + why)
+        self._log((i18n.tr("[WARN] 夹爪停止: ") if ok
+                   else i18n.tr("[ERR] 夹爪停止未完整生效: ")) + why)
 
     def _on_write_zero(self):
         if not self._worker.online:
             return
         if QMessageBox.warning(
-                self, "确认写零",
-                "写零会把当前编码器角写为电机零位并写入电机 Flash，不可逆。\n"
-                "标定行程保持不变。确认继续？",
+                self, i18n.tr("确认写零"),
+                i18n.tr("写零会把当前编码器角写为电机零位并写入电机 Flash，不可逆。\n"
+                        "标定行程保持不变。确认继续？"),
                 QMessageBox.Ok | QMessageBox.Cancel,
                 QMessageBox.Cancel) != QMessageBox.Ok:
             return
@@ -263,16 +272,16 @@ class GripperPage(QWidget):
         self._worker.write_zero(cb=self._on_task)
 
     def _pick_calibration(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择标定文件", "",
-                                              "JSON (*.json);;全部 (*)")
+        path, _ = QFileDialog.getOpenFileName(self, i18n.tr("选择标定文件"), "",
+                                              i18n.tr("JSON (*.json);;全部 (*)"))
         if path:
             self.calib_path.setText(path)
 
     def _load_calibration(self):
         if not self._worker.online:
             return
-        path, _ = QFileDialog.getOpenFileName(self, "加载标定文件", "",
-                                              "JSON (*.json);;全部 (*)")
+        path, _ = QFileDialog.getOpenFileName(self, i18n.tr("加载标定文件"), "",
+                                              i18n.tr("JSON (*.json);;全部 (*)"))
         if not path:
             return
         self._busy = True
@@ -282,9 +291,9 @@ class GripperPage(QWidget):
     def _save_calibration(self):
         if not self._worker.online:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "保存标定文件",
+        path, _ = QFileDialog.getSaveFileName(self, i18n.tr("保存标定文件"),
                                               "litegrip_calibration.json",
-                                              "JSON (*.json);;全部 (*)")
+                                              i18n.tr("JSON (*.json);;全部 (*)"))
         if not path:
             return
         self._busy = True
@@ -295,23 +304,44 @@ class GripperPage(QWidget):
         self._busy = False
         self._log(("[OK] " if res.ok else "[ERR] ") + res.text)
         if res.ok and res.value and isinstance(res.value, dict):
-            v = res.value
-            self.calib_lbl.setText(
-                f"通道 {v['channel']} · CAN 0x{int(v['can_id']):02X} · "
-                f"MST {v['mst_id']} · 方向 {v['mount'] or '未标定'} · "
-                f"行程 {v['travel_mm']:.1f} mm · "
-                f"{'已标定' if v['calibrated'] else '未标定'}")
+            self._calib = res.value
+            self._render_calib()
         self._refresh()
 
     # ---------------- 轮询 ----------------
+    def _render_conn(self, online: bool) -> None:
+        self.conn_lbl.setText(i18n.tr("● 已连接") if online
+                              else i18n.tr("● 未连接"))
+        self.conn_lbl.setStyleSheet(
+            "color:#6fdd8b;" if online else "color:#a0a0a0;")
+        if not self._avail:
+            self.conn_lbl.setText(i18n.tr("● 不可用 — {why}",
+                                          why=i18n.tr(self._why)))
+            self.conn_lbl.setStyleSheet("color:#d8a13a;")
+
+    def _render_calib(self) -> None:
+        v = self._calib
+        if v is None:
+            self.calib_lbl.setText("—")
+            return
+        self.calib_lbl.setText(i18n.tr(
+            "通道 {channel} · CAN 0x{can_id:02X} · MST {mst} · 方向 {mount} · "
+            "行程 {travel:.1f} mm · {state}",
+            channel=v['channel'], can_id=int(v['can_id']), mst=v['mst_id'],
+            mount=i18n.tr(v['mount'] or "未标定"),
+            travel=v['travel_mm'],
+            state=i18n.tr("已标定") if v['calibrated'] else i18n.tr("未标定")))
+
+    def retranslate(self) -> None:
+        self._render_conn(bool(self._worker.online))
+        self._render_calib()
+        self._tick()
+
     def _tick(self):
         online = bool(self._worker.online)
         if online != self._online:
             self._online = online
-            self.conn_lbl.setText(
-                "● 已连接" if online else "● 未连接")
-            self.conn_lbl.setStyleSheet(
-                "color:#6fdd8b;" if online else "color:#a0a0a0;")
+            self._render_conn(online)
             if not online:
                 for lb in (self.pos_lbl, self.force_lbl, self.tau_lbl,
                            self.temp_lbl, self.err_lbl, self.fresh_lbl):
@@ -324,7 +354,10 @@ class GripperPage(QWidget):
             self.temp_lbl.setText(f"{st.temperature_mos}/{st.temperature_coil}")
             self.err_lbl.setText(str(st.error_code))
             age = "—" if st.data_age_s is None else f"{st.data_age_s * 1000:.0f} ms"
-            self.fresh_lbl.setText(f"{'新帧' if st.fresh else '缓存'} · {age}")
+            self.fresh_lbl.setText(
+                i18n.tr("{state} · {age}",
+                        state=i18n.tr("新帧") if st.fresh else i18n.tr("缓存"),
+                        age=age))
         self._refresh()
 
     def _refresh(self):
@@ -332,9 +365,9 @@ class GripperPage(QWidget):
         enabled = bool(getattr(self._worker.state, "is_enabled", False)) if online else False
         can = online and not self._busy
         self.btn_conn.setEnabled(self._avail)
-        self.btn_conn.setText("断开" if online else "连接")
+        self.btn_conn.setText(i18n.tr("断开") if online else i18n.tr("连接"))
         self.btn_enable.setEnabled(can)
-        self.btn_enable.setText("失能" if enabled else "使能")
+        self.btn_enable.setText(i18n.tr("失能") if enabled else i18n.tr("使能"))
         for b in (self.btn_open, self.btn_close, self.btn_grasp,
                   self.btn_refresh, self.btn_calib, self.btn_load,
                   self.btn_save, self.btn_zero):
@@ -346,5 +379,6 @@ class GripperPage(QWidget):
                   self.mount, self.calib_path, self.btn_browse):
             w.setEnabled(not online)          # 身份改动要求重新连接
         if not self._avail:
-            self.conn_lbl.setText(f"● 不可用 — {self._why}")
+            self.conn_lbl.setText(i18n.tr("● 不可用 — {why}",
+                                          why=i18n.tr(self._why)))
             self.conn_lbl.setStyleSheet("color:#d8a13a;")

@@ -16,6 +16,8 @@
 """
 from __future__ import annotations
 
+from litetool import i18n
+
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol, Tuple
 
@@ -133,11 +135,13 @@ def run_upgrade(*, blob: bytes, base: int, summary, hooks: UpgradeHooks,
         emit(Progress(phase, done, total, detail))
 
     note(PHASE_VALIDATE,
-         f"{summary.name} · {summary.size} B · "
-         f"版本 {expected_version or '未识别'} · sha256 {summary.sha256[:12]}")
+         i18n.tr("{name} · {size} B · 版本 {version} · sha256 {sha}",
+                 name=summary.name, size=summary.size,
+                 version=expected_version or i18n.tr("未识别"),
+                 sha=summary.sha256[:12]))
 
     if is_cancelled():
-        return Result(False, REASON_CANCELLED, "已取消（尚未开始）")
+        return Result(False, REASON_CANCELLED, i18n.tr("已取消（尚未开始）"))
 
     #: 失败收尾要不要把设备拉出 DFU。从 DFU 起跑时初值就是 `True` —— 板子**本来**
     #: 就在里面，而"留在 bootloader 里像坏了"是这里最坏的结局，与"是不是我们推进
@@ -145,10 +149,10 @@ def run_upgrade(*, blob: bytes, base: int, summary, hooks: UpgradeHooks,
     in_dfu = bool(from_dfu)
     try:
         if not from_dfu:
-            note(PHASE_DISARM, "失能全部关节")
+            note(PHASE_DISARM, i18n.tr("失能全部关节"))
             hooks.disarm()
 
-            note(PHASE_ENTER_DFU, "发送 CMD_ENTER_DFU (0x15)")
+            note(PHASE_ENTER_DFU, i18n.tr("发送 CMD_ENTER_DFU (0x15)"))
             # ⚠ **先置位再发**。SDK 记着一条已知边界 (`Arm.enter_dfu` 的文档): 固件的
             #   `ACK{0x15}` 在应答 FIFO 满时会被丢掉 (`usb_cmd.c` 的"满: 丢最新"), 而设备
             #   **照样跳进 bootloader** —— 这时 `enter_dfu()` 从等 ACK 里抛 `TransportError`,
@@ -160,22 +164,23 @@ def run_upgrade(*, blob: bytes, base: int, summary, hooks: UpgradeHooks,
             in_dfu = True
             hooks.enter_dfu()
 
-        note(PHASE_WAIT_DFU, "打开 DFU 设备 (0483:DF11)" if from_dfu
-             else "等待 DFU 设备 (0483:DF11) 枚举")
+        note(PHASE_WAIT_DFU,
+             i18n.tr("打开 DFU 设备 (0483:DF11)") if from_dfu
+             else i18n.tr("等待 DFU 设备 (0483:DF11) 枚举"))
         hooks.wait_for_dfu(is_cancelled)
 
-        note(PHASE_FLASH, "开始烧录", 0, summary.size)
+        note(PHASE_FLASH, i18n.tr("开始烧录"), 0, summary.size)
         hooks.flash(blob, base, lambda d, t, s: note(PHASE_FLASH, s, d, t))
 
         if is_cancelled():
             # 烧完了才按的取消：镜像已经落盘, 这里**不能**说"没升级"。
-            note(PHASE_DETACH, "复位回应用（烧录已完成, 取消不再生效）")
+            note(PHASE_DETACH, i18n.tr("复位回应用（烧录已完成, 取消不再生效）"))
         else:
-            note(PHASE_DETACH, "复位回应用")
+            note(PHASE_DETACH, i18n.tr("复位回应用"))
         hooks.detach()
         in_dfu = False
 
-        note(PHASE_RECONNECT, "等待串口重新枚举并重建会话")
+        note(PHASE_RECONNECT, i18n.tr("等待串口重新枚举并重建会话"))
         port, version = hooks.reconnect(is_cancelled)
     except UpgradeError as e:
         return _fail(e.reason, str(e), hooks, in_dfu, note)
@@ -190,10 +195,13 @@ def run_upgrade(*, blob: bytes, base: int, summary, hooks: UpgradeHooks,
         # ⚠ 不做成失败: 读回校验已经过了, 镜像**确实**写进去了 —— 对不上说明
         #   我们对"镜像里的版本串"或"设备报的版本串"的理解有一个是错的, 这要
         #   让人看见, 但不是"升级失败"。
-        warning = (f"镜像版本 {expected_version}, 但设备复位后报 {version} —— "
-                   f"烧录本身已通过读回校验, 请核对这份镜像是否选错")
-    note(PHASE_DONE, f"完成 · 设备报版本 {version or '未知'}")
-    return Result(True, None, "升级完成并通过读回校验",
+        warning = i18n.tr(
+            "镜像版本 {expected}, 但设备复位后报 {version} —— "
+            "烧录本身已通过读回校验, 请核对这份镜像是否选错",
+            expected=expected_version, version=version)
+    note(PHASE_DONE, i18n.tr("完成 · 设备报版本 {version}",
+                             version=version or i18n.tr("未知")))
+    return Result(True, None, i18n.tr("升级完成并通过读回校验"),
                   version=version, port=port, warning=warning)
 
 
@@ -206,10 +214,11 @@ def _fail(reason: str, message: str, hooks: UpgradeHooks, in_dfu: bool,
     真正的失败原因 —— 后者才是操作员要看的。
     """
     if in_dfu:
-        note(PHASE_DETACH, "失败后复位回应用 ...")
+        note(PHASE_DETACH, i18n.tr("失败后复位回应用 ..."))
         try:
             hooks.detach()
         except Exception as e:                                 # noqa: BLE001
-            note(PHASE_DETACH, f"复位回应用也失败 ({type(e).__name__}: {e}) "
-                               f"—— 板子可能停在 bootloader, 断电重上电即可")
+            note(PHASE_DETACH, i18n.tr(
+                "复位回应用也失败 ({detail}) —— 板子可能停在 bootloader, 断电重上电即可",
+                detail=f"{type(e).__name__}: {e}"))
     return Result(False, reason, message)

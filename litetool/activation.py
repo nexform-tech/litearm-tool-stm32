@@ -19,6 +19,8 @@
 """
 from __future__ import annotations
 
+from litetool import i18n
+
 import json
 import os
 import re
@@ -101,21 +103,21 @@ DEFAULT_ACTIVATION_URL = PRODUCTION_ACTIVATION_URL
 
 def _hex_bytes(value: Any, n: int, field: str) -> bytes:
     if not isinstance(value, str):
-        raise LicenseFileError("bad_field", f"{field} 必须是十六进制字符串")
+        raise LicenseFileError("bad_field", i18n.tr("{field} 必须是十六进制字符串", field=field))
     text = value.strip().lower()
     if len(text) != n * 2:
-        raise LicenseFileError("bad_field", f"{field} 需 {n * 2} 位十六进制，给的是 {len(text)} 位")
+        raise LicenseFileError("bad_field", i18n.tr("{field} 需 {want} 位十六进制，给的是 {got} 位", field=field, want=n * 2, got=len(text)))
     try:
         return bytes.fromhex(text)
     except ValueError:
-        raise LicenseFileError("bad_field", f"{field} 含非十六进制字符") from None
+        raise LicenseFileError("bad_field", i18n.tr("{field} 含非十六进制字符", field=field)) from None
 
 
 def _uint(value: Any, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
-        raise LicenseFileError("bad_field", f"{field} 必须是整数")
+        raise LicenseFileError("bad_field", i18n.tr("{field} 必须是整数", field=field))
     if not 0 <= value <= _U32_MAX:
-        raise LicenseFileError("bad_field", f"{field} 超出 u32 范围: {value}")
+        raise LicenseFileError("bad_field", i18n.tr("{field} 超出 u32 范围: {value}", field=field, value=value))
     return int(value)
 
 
@@ -130,31 +132,31 @@ def parse_license(raw: Any, *, expected_uid: Optional[str] = None) -> Dict[str, 
         try:
             raw = json.loads(raw)
         except ValueError:
-            raise LicenseFileError("not_json", "这不是一份凭据文件（不是 JSON）") from None
+            raise LicenseFileError("not_json", i18n.tr("这不是一份凭据文件（不是 JSON）")) from None
     if not isinstance(raw, dict):
-        raise LicenseFileError("not_json", "凭据文件的内容不是一个 JSON 对象")
+        raise LicenseFileError("not_json", i18n.tr("凭据文件的内容不是一个 JSON 对象"))
 
     fmt = raw.get("format")
     if fmt is None:
-        raise LicenseFileError("missing_field", "凭据文件缺少 format 字段")
+        raise LicenseFileError("missing_field", i18n.tr("凭据文件缺少 format 字段"))
     if fmt != LICENSE_FORMAT:
         raise LicenseFileError(
             "unsupported_format",
-            f"凭据格式为 {fmt!r}，当前上位机只认 {LICENSE_FORMAT}（请升级上位机）")
+            i18n.tr("凭据格式为 {fmt}，当前上位机只认 {want}（请升级上位机）", fmt=repr(fmt), want=LICENSE_FORMAT))
 
     for field in ("uid", "cust_id", "issued", "mac"):
         if field not in raw:
-            raise LicenseFileError("missing_field", f"凭据文件缺少 {field} 字段")
+            raise LicenseFileError("missing_field", i18n.tr("凭据文件缺少 {field} 字段", field=field))
 
     uid = _hex_bytes(raw["uid"], 12, "uid").hex()
     if expected_uid is not None and uid != expected_uid.strip().lower():
         raise LicenseFileError(
             "uid_mismatch",
-            f"这份凭据是给 {uid} 的，当前这台机器是 {expected_uid.strip().lower()}")
+            i18n.tr("这份凭据是给 {uid} 的，当前这台机器是 {actual}", uid=uid, actual=expected_uid.strip().lower()))
 
     flags = _uint(raw.get("flags", 0), "flags")
     if flags & ~0x1:
-        raise LicenseFileError("bad_field", f"flags 只允许 bit0，给的是 0x{flags:X}")
+        raise LicenseFileError("bad_field", i18n.tr("flags 只允许 bit0，给的是 0x{flags:X}", flags=flags))
 
     return {
         "uid": uid,
@@ -200,22 +202,22 @@ def _contact_fields(contact: dict) -> Dict[str, str]:
         if raw is None:
             raw = ""
         if not isinstance(raw, str):
-            raise ActivationError("missing_contact", f"字段 {field} 必须是文本")
+            raise ActivationError("missing_contact", i18n.tr("字段 {field} 必须是文本", field=field))
         text = raw.strip()
         if required and not text:
-            raise ActivationError("missing_contact", f"缺少字段 {field}")
+            raise ActivationError("missing_contact", i18n.tr("缺少字段 {field}", field=field))
         if max_len is not None and len(text) > max_len:
-            raise ActivationError("contact_too_long", f"字段 {field} 过长（上限 {max_len} 字）")
+            raise ActivationError("contact_too_long", i18n.tr("字段 {field} 过长（上限 {max} 字）", field=field, max=max_len))
         if text and min_len is not None and len(text) < min_len:
-            raise ActivationError("missing_contact", f"字段 {field} 至少 {min_len} 字")
+            raise ActivationError("missing_contact", i18n.tr("字段 {field} 至少 {min} 字", field=field, min=min_len))
         values[field] = text
 
     if not _PHONE_RE.fullmatch(values["phone"]):
-        raise ActivationError("bad_phone", "字段 phone 格式不正确：需为 11 位手机号")
+        raise ActivationError("bad_phone", i18n.tr("字段 phone 格式不正确：需为 11 位手机号"))
     if not _EMAIL_RE.fullmatch(values["email"]):
-        raise ActivationError("bad_email", "字段 email 格式不正确：例如 name@example.com")
+        raise ActivationError("bad_email", i18n.tr("字段 email 格式不正确：例如 name@example.com"))
     if not _is_person_name(values["name"]):
-        raise ActivationError("bad_name", "字段 name 格式不正确：只允许文字（2-32 字），不能含数字")
+        raise ActivationError("bad_name", i18n.tr("字段 name 格式不正确：只允许文字（2-32 字），不能含数字"))
     return values
 
 
@@ -223,15 +225,15 @@ def build_request(payload: dict) -> dict:
     """界面提交的内容 → 发给激活服务的请求体（**最终门禁在这一层**）。"""
     uid = payload.get("uid")
     if not isinstance(uid, str) or not _UID_RE.fullmatch(uid.strip().lower()):
-        raise ActivationError("bad_uid", "设备 UID 需为 24 位十六进制")
+        raise ActivationError("bad_uid", i18n.tr("设备 UID 需为 24 位十六进制"))
 
     consent = payload.get("consent")
     if not isinstance(consent, dict) or consent.get("granted") is not True:
-        raise ActivationError("consent_required", "未同意《激活注册信息同意书》—— 请先阅读并同意")
+        raise ActivationError("consent_required", i18n.tr("未同意《激活注册信息同意书》—— 请先阅读并同意"))
 
     contact = payload.get("contact")
     if not isinstance(contact, dict):
-        raise ActivationError("missing_contact", "缺少注册信息")
+        raise ActivationError("missing_contact", i18n.tr("缺少注册信息"))
 
     diag = payload.get("diagnostics")
     diag = diag if isinstance(diag, dict) else {}
@@ -296,7 +298,7 @@ def _service_error(status: int, body: bytes) -> ActivationError:
     known = {"not_found", "invalid_uid", "consent_required", "rate_limited",
              "maintenance", "code_required", "invalid_request"}
     reason = code if code in known else "server"
-    detail = message or f"激活服务返回 HTTP {status}"
+    detail = message or i18n.tr("激活服务返回 HTTP {status}", status=status)
     return ActivationError(reason, f"{detail} (HTTP {status})")
 
 
@@ -308,28 +310,28 @@ def request_license(base_url: str, request: dict, *, timeout: float = REQUEST_TI
     `post` 可注入 —— 测试用它替换真网络。
     """
     if not base_url:
-        raise ActivationError("unconfigured", "未配置激活服务地址 —— 请用 --activation-url 指定")
+        raise ActivationError("unconfigured", i18n.tr("未配置激活服务地址 —— 请用 --activation-url 指定"))
     url = base_url.rstrip("/") + ACTIVATION_PATH
     try:
         status, body = post(url, request, timeout)
     except ActivationError:
         raise
     except urllib.error.URLError as e:
-        raise ActivationError("unreachable", f"连不上激活服务: {e.reason}") from None
+        raise ActivationError("unreachable", i18n.tr("连不上激活服务: {detail}", detail=e.reason)) from None
     except OSError as e:
-        raise ActivationError("unreachable", f"连不上激活服务: {e}") from None
+        raise ActivationError("unreachable", i18n.tr("连不上激活服务: {detail}", detail=e)) from None
 
     if not 200 <= status < 300:
         raise _service_error(status, body)
     try:
         doc = json.loads(body.decode("utf-8", "replace"))
     except ValueError:
-        raise ActivationError("bad_response", "激活服务返回的不是合法 JSON") from None
+        raise ActivationError("bad_response", i18n.tr("激活服务返回的不是合法 JSON")) from None
     try:
         return parse_license(doc, expected_uid=expected_uid)
     except LicenseFileError as e:
         reason = e.reason if e.reason in _TRANSPARENT_LICENSE_REASONS else "bad_response"
-        raise ActivationError(reason, f"激活服务返回的凭据不可用: {e}") from None
+        raise ActivationError(reason, i18n.tr("激活服务返回的凭据不可用: {detail}", detail=e)) from None
 
 
 # --------------------------------------------------------------------------- 内部测试通道

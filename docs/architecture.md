@@ -23,6 +23,11 @@ Constraints:
 | `litetool/protocol.py` | Frame codec, CRC, G8 status frame, ACK/ERR, tuning command codecs | Standard library only |
 | `litetool/param_catalog.py` | Parameter mirror: schema, ranges, diff, ff_mask, roles, hints, details | `protocol.py` |
 | `litetool/tuning_guide.py` | Tuning guide text: formulas, symbol mapping, prerequisite notes, symptom table | Standard library only |
+| `litetool/i18n.py` | UI language state, system-language detection, Chinese-source `tr()` with automatic fallback | Standard library only |
+| `litetool/i18n_en.py` | English string table (Chinese source text → English) | Standard library only |
+| `litetool/param_catalog_en.py`, `litetool/tuning_guide_en.py` | English parameter metadata and guide content | Standard library only |
+| `litetool/gui/i18n_ui.py` | Static-text registry and live retranslation for PyQt widgets | PyQt5 |
+| `litetool/gui/prefs.py` | Per-machine UI preferences (`QSettings`: language) | PyQt5 |
 | `litetool/checks.py` | Δq intent confirmation and motion-page lock checks | Standard library only |
 | `litetool/client.py` | State cache, ACK pairing, emergency bypass, parameter read/write | `protocol.py`, `transport.py` |
 | `litetool/transport.py` | Port discovery and `SerialLink` background reader | `pyserial` |

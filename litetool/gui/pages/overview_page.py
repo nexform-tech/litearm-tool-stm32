@@ -9,6 +9,8 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QPushButton, QSplitter,
                              QVBoxLayout, QWidget)
 
+from litetool import i18n
+from litetool.gui.i18n_ui import TrButton, TrLabel
 from litetool.gui.pages.plot_pane import PlotPane
 from litetool.gui.widgets import JointTable
 
@@ -19,12 +21,12 @@ class OverviewPage(QWidget):
         self.table.set_temp_alert(settings.temp_alert_c)
         self.plot = PlotPane(window_s=settings.plot_window_s)
 
-        self.btn_zoom = QPushButton("曲线放大")
+        self.btn_zoom = TrButton("曲线放大")
         self.btn_zoom.setCheckable(True)
         self.btn_zoom.toggled.connect(self._on_zoom)
 
         head = QHBoxLayout()
-        head.addWidget(QLabel("逐关节状态（超温黄底 / 异常码或断轴红底）"))
+        head.addWidget(TrLabel("逐关节状态（超温黄底 / 异常码或断轴红底）"))
         head.addStretch(1)
         self.fault_lbl = QLabel("")
         self.fault_lbl.setStyleSheet("color:#ff6b6b;font-weight:bold;")
@@ -49,7 +51,10 @@ class OverviewPage(QWidget):
 
     def _on_zoom(self, on: bool):
         self.split.widget(0).setVisible(not on)
-        self.btn_zoom.setText("显示状态表" if on else "曲线放大")
+        self.btn_zoom.setText(i18n.tr("显示状态表") if on else i18n.tr("曲线放大"))
+
+    def retranslate(self):
+        self._on_zoom(self.btn_zoom.isChecked())
 
     def set_joints(self, n: int):
         self.plot.set_joints(n)

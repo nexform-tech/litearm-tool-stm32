@@ -5,6 +5,8 @@
 """
 from dataclasses import dataclass
 
+from litetool import i18n
+
 
 @dataclass
 class MotionPlan:
@@ -31,7 +33,8 @@ def plan_motion(current: list[float], targets: list[float], threshold: float = 0
     - threshold: Δq 超过即需弹确认框（rad, 应 > 0）。
     """
     if len(current) != len(targets):
-        raise ValueError(f"current({len(current)}) 与 targets({len(targets)}) 关节数不一致")
+        raise ValueError(i18n.tr("current({a}) 与 targets({b}) 关节数不一致",
+                                 a=len(current), b=len(targets)))
     deltas = [abs(t - c) for c, t in zip(current, targets)]
     exceeds = [i + 1 for i, d in enumerate(deltas) if d > threshold]
     return MotionPlan(current=list(current), targets=list(targets),
@@ -45,7 +48,8 @@ def confirm_lines(plan: MotionPlan, labels=None) -> list[str]:
     for idx1 in plan.exceeds:
         i = idx1 - 1
         c, t, d = plan.current[i], plan.targets[i], plan.deltas[i]
-        lines.append(f"{labels[i]}: 当前 {c:.3f} → 目标 {t:.3f}（Δ {d:.3f} rad）")
+        lines.append(i18n.tr("{joint}: 当前 {cur:.3f} → 目标 {target:.3f}（Δ {delta:.3f} rad）",
+                             joint=labels[i], cur=c, target=t, delta=d))
     return lines
 
 
@@ -77,11 +81,16 @@ class PosePlan:
 
     def summary(self) -> str:
         if self.current is None:
-            return (f"⚠ 拿不到当前末端位姿，无法比较幅度。\n"
-                    f"目标：{'  '.join(f'{v:+.4f}' for v in self.target)}\n"
-                    f"（建议先 [读取当前末端位姿] 再下发）")
-        return (f"位置移动 {self.dpos:.3f} m（阈值 {self.pos_threshold}）\n"
-                f"姿态变化 {self.drot:.3f} rad（阈值 {self.rot_threshold}）")
+            return i18n.tr(
+                "⚠ 拿不到当前末端位姿，无法比较幅度。\n"
+                "目标：{target}\n"
+                "（建议先 [读取当前末端位姿] 再下发）",
+                target='  '.join(f'{v:+.4f}' for v in self.target))
+        return i18n.tr(
+            "位置移动 {dpos:.3f} m（阈值 {pos_threshold}）\n"
+            "姿态变化 {drot:.3f} rad（阈值 {rot_threshold}）",
+            dpos=self.dpos, pos_threshold=self.pos_threshold,
+            drot=self.drot, rot_threshold=self.rot_threshold)
 
 
 def _rpy_to_R(rpy):

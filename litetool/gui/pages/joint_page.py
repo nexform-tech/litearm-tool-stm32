@@ -9,6 +9,7 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (QCheckBox, QComboBox, QGridLayout, QLabel,
                              QPushButton, QVBoxLayout, QWidget)
 
+from litetool.gui.i18n_ui import TrButton, TrCheckBox, TrLabel, tr_tooltip
 from litetool.gui.pages.common import (JointRow, LockBanner, group, hint, note,
                                        row, spin)
 
@@ -37,15 +38,17 @@ class JointPage(QWidget):
         # ---------------- movej ----------------
         self.mj_row = JointRow()
         self.mj_speed = spin(0.01, settings.speed_max_ui, settings.default_speed, 0.05)
-        self.btn_mj = QPushButton("下发 movej")
+        self.btn_mj = TrButton("下发 movej")
         self.btn_mj.clicked.connect(self._emit_mj)
-        self.btn_ready = QPushButton("就绪姿态")
-        self.btn_ready.setToolTip(
+        self.btn_ready = TrButton("就绪姿态")
+        tr_tooltip(
+            self.btn_ready,
             "把目标填成就绪姿态 [0, 0.5, 0, -1, 0, 0.6, 0]（按轴数裁剪/补 0）\n"
             "并立即下发 movej。仍走运动解锁与 Δq 确认。")
         self.btn_ready.clicked.connect(self._emit_ready)
-        self.sup_cb = QCheckBox("接管在途运动")
-        self.sup_cb.setToolTip(
+        self.sup_cb = TrCheckBox("接管在途运动")
+        tr_tooltip(
+            self.sup_cb,
             "勾选后直接写一条 movej 旁路帧：固件会作废在途的笛卡尔规划（点动/直线），\n"
             "不必等它走完。\n"
             "⚠ 若在途的是另一条 movej，SDK 要等原目标超时/到位才返回；\n"
@@ -53,18 +56,18 @@ class JointPage(QWidget):
         self.sup_cb.toggled.connect(lambda _=None: self._refresh())
         g_mj = group("move_j —— 关节轨迹（绝对角 rad，固件 S 曲线自完成 + 到位静止保持）",
                      self.mj_row,
-                     row(QLabel("速度倍率 (0..1)"), self.mj_speed,
+                     row(TrLabel("速度倍率 (0..1)"), self.mj_speed,
                          self.btn_ready, self.sup_cb, self.btn_mj))
 
         # ---------------- move_js ----------------
         self.js_q = JointRow()
         self.js_dq = JointRow()
         self.js_tau = JointRow()
-        self.js_use_tau = QCheckBox("带 tau_ff 前馈")
-        self.btn_js = QPushButton("单发 move_js")
+        self.js_use_tau = TrCheckBox("带 tau_ff 前馈")
+        self.btn_js = TrButton("单发 move_js")
         self.btn_js.clicked.connect(self._emit_js)
         g_js = group("move_js —— 连续伺服透传（单发）",
-                     self.js_q, row(QLabel("dq (rad/s)")), self.js_dq,
+                     self.js_q, row(TrLabel("dq (rad/s)")), self.js_dq,
                      row(self.js_use_tau), self.js_tau,
                      row(self.btn_js),
                      hint("⚠ 固件 0.1s 看门狗：连续伺服须以 ≥10Hz 重发，"
@@ -74,7 +77,7 @@ class JointPage(QWidget):
         self.mm_idx = QComboBox()
         self.mm_spins = {}
         mm = QGridLayout()
-        mm.addWidget(QLabel("关节"), 0, 0)
+        mm.addWidget(TrLabel("关节"), 0, 0)
         mm.addWidget(self.mm_idx, 0, 1)
         fields = (("q (rad)", -6.28, 6.28, 0.0),
                   ("dq (rad/s)", -30.0, 30.0, 0.0),
@@ -82,11 +85,11 @@ class JointPage(QWidget):
                   ("kd", 0.0, 5.0, settings.mit_kd_default),
                   ("tau (Nm)", -120.0, 120.0, settings.mit_tau_default))
         for c, (lab, lo, hi, val) in enumerate(fields, start=2):
-            mm.addWidget(QLabel(lab), 0, c)
+            mm.addWidget(TrLabel(lab), 0, c)
             sp = spin(lo, hi, val)
             self.mm_spins[lab.split()[0]] = sp
             mm.addWidget(sp, 1, c)
-        self.btn_mm = QPushButton("下发 move_mit 单帧")
+        self.btn_mm = TrButton("下发 move_mit 单帧")
         self.btn_mm.clicked.connect(self._emit_mit)
         mm.addWidget(self.btn_mm, 1, len(fields) + 2)
         g_mm = group("move_mit —— 单关节 MIT 透传（单帧，无保活）", mm)
@@ -97,12 +100,12 @@ class JointPage(QWidget):
         self.ma_tau = JointRow()
         self.ma_kp = spin(0.0, 500.0, settings.mit_kp_default)
         self.ma_kd = spin(0.0, 5.0, settings.mit_kd_default)
-        self.btn_ma = QPushButton("下发整臂 MIT 单帧")
+        self.btn_ma = TrButton("下发整臂 MIT 单帧")
         self.btn_ma.clicked.connect(self._emit_mit_all)
         g_ma = group("move_mit_all —— 整臂 MIT 透传（单帧）",
-                     self.ma_q, row(QLabel("dq")), self.ma_dq,
-                     row(QLabel("kp(统一)"), self.ma_kp, QLabel("kd(统一)"), self.ma_kd),
-                     row(QLabel("tau")), self.ma_tau,
+                     self.ma_q, row(TrLabel("dq")), self.ma_dq,
+                     row(TrLabel("kp(统一)"), self.ma_kp, TrLabel("kd(统一)"), self.ma_kd),
+                     row(TrLabel("tau")), self.ma_tau,
                      row(self.btn_ma),
                      note("kp/kd 对全部关节统一；要逐关节不同请用单关节 move_mit。"))
 

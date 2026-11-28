@@ -22,7 +22,10 @@ from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtWidgets import (QCheckBox, QComboBox, QGridLayout, QLabel,
                              QPlainTextEdit, QPushButton, QVBoxLayout, QWidget)
 
+from litetool import i18n
 from litetool import pose_math
+from litetool.gui.i18n_ui import (TrButton, TrCheckBox, TrLabel, tr_items,
+                                  tr_tooltip)
 from litetool.gui.pages.common import (LockBanner, PoseInput, group, hint, note,
                                        row, spin)
 
@@ -68,9 +71,9 @@ class CartPage(QWidget):
         self._jog_buttons = []
 
         # ---------------- 当前位姿 ----------------
-        self.btn_tcp = QPushButton("读取当前末端位姿 (GET_TCP)")
+        self.btn_tcp = TrButton("读取当前末端位姿 (GET_TCP)")
         self.btn_tcp.clicked.connect(self.tcp_req.emit)
-        self.btn_fill = QPushButton("填入下方目标位姿")
+        self.btn_fill = TrButton("填入下方目标位姿")
         self.btn_fill.clicked.connect(lambda: self.pose.set_value(self._tcp))
         self.tcp_lbl = QLabel("—")
         self.tcp_lbl.setStyleSheet("color:#61afef;font-family:'DejaVu Sans Mono';")
@@ -80,8 +83,7 @@ class CartPage(QWidget):
 
         # ---------------- 点动 ----------------
         self.frame = QComboBox()
-        self.frame.addItem("基座系", "base")
-        self.frame.addItem("工具系", "tool")
+        tr_items(self.frame, [("基座系", "base"), ("工具系", "tool")])
         self.trans_step = QComboBox()
         for mm in TRANS_STEPS:
             self.trans_step.addItem(f"{mm} mm", mm)
@@ -90,8 +92,9 @@ class CartPage(QWidget):
         for deg in ROT_STEPS:
             self.rot_step.addItem(f"{deg}°", deg)
         self.rot_step.setCurrentIndex(1)            # 5°
-        self.btn_stop = QPushButton("停止点动（受控停止）")
-        self.btn_stop.setToolTip(
+        self.btn_stop = TrButton("停止点动（受控停止）")
+        tr_tooltip(
+            self.btn_stop,
             "写一条 movej 到**当前实测关节角**，作废在途点动/直线规划。\n"
             "走旁路，不排在在途命令后面。")
         self.btn_stop.clicked.connect(self._on_stop_clicked)
@@ -128,9 +131,9 @@ class CartPage(QWidget):
 
         g_jog = group(
             "点动（按住连续趋近，松手受控停止）",
-            row(QLabel("坐标系"), self.frame,
-                QLabel("平移步长"), self.trans_step,
-                QLabel("旋转步长"), self.rot_step,
+            row(TrLabel("坐标系"), self.frame,
+                TrLabel("平移步长"), self.trans_step,
+                TrLabel("旋转步长"), self.rot_step,
                 self.btn_stop),
             jog_grid,
             self.jog_status,
@@ -141,19 +144,21 @@ class CartPage(QWidget):
         # ---------------- 目标位姿（movel/movep 与 ik 共用同一组输入） ----------------
         self.pose = PoseInput()
         self.speed = spin(0.01, settings.speed_max_ui, settings.default_speed, 0.05)
-        self.btn_mp = QPushButton("下发 movep")
-        self.btn_mp.setToolTip("关节空间插值到目标位姿；不是直线，不需要笛卡尔规划。")
+        self.btn_mp = TrButton("下发 movep")
+        tr_tooltip(self.btn_mp,
+                   "关节空间插值到目标位姿；不是直线，不需要笛卡尔规划。")
         self.btn_mp.clicked.connect(lambda: self.movep.emit(self.pose.value(),
                                                             self.speed.value()))
-        self.btn_ml = QPushButton("下发 movel（直线）")
-        self.btn_ml.setToolTip(
+        self.btn_ml = TrButton("下发 movel（直线）")
+        tr_tooltip(
+            self.btn_ml,
             "固件笛卡尔直线：末端沿起点→目标直线运动，姿态 slerp。\n"
             "到位判据 6mm / 0.03rad；需要固件支持 LITEARM_CART_PLAN。")
         self.btn_ml.clicked.connect(lambda: self.movel.emit(self.pose.value(),
                                                             self.speed.value()))
-        self.btn_ik = QPushButton("求解 IK（只算不动）")
+        self.btn_ik = TrButton("求解 IK（只算不动）")
         self.btn_ik.clicked.connect(self._emit_ik)
-        self.seed_cb = QCheckBox("用当前实测关节角作 IK 种子")
+        self.seed_cb = TrCheckBox("用当前实测关节角作 IK 种子")
         self.seed_cb.setChecked(True)
         self.ik_out = QPlainTextEdit()
         self.ik_out.setReadOnly(True)
@@ -161,7 +166,7 @@ class CartPage(QWidget):
 
         g_tgt = group("目标位姿（movel / movep 与 ik 共用这组数值）",
                       self.pose,
-                      row(QLabel("速度倍率 (0..1)"), self.speed,
+                      row(TrLabel("速度倍率 (0..1)"), self.speed,
                           self.btn_mp, self.btn_ml),
                       row(self.btn_ik, self.seed_cb),
                       self.ik_out,
@@ -186,7 +191,7 @@ class CartPage(QWidget):
     def set_online(self, onl: bool):
         self._online = onl
         if not onl:
-            self._abort_jog("已离线")
+            self._abort_jog(i18n.tr("已离线"))
         self._refresh()
 
     def set_busy(self, busy: bool):
@@ -196,13 +201,13 @@ class CartPage(QWidget):
     def set_armed(self, armed: bool):
         self._armed = armed
         if not armed:
-            self._abort_jog("运动已锁定")
+            self._abort_jog(i18n.tr("运动已锁定"))
         self._refresh()
 
     def set_fault_blocked(self, blocked: bool):
         self._fault_blocked = blocked
         if blocked:
-            self._abort_jog("FAULT/急停锁存")
+            self._abort_jog(i18n.tr("FAULT/急停锁存"))
         self._refresh()
 
     def set_cart_supported(self, ok, silent: bool = False):
@@ -212,12 +217,12 @@ class CartPage(QWidget):
         if ok is True:
             text = ""
         elif ok is False and self._cart_silent:
-            text = ("笛卡尔能力探测未获确认（上行无应答）—— 点动/movel 已禁用；"
-                    "请重连或检查链路")
+            text = i18n.tr("笛卡尔能力探测未获确认（上行无应答）—— 点动/movel 已禁用；"
+                           "请重连或检查链路")
         elif ok is False:
-            text = "固件未编入笛卡尔规划（LITEARM_CART_PLAN）—— 点动/movel 不可用"
+            text = i18n.tr("固件未编入笛卡尔规划（LITEARM_CART_PLAN）—— 点动/movel 不可用")
         else:
-            text = "未连接 —— 点动/movel 需要先连接设备"
+            text = i18n.tr("未连接 —— 点动/movel 需要先连接设备")
         self.cart_hint.setText(text)
         self._refresh()
 
@@ -258,12 +263,12 @@ class CartPage(QWidget):
 
     def _jog_press(self, axis: str, kind: str, sign: int):
         if not self._jog_ready():
-            self.jog_status.setText("点动不可用：未连接/未解锁/固件不支持")
+            self.jog_status.setText(i18n.tr("点动不可用：未连接/未解锁/固件不支持"))
             return
         if self._jog_holding:
             return                     # 不支持同时按两个方向；松开再按
         if self._busy and not self._jog_active:
-            self.jog_status.setText("忙：等当前命令结束再点动")
+            self.jog_status.setText(i18n.tr("忙：等当前命令结束再点动"))
             return
         self._jog_holding = True
         self._jog_stop_requested = False
@@ -278,7 +283,8 @@ class CartPage(QWidget):
         axis, kind, sign = self._jog_params
         amount = self._step_amount(kind, sign)
         self._jog_in_flight = True
-        self.jog_status.setText(f"点动 {_jog_label(axis, sign, kind)} …")
+        self.jog_status.setText(i18n.tr("点动 {button} …",
+                                       button=_jog_label(axis, sign, kind)))
         self.jog_step.emit(axis, kind, amount, self.frame.currentData(),
                            self.speed.value(), gen)
 
@@ -288,15 +294,15 @@ class CartPage(QWidget):
             return
         self._jog_in_flight = False
         if res is None:
-            self._end_jog("点动未下发（运动未解锁/未连接）")
+            self._end_jog(i18n.tr("点动未下发（运动未解锁/未连接）"))
             return
         if not res.ok:
             superseded = isinstance(getattr(res, "error", None),
                                     getattr(pa, "MotionSupersededError", ()))
             if superseded or self._jog_stop_requested:
-                self._end_jog("已停止")
+                self._end_jog(i18n.tr("已停止"))
             else:
-                self._end_jog(f"点动失败：{res.error}")
+                self._end_jog(i18n.tr("点动失败：{err}", err=res.error))
             return
         try:
             _start, target, _plan = res.value
@@ -306,7 +312,8 @@ class CartPage(QWidget):
         if self._jog_holding and not self._jog_stop_requested:
             self._start_segment(gen)
         else:
-            self._end_jog("已停止" if self._jog_stop_requested else "完成")
+            self._end_jog(i18n.tr("已停止") if self._jog_stop_requested
+                          else i18n.tr("完成"))
 
     def _jog_release(self):
         if not self._jog_holding:
@@ -315,15 +322,15 @@ class CartPage(QWidget):
         if self._jog_in_flight:
             # 松手立即受控停止：作废在途续段，movej 到当前实测角。
             self._jog_stop_requested = True
-            self.jog_status.setText("受控停止…")
+            self.jog_status.setText(i18n.tr("受控停止…"))
             self.stop_req.emit()
         else:
-            self._end_jog("已停止")
+            self._end_jog(i18n.tr("已停止"))
 
     def _on_stop_clicked(self):
         self._jog_holding = False
         self._jog_stop_requested = True
-        self.jog_status.setText("受控停止…")
+        self.jog_status.setText(i18n.tr("受控停止…"))
         self.stop_req.emit()
 
     def _end_jog(self, text: str):
@@ -347,8 +354,17 @@ class CartPage(QWidget):
     def show_ik(self, qs):
         self.ik_out.setPlainText("  ".join(f"{v:+.4f}" for v in qs))
 
-    def show_ik_error(self, msg: str):
-        self.ik_out.setPlainText(f"失败：{msg}")
+    def show_ik_error(self, msg):
+        err = msg
+        try:
+            err = pa.describe_exc(msg, locale=i18n.sdk_locale()).title
+        except Exception:  # noqa: BLE001 - 老 SDK / 非异常对象
+            err = str(msg)
+        self.ik_out.setPlainText(i18n.tr("失败：{msg}", msg=err))
+
+    def retranslate(self):
+        self.set_cart_supported(self._cart_ok, self._cart_silent)
+        self.jog_status.setText(i18n.tr("—"))
 
     def set_seed_q(self, qs):
         """主窗口把当前实测角灌进来，作为可选 IK 种子。"""

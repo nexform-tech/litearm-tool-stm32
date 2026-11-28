@@ -54,6 +54,15 @@ GUI 主线程 ──submit(fn)──▶ 任务队列 ──▶ SdkWorker 线程 
 | | **诊断** | `KIN_BENCH` 自检、启动复位原因、链路计数（CRC / 队满 / CAN 失败 / 控制拍超预算）、错误码文案、诊断包 |
 | | **授权** | 读设备授权记录（UID / 状态 / 客户号 / 签发日）；未激活设备可在线提交注册信息激活（`0x2F` / `0x3F`） |
 | | **固件升级** | USB DFU（`0483:DF11`）：选镜像并校验（版本 / 大小 / 地址范围 / SHA / 空洞），失能后进 ROM bootloader —— 或直接从已停在 bootloader 的板子起跑 —— 烧录并读回校验，进度 / 取消 / 结果 |
+| | **设置** | 界面语言：跟随系统 / 简体中文 / English；立即生效、无需重启，并按机器记住选择 |
+
+### 界面语言
+
+界面提供简体中文与英文。在 **设置 → 语言** 切换；切换立即生效（不重启），选择按机器
+存进 `QSettings`。默认跟随桌面语言 —— Linux 上先看 `LANGUAGE` 再看 `LC_ALL`/`LANG`，
+所以"中文桌面 + 英文终端"仍会以中文启动。`config.yaml` 的
+`language: auto | zh | en` 是部署默认值，操作员的选择优先；`--lang zh|en` 只覆盖本次
+运行。SDK 的错误码文案使用同一语言（`litearm.describe_*` 的 locale）。
 
 ## 覆盖：SDK 公开面 → UI 入口
 
@@ -177,6 +186,7 @@ pip install -r requirements.txt
 python3 main.py                       # 普通用户即可（串口在 dialout 组则无需 root）
 python3 main.py --fake                # 无硬件演示：SDK 假传输，自动接上假设备
 python3 main.py --activation-url https://act.nexform.tech   # 指定激活服务（默认即生产地址）
+python3 main.py --lang en            # 本次以英文运行（不改变已保存的选择）
 ```
 
 `--fake` 不碰真实串口，适合演示、培训和没有硬件时的 UI 开发；假固件不能用来判断真实运动或安全边界。
@@ -253,8 +263,12 @@ litetool/
   pose_math.py          点动位姿数学（基座/工具系、rpy ↔ 旋转矩阵）
   param_catalog.py      调参参数目录镜像表 + schema/diff/ff_mask + role/hint/detail
   tuning_guide.py       调参指南内容（公式/符号映射/症状速查）
+  tuning_guide_en.py    调参指南英文内容
+  i18n.py               界面语言状态/系统检测/中文源串 tr()
+  i18n_en.py            英文翻译表（中文源串 -> 英文）
+  param_catalog_en.py   参数标签/提示/详解的英文版
   firmware_defaults.py  解析固件 defaults.c（presets/ 生成与一致性断言的真源）
-  settings.py           config.yaml 合并（类型 + 区间校验）
+  settings.py           config.yaml 合并（类型 + 区间校验、语言默认值）
   csv_export.py         曲线窗口 / 300Hz 采集的 CSV 写出（列名带单位）
   obs.py                结构化日志（JSONL、OpenTelemetry 字段名、脱敏）
   activation.py         激活服务客户端（唯一出网点；凭据/注册信息校验）
@@ -279,6 +293,7 @@ litetool/
       cart_page.py      笛卡尔    zerog_page.py    零重力
       gripper_page.py   夹爪      log_page.py      日志
       params_page.py    参数表    guide_page.py    调参指南
+      settings_page.py  设置
       diag_page.py      诊断      installation_page.py 安装方向
       activation_page.py 授权（读 UID / 在线激活）
       firmware_page.py 固件升级（USB DFU）
@@ -297,7 +312,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 640 passed（全部离线，无需硬件）
+python3 -m pytest          # 689 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |
@@ -323,6 +338,7 @@ python3 -m pytest          # 640 passed（全部离线，无需硬件）
 | `test_dfu_controller.py` | tool 侧适配：失能/进 DFU 失败映射、`enter_dfu` 后放串口、udev 权限重试、开跑前闸门 |
 | `test_firmware_page.py` | 固件升级页（假引擎 + 假 SDK）：摘要、from-DFU 路径、完整流水线、失败、取消、重连 RPC |
 | `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | 意图层与纯数据层 |
+| `test_i18n.py` `test_i18n_ui.py` `test_i18n_live.py` | 语言检测/回落、源码覆盖、离屏英文窗口、连接假设备后的中英切换 |
 | `test_preset_sync.py` | `presets/` 与 `templates/` 逐字段比对固件 `defaults.c`（固件仓在场时生效，`LITEARM_FW_DIR` 可指定） |
 
 ## 真机验收清单（需 STM32 + 电机/CAN 在线）

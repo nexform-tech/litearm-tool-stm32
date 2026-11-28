@@ -9,6 +9,8 @@ pyusb + 一块真板子，而板子烧一次要人在场、臂要有支撑 —�
 """
 from __future__ import annotations
 
+from litetool import i18n
+
 import time
 from typing import Callable, Optional
 
@@ -82,12 +84,15 @@ class FakeDfuDevice:
             if self.step_delay:
                 time.sleep(self.step_delay)
             if progress:
-                progress(int(total * i / self.steps), total,
-                         f"写入 {int(total * i / self.steps)}/{total} B (假件)")
+                done = int(total * i / self.steps)
+                progress(done, total,
+                         i18n.tr("写入 {done}/{total} B (假件)",
+                                 done=done, total=total))
         if self.fail == "flash":
-            raise FakeDfuError("假件: 读回校验失败 (首个不一致处 0x08000100)")
+            raise FakeDfuError(i18n.tr("假件: 读回校验失败 (首个不一致处 0x08000100)"))
         if progress:
-            progress(total, total, f"✓ 读回校验通过 ({total} B 逐字节一致, 假件)")
+            progress(total, total, i18n.tr(
+                "✓ 读回校验通过 ({n} B 逐字节一致, 假件)", n=total))
 
     def close(self) -> None:
         self.opened = False
@@ -129,7 +134,7 @@ class FakeEngine:
         return True
 
     def backend_status(self) -> str:
-        return "假件 (--fake / 测试)"
+        return i18n.tr("假件 (--fake / 测试)")
 
     def find_device(self):
         return FakeHandle() if self.present else None

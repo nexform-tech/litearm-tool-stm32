@@ -12,7 +12,8 @@ import pyqtgraph as pg
 from PyQt5.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
                              QMessageBox, QPushButton, QVBoxLayout, QWidget)
 
-from litetool import csv_export
+from litetool import csv_export, i18n
+from litetool.gui.i18n_ui import TrButton, TrLabel, tr_tooltip
 
 COLORS = ["#e8c547", "#e06c75", "#61afef", "#98c379", "#c678dd",
           "#56b6c2", "#d19a66"]
@@ -50,19 +51,20 @@ class PlotPane(QWidget):
             pi.setXLink(self.plots[0])
 
         top = QHBoxLayout()
-        top.addWidget(QLabel("关节:"))
+        top.addWidget(TrLabel("关节:"))
         self.box_row = QHBoxLayout()
         top.addLayout(self.box_row)
         top.addStretch(1)
-        self.freeze_btn = QPushButton("❚❚ 冻结")
+        self.freeze_btn = TrButton("❚❚ 冻结")
         self.freeze_btn.setCheckable(True)
         self.freeze_btn.toggled.connect(self._on_freeze)
         top.addWidget(self.freeze_btn)
-        self.clear_btn = QPushButton("清屏")
+        self.clear_btn = TrButton("清屏")
         self.clear_btn.clicked.connect(self.clear_all)
         top.addWidget(self.clear_btn)
-        self.export_btn = QPushButton("导出 CSV…")
-        self.export_btn.setToolTip(
+        self.export_btn = TrButton("导出 CSV…")
+        tr_tooltip(
+            self.export_btn,
             "导出当前窗口里勾选的关节：时间、q/dq/tau、MOS/线圈温度、驱动错误码。\n"
             "冻结状态下导出的是冻结那一刻的窗口。")
         self.export_btn.clicked.connect(self._on_export)
@@ -90,7 +92,7 @@ class PlotPane(QWidget):
         # 冻结时把窗口定格下来：之后模型继续滚动，导出的仍是用户眼前这一屏。
         self._frozen_snapshot = (self._model.snapshot_full()
                                  if on and self._model is not None else None)
-        self.freeze_btn.setText("▶ 继续" if on else "❚❚ 冻结")
+        self.freeze_btn.setText(i18n.tr("▶ 继续") if on else i18n.tr("❚❚ 冻结"))
 
     def clear_all(self):
         self._frozen_snapshot = None
@@ -98,6 +100,9 @@ class PlotPane(QWidget):
         for pi in self.plots:
             pi.clear()                    # clear() 会把图例一起删掉
             self._add_legend(pi)
+
+    def retranslate(self):
+        self._on_freeze(self.frozen)
 
     def set_context(self, firmware: str):
         """主窗口在连接后注入固件版本 —— 导出文件名带它。"""
@@ -116,15 +121,16 @@ class PlotPane(QWidget):
         else:
             snap = None
         if not snap or not snap.get("times"):
-            QMessageBox.information(self, "导出 CSV",
-                                    "当前窗口里没有数据 —— 先连接设备等几帧。")
+            QMessageBox.information(self, i18n.tr("导出 CSV"),
+                                    i18n.tr("当前窗口里没有数据 —— 先连接设备等几帧。"))
             return
         joints = self.selected_joints()
         if not joints:
-            QMessageBox.information(self, "导出 CSV", "请至少勾选一个关节。")
+            QMessageBox.information(self, i18n.tr("导出 CSV"),
+                                    i18n.tr("请至少勾选一个关节。"))
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出曲线窗口 CSV",
+            self, i18n.tr("导出曲线窗口 CSV"),
             csv_export.timestamped_name("plot", self._firmware),
             "CSV (*.csv);;全部 (*)")
         if not path:
@@ -133,9 +139,11 @@ class PlotPane(QWidget):
             rows = csv_export.write_plot_csv(path, snap, joints=joints,
                                              firmware=self._firmware)
         except Exception as e:  # noqa: BLE001 - 导出失败不该拖垮界面
-            QMessageBox.warning(self, "导出失败", str(e))
+            QMessageBox.warning(self, i18n.tr("导出失败"),
+                                i18n.safe_detail(e) or i18n.tr("未知错误"))
             return
-        QMessageBox.information(self, "导出完成", f"已写出 {rows} 行 → {path}")
+        QMessageBox.information(self, i18n.tr("导出完成"),
+                                i18n.tr("已写出 {n} 行 → {path}", n=rows, path=path))
 
     def set_joints(self, n: int):
         if n == self._n:

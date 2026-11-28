@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import litearm as pa
 
+from litetool import i18n
 from litetool import param_catalog as C
 from litetool.hyy_config import MODEL_BODY_KEYS, MODEL_ABS_MAX
 
@@ -39,15 +40,15 @@ Result = Tuple[bool, Optional[int]]
 def err_text(code: Optional[int]) -> str:
     """错误码 -> 中文。0x07 是本设计新增的"掩码不符"(与"数值非法"分开)。"""
     if code is None:
-        return "超时/无应答"
-    return {
+        return i18n.tr("超时/无应答")
+    return i18n.tr({
         0x00: "固件无此命令（未实现）",
         0x01: "载荷过短",
         0x02: "数值非法（NaN/超限/零模型），固件已拒绝",
         0x04: "需先失能（模型 commit/回退要求失能态）",
         0x05: "忙（flash 正在擦写）",
         0x07: "掩码不符（本会话漏写或写错了 body）",
-    }.get(code, f"code 0x{code:02X}")
+    }.get(code, f"code 0x{code:02X}"))
 
 
 def _call(fn: Callable[[], Any]) -> Result:
@@ -104,20 +105,20 @@ def read_model(arm) -> Dict[str, Any]:
             # 走 `.value` (下同; 信封里另两个字段本模块不消费)。
             v = arm.model.get_body(i).value
         except Exception as e:                  # noqa: BLE001
-            raise OSError(f"模型 body{i} 读回失败: {e}") from e
+            raise OSError(i18n.tr("模型 body{i} 读回失败: {err}", i=i, err=e)) from e
         if len(v) != BODY_PARAMS:
-            raise OSError(f"模型 body{i} 长度 {len(v)} != {BODY_PARAMS}")
+            raise OSError(i18n.tr("模型 body{i} 长度 {got} != {want}", i=i, got=len(v), want=BODY_PARAMS))
         body.append([float(x) for x in v])
     try:
         jm = [float(x) for x in arm.model.get_jm().value]
     except Exception as e:                      # noqa: BLE001
-        raise OSError(f"模型 jm 读回失败: {e}") from e
+        raise OSError(i18n.tr("模型 jm 读回失败: {err}", err=e)) from e
     if len(jm) != JM_N:
-        raise OSError(f"模型 jm 长度 {len(jm)} != {JM_N}")
+        raise OSError(i18n.tr("模型 jm 长度 {got} != {want}", got=len(jm), want=JM_N))
     try:
         st = arm.model.status().value
     except Exception as e:                      # noqa: BLE001
-        raise OSError(f"模型状态读回失败: {e}") from e
+        raise OSError(i18n.tr("模型状态读回失败: {err}", err=e)) from e
     return {"body": body, "jm": jm, "status": st}
 
 
@@ -156,22 +157,25 @@ def send_model(arm, model: Dict[str, Any], mask: int = MASK_WRITTEN) -> Dict[str
         if len(vals) != BODY_PARAMS:
             frames[("body", i)] = (False, None)
             return {"frames": frames, "commit": (False, None),
-                    "aborted": f"body{i} 参数个数 {len(vals)} != {BODY_PARAMS}"}
+                    "aborted": i18n.tr(
+                        "body{i} 参数个数 {got} != {want}",
+                        i=i, got=len(vals), want=BODY_PARAMS)}
         r = _call(lambda i=i, vals=vals: arm.model.set_body(i, vals))
         frames[("body", i)] = r
         if not r[0]:
-            return {"frames": frames, "commit": (False, None), "aborted": f"body{i} 写入被拒"}
+            return {"frames": frames, "commit": (False, None), "aborted": i18n.tr("body{i} 写入被拒", i=i)}
 
     if mask & (1 << 9):
         vals = [float(x) for x in jm]
         if len(vals) != JM_N:
             frames[("jm", 0)] = (False, None)
             return {"frames": frames, "commit": (False, None),
-                    "aborted": f"jm 个数 {len(vals)} != {JM_N}"}
+                    "aborted": i18n.tr("jm 个数 {got} != {want}",
+                                       got=len(vals), want=JM_N)}
         r = _call(lambda: arm.model.set_jm(vals))
         frames[("jm", 0)] = r
         if not r[0]:
-            return {"frames": frames, "commit": (False, None), "aborted": "jm 写入被拒"}
+            return {"frames": frames, "commit": (False, None), "aborted": i18n.tr("jm 写入被拒")}
 
     commit = _call(lambda: arm.model.commit(mask))
     return {"frames": frames, "commit": commit, "aborted": None}
@@ -236,24 +240,24 @@ def validate_model(model: Dict[str, Any]) -> List[str]:
     body = model.get("body") or []
     jm = model.get("jm") or []
     if len(body) != NBODY:
-        errs.append(f"模型 body 须为 {NBODY} 个, 实际 {len(body)}")
+        errs.append(i18n.tr("模型 body 须为 {n} 个, 实际 {got}", n=NBODY, got=len(body)))
         return errs
     for i, b in enumerate(body):
         if len(b) != BODY_PARAMS:
-            errs.append(f"body{i} 须为 {BODY_PARAMS} 个, 实际 {len(b)}")
+            errs.append(i18n.tr("body{i} 须为 {n} 个, 实际 {got}", i=i, n=BODY_PARAMS, got=len(b)))
             continue
         for k, key in enumerate(MODEL_BODY_KEYS):
             v = float(b[k])
             if v != v or abs(v) > MODEL_ABS_MAX:
-                errs.append(f"body{i}.{key} = {v} 非有限或超出 ±{MODEL_ABS_MAX:g}")
+                errs.append(i18n.tr("body{i}.{key} = {value} 非有限或超出 ±{limit:g}", i=i, key=key, value=v, limit=MODEL_ABS_MAX))
         if i == NBODY - 1 and float(b[0]) != 0.0:
-            errs.append(f"body{i} 是 ee 固定体 (payload 复合位), 质量必须为 0, 实际 {b[0]}")
+            errs.append(i18n.tr("body{i} 是 ee 固定体 (payload 复合位), 质量必须为 0, 实际 {value}", i=i, value=b[0]))
     if len(jm) != JM_N:
-        errs.append(f"jm 须为 {JM_N} 个, 实际 {len(jm)}")
+        errs.append(i18n.tr("jm 须为 {n} 个, 实际 {got}", n=JM_N, got=len(jm)))
     else:
         for k, v in enumerate(jm):
             if float(v) != float(v) or abs(float(v)) > MODEL_ABS_MAX:
-                errs.append(f"jm.J{k + 1} = {v} 非有限或超出 ±{MODEL_ABS_MAX:g}")
+                errs.append(i18n.tr("jm.J{axis} = {value} 非有限或超出 ±{limit:g}", axis=k + 1, value=v, limit=MODEL_ABS_MAX))
     return errs
 
 

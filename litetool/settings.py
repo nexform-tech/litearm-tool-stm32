@@ -25,6 +25,9 @@ _RANGES = {
 #: 布尔字段（`true`/`false`）；与数值字段分开校验。
 _BOOLS = {"scene_lod", "scene_software_gl"}
 
+#: 字符串枚举字段。`auto` = 跟随系统（操作员在设置页的选择优先于这里）。
+_CHOICES = {"language": ("auto", "zh", "en")}
+
 
 @dataclass
 class Settings:
@@ -41,6 +44,7 @@ class Settings:
     scene_msaa: int = 0                   # 3D 视图 MSAA 采样数 (0=关闭，软件渲染更流畅)
     scene_lod: bool = True                # 3D 用 LOD 网格（约 45k 三角形）
     scene_software_gl: bool = False       # Windows: 强制 Qt 自带的 Mesa 软件 GL
+    language: str = "auto"                # auto=跟随系统 / zh / en（设置页选择优先）
 
     @classmethod
     def load(cls, path=None) -> "Settings":
@@ -67,6 +71,18 @@ class Settings:
                 print(f"[config] 忽略未知配置项: {key}", file=os.sys.stderr)
                 continue
             default = getattr(s, key)
+            if key in _CHOICES:
+                choices = _CHOICES[key]
+                text = str(val).strip().lower() if val is not None else ""
+                lang = "zh" if text.startswith("zh") else \
+                    "en" if text.startswith("en") else \
+                    "auto" if text in ("auto", "", "system", "follow") else text
+                if lang not in choices:
+                    print(f"[config] {key}={val!r} 不是 {choices} 之一，"
+                          f"使用默认 {default}", file=os.sys.stderr)
+                    continue
+                setattr(s, key, lang)
+                continue
             if key in _BOOLS:
                 if not isinstance(val, bool):
                     print(f"[config] {key} 需是 true/false，使用默认 {default}",

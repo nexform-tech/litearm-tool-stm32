@@ -25,7 +25,8 @@ from PyQt5.QtWidgets import (QCheckBox, QFormLayout, QGridLayout, QGroupBox,
                              QHBoxLayout, QLabel, QLineEdit, QPlainTextEdit,
                              QPushButton, QVBoxLayout, QWidget)
 
-from litetool import activation
+from litetool import activation, i18n
+from litetool.gui.i18n_ui import TrButton, TrCheckBox, TrGroupBox, TrLabel
 from litetool.license_io import read_record, uid_of, write_license
 
 STATE_TEXT = {
@@ -54,9 +55,14 @@ CONSENT_TEXT = (
     "换一台要重新签发。<br>"
     "<b>上位机 / SDK / 固件版本</b> —— 排查问题时判断你用的是哪一套，省一轮来回。<br><br>"
     "以上内容只用于签发授权、售后联系与服务登记；需要更正或删除请联系供应商。详见 "
-    f"<a href='{PRIVACY_URL}'>隐私政策</a>。"
-    f"<br><span style='color:#6b7683'>同意书版本 {activation.CONSENT_TEXT_VERSION}</span>"
+    "<a href='{privacy_url}'>隐私政策</a>。"
+    "<br><span style='color:#6b7683'>同意书版本 {version}</span>"
 )
+
+
+def consent_text() -> str:
+    return i18n.tr(CONSENT_TEXT, privacy_url=PRIVACY_URL,
+                   version=activation.CONSENT_TEXT_VERSION)
 
 
 class ActivationPage(QWidget):
@@ -95,15 +101,15 @@ class ActivationPage(QWidget):
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self):
-        self.title = QLabel("授权")
+        self.title = TrLabel("授权")
         self.title.setStyleSheet("font-weight:bold;font-size:14px;")
-        self.state_lbl = QLabel("未连接")
+        self.state_lbl = QLabel(i18n.tr("未连接"))
         self.state_lbl.setStyleSheet("color:#8a97a4;font-size:12px;")
-        self.url_lbl = QLabel(f"激活服务: {self._url}")
+        self.url_lbl = QLabel(i18n.tr("激活服务: {url}", url=self._url))
         self.url_lbl.setStyleSheet("color:#8a97a4;font-size:12px;")
-        self.btn_refresh = QPushButton("读取授权记录")
+        self.btn_refresh = TrButton("读取授权记录")
         self.btn_refresh.clicked.connect(self.refresh)
-        self.btn_copy_uid = QPushButton("复制 UID")
+        self.btn_copy_uid = TrButton("复制 UID")
         self.btn_copy_uid.clicked.connect(self._copy_uid)
         self.btn_copy_uid.setEnabled(False)
 
@@ -124,28 +130,28 @@ class ActivationPage(QWidget):
         self.flags_lbl = QLabel("—")
         self.ver_lbl = QLabel("—")
         rec_grid = QGridLayout()
-        rec_grid.addWidget(QLabel("UID"), 0, 0)
+        rec_grid.addWidget(TrLabel("UID"), 0, 0)
         rec_grid.addWidget(self.uid_lbl, 0, 1, 1, 3)
-        rec_grid.addWidget(QLabel("状态"), 1, 0)
+        rec_grid.addWidget(TrLabel("状态"), 1, 0)
         rec_grid.addWidget(self.state_val, 1, 1)
-        rec_grid.addWidget(QLabel("记录版本"), 1, 2)
+        rec_grid.addWidget(TrLabel("记录版本"), 1, 2)
         rec_grid.addWidget(self.ver_lbl, 1, 3)
-        rec_grid.addWidget(QLabel("客户号"), 2, 0)
+        rec_grid.addWidget(TrLabel("客户号"), 2, 0)
         rec_grid.addWidget(self.cust_lbl, 2, 1)
-        rec_grid.addWidget(QLabel("签发日"), 2, 2)
+        rec_grid.addWidget(TrLabel("签发日"), 2, 2)
         rec_grid.addWidget(self.issued_lbl, 2, 3)
-        rec_grid.addWidget(QLabel("flags"), 3, 0)
+        rec_grid.addWidget(TrLabel("flags"), 3, 0)
         rec_grid.addWidget(self.flags_lbl, 3, 1)
-        rec_box = QGroupBox("设备授权记录")
+        rec_box = TrGroupBox("设备授权记录")
         rec_lay = QVBoxLayout(rec_box)
         rec_lay.addLayout(rec_grid)
-        self.record_hint = QLabel("连接设备后点「读取授权记录」。")
+        self.record_hint = QLabel(i18n.tr("连接设备后点「读取授权记录」。"))
         self.record_hint.setWordWrap(True)
         self.record_hint.setStyleSheet("color:#8a97a4;font-size:12px;")
         rec_lay.addWidget(self.record_hint)
 
         # ---- 注册表单 ----
-        self.form_box = QGroupBox("在线激活（未激活设备）")
+        self.form_box = TrGroupBox("在线激活（未激活设备）")
         form = QFormLayout(self.form_box)
         self.edit_name = QLineEdit()
         self.edit_phone = QLineEdit()
@@ -170,31 +176,31 @@ class ActivationPage(QWidget):
             edit.textChanged.connect(lambda _text: self._update_buttons())
         # QPlainTextEdit.textChanged() 没有参数（QLineEdit 那把带 str）。
         self.edit_purpose.textChanged.connect(self._update_buttons)
-        form.addRow("联系人*", self.edit_name)
-        form.addRow("手机号*", self.edit_phone)
-        form.addRow("单位*", self.edit_org)
-        form.addRow("微信（可选）", self.edit_wechat)
-        form.addRow("邮箱*", self.edit_email)
-        form.addRow("地区*", self.edit_region)
-        form.addRow("行业（可选）", self.edit_industry)
-        form.addRow("用途（可选）", self.edit_purpose)
-        self.consent_label = QLabel(CONSENT_TEXT)
+        form.addRow(TrLabel("联系人*"), self.edit_name)
+        form.addRow(TrLabel("手机号*"), self.edit_phone)
+        form.addRow(TrLabel("单位*"), self.edit_org)
+        form.addRow(TrLabel("微信（可选）"), self.edit_wechat)
+        form.addRow(TrLabel("邮箱*"), self.edit_email)
+        form.addRow(TrLabel("地区*"), self.edit_region)
+        form.addRow(TrLabel("行业（可选）"), self.edit_industry)
+        form.addRow(TrLabel("用途（可选）"), self.edit_purpose)
+        self.consent_label = QLabel(consent_text())
         self.consent_label.setTextFormat(Qt.RichText)
         self.consent_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
         self.consent_label.setOpenExternalLinks(True)
         self.consent_label.setWordWrap(True)
         self.consent_label.setStyleSheet("color:#8a97a4;font-size:12px;")
         # 与 studio 的"弹窗里逐项阅读"等价：默认收起，按钮展开；勾选框始终可见。
-        self.btn_consent = QPushButton("查看《激活注册信息同意书》")
+        self.btn_consent = TrButton("查看《激活注册信息同意书》")
         self.btn_consent.setCheckable(True)
         self.btn_consent.toggled.connect(self._toggle_consent)
         form.addRow(self.btn_consent)
         form.addRow(self.consent_label)
         self.consent_label.setVisible(False)
-        self.consent_cb = QCheckBox("我已阅读并同意《激活注册信息同意书》")
+        self.consent_cb = TrCheckBox("我已阅读并同意《激活注册信息同意书》")
         self.consent_cb.toggled.connect(lambda _checked: self._update_buttons())
         form.addRow(self.consent_cb)
-        self.btn_activate = QPushButton("提交并激活")
+        self.btn_activate = TrButton("提交并激活")
         self.btn_activate.clicked.connect(self._on_activate)
         self.form_hint = QLabel("")
         self.form_hint.setWordWrap(True)
@@ -229,15 +235,15 @@ class ActivationPage(QWidget):
             self._stale = False
             self._record = None
             self._clear_record_display()
-            self.state_lbl.setText("未连接")
+            self.state_lbl.setText(i18n.tr("未连接"))
             self.state_lbl.setStyleSheet("color:#8a97a4;font-size:12px;")
-            self.record_hint.setText("连接设备后点「读取授权记录」。")
+            self.record_hint.setText(i18n.tr("连接设备后点「读取授权记录」。"))
             self.form_box.setVisible(False)
             self._show_hint("")
             self._set_busy(False)
             return
 
-        self.state_lbl.setText("已连接")
+        self.state_lbl.setText(i18n.tr("已连接"))
         self.state_lbl.setStyleSheet("color:#61afef;font-size:12px;")
         self._update_buttons()
         if self._submit is not None:
@@ -254,8 +260,8 @@ class ActivationPage(QWidget):
             return
         self._set_busy(True)
         self._read_epoch = self._epoch
-        self.record_hint.setText("正在读取授权记录…")
-        self._submit("读取授权记录", read_record, self._on_record)
+        self.record_hint.setText(i18n.tr("正在读取授权记录…"))
+        self._submit(i18n.tr("读取授权记录"), read_record, self._on_record)
 
     def _on_record(self, res):
         self._set_busy(False)
@@ -272,11 +278,12 @@ class ActivationPage(QWidget):
         """链路层失败也要保留上一次的记录 —— 与 `supported: null` 同一处理。"""
         self._stale = self._record is not None
         if self._record is not None:
-            self.record_hint.setText(
-                f"读取失败：{text} —— 下面是上一次读数（提交前会重新核对 UID）。")
+            self.record_hint.setText(i18n.tr(
+                "读取失败：{text} —— 下面是上一次读数（提交前会重新核对 UID）。",
+                text=text))
             self.form_box.setVisible(not bool(self._record.get("activated")))
         else:
-            self.record_hint.setText(f"读取失败：{text}")
+            self.record_hint.setText(i18n.tr("读取失败：{text}", text=text))
             self.form_box.setVisible(False)
         self._update_buttons()
 
@@ -286,7 +293,7 @@ class ActivationPage(QWidget):
             self._record = record
             self._stale = False
             state = record.get("stateName", "")
-            self.state_val.setText(STATE_TEXT.get(state, state or "—"))
+            self.state_val.setText(i18n.tr(STATE_TEXT.get(state, state or "—")))
             self.uid_lbl.setText(record.get("uid") or "—")
             self.ver_lbl.setText(str(record.get("ver", "—")))
             cust = int(record.get("custId", 0))
@@ -294,7 +301,7 @@ class ActivationPage(QWidget):
             self.issued_lbl.setText(_format_issued(record.get("issued", 0)))
             flags = int(record.get("flags", 0))
             if record.get("factoryMode"):
-                self.flags_lbl.setText("产线码")
+                self.flags_lbl.setText(i18n.tr("产线码"))
             elif flags:
                 self.flags_lbl.setText(f"0x{flags:X}")
             else:
@@ -302,27 +309,29 @@ class ActivationPage(QWidget):
             activated = bool(record.get("activated"))
             self.form_box.setVisible(not activated)
             if activated:
-                self.record_hint.setText("已激活 —— 使能可用；授权记录不可修改。")
-            else:
                 self.record_hint.setText(
+                    i18n.tr("已激活 —— 使能可用；授权记录不可修改。"))
+            else:
+                self.record_hint.setText(i18n.tr(
                     "未激活：`enable` 会被固件拒绝（0x10/0x08）。"
-                    "填写下方注册信息并提交即可激活。")
+                    "填写下方注册信息并提交即可激活。"))
             self._update_buttons()
             return
 
         # 这一次没读到 / 固件没有这条命令：上一次的记录如果还在，就保留它并标明是旧读数。
         # ⚠ UID 是这一段唯一的交付物，一次链路抖动不该把它从屏幕上抹掉
         #   （studio `docs/ACTIVATION.md` §7）。
-        why = ("这台固件没有授权命令（版本过旧）—— 请升级固件"
+        why = (i18n.tr("这台固件没有授权命令（版本过旧）—— 请升级固件")
                if supported is False else _unreadable_reason(self._firmware))
         self._stale = self._record is not None
         if self._record is not None:
-            self.record_hint.setText(
-                f"{why}。下面是上一次读数（提交前会重新核对 UID）。")
+            self.record_hint.setText(i18n.tr(
+                "{why}。下面是上一次读数（提交前会重新核对 UID）。", why=why))
             self.form_box.setVisible(not bool(self._record.get("activated")))
         else:
             self._clear_record_display()
-            self.record_hint.setText(f"{why}。无法确认授权状态，也不会提交注册信息。")
+            self.record_hint.setText(i18n.tr(
+                "{why}。无法确认授权状态，也不会提交注册信息。", why=why))
             self.form_box.setVisible(False)
         self._update_buttons()
 
@@ -343,7 +352,8 @@ class ActivationPage(QWidget):
         """按 `build_request` 的同一套判据看表单；返回第一个问题或 None。"""
         uid = uid_of(self._record)
         if uid is None:
-            return activation.ActivationError("bad_uid", "还没有可信的设备 UID")
+            return activation.ActivationError(
+                "bad_uid", i18n.tr("还没有可信的设备 UID"))
         try:
             activation.build_request({
                 "uid": uid,
@@ -367,17 +377,17 @@ class ActivationPage(QWidget):
     def _submit_tooltip(self) -> str:
         """按钮为什么不能按 —— 没有行内错误提示时，tooltip 是最近的说明。"""
         if self._busy:
-            return "正在处理…"
+            return i18n.tr("正在处理…")
         if not self._online:
-            return "未连接设备"
+            return i18n.tr("未连接设备")
         if self._record is None:
-            return "请先读取授权记录"
+            return i18n.tr("请先读取授权记录")
         if self._record.get("activated"):
-            return "这台设备已激活"
+            return i18n.tr("这台设备已激活")
         if self._enabled:
-            return "设备已使能 —— 请先在「整机」页失能"
+            return i18n.tr("设备已使能 —— 请先在「整机」页失能")
         if not self.consent_cb.isChecked():
-            return "请先阅读并勾选同意书"
+            return i18n.tr("请先阅读并勾选同意书")
         problem = self._form_problem()
         return _reason_text(problem) if problem is not None else ""
 
@@ -385,28 +395,29 @@ class ActivationPage(QWidget):
         if self._submit is None:
             return
         if not self._online:
-            self._show_hint("未连接设备。")
+            self._show_hint(i18n.tr("未连接设备。"))
             return
         if self._busy:
             return
         if not self.consent_cb.isChecked():
-            self._show_hint("请先阅读并勾选同意书。")
+            self._show_hint(i18n.tr("请先阅读并勾选同意书。"))
             return
         record = self._record
         uid = uid_of(record)
         if uid is None:
-            self._show_hint("还没有可信的设备 UID —— 请先点「读取授权记录」。")
+            self._show_hint(i18n.tr("还没有可信的设备 UID —— 请先点「读取授权记录」。"))
             return
         if self._enabled:
             # 固件要求失能才写 flash（ERR{0x3F,0x04}）；在这里先拦一道，省一次往返。
-            self._show_hint("设备已使能 —— 请先在「整机」页失能，再提交激活。")
+            self._show_hint(i18n.tr(
+                "设备已使能 —— 请先在「整机」页失能，再提交激活。"))
             return
         self._show_hint("")
         self._set_busy(True)
 
         # 第 1 段：所有者线程上重读 UID（记录可能是几分钟前的）。
         self._flow_epoch = self._epoch
-        self._submit("激活前读取 UID", read_record, self._on_uid_fresh)
+        self._submit(i18n.tr("激活前读取 UID"), read_record, self._on_uid_fresh)
 
     def _on_uid_fresh(self, res):
         if res is None:
@@ -414,11 +425,11 @@ class ActivationPage(QWidget):
             return
         if self._flow_epoch != self._epoch:
             self._set_busy(False)
-            self._show_hint("连接已变化 —— 请重新读取设备信息后再提交。")
+            self._show_hint(i18n.tr("连接已变化 —— 请重新读取设备信息后再提交。"))
             return
         if not res.ok:
             self._set_busy(False)
-            self._show_hint(f"读取设备 UID 失败：{res.text}")
+            self._show_hint(i18n.tr("读取设备 UID 失败：{text}", text=res.text))
             return
 
         record = res.value
@@ -426,12 +437,12 @@ class ActivationPage(QWidget):
         if uid is None:
             self._set_busy(False)
             self._apply_record(record)
-            self._show_hint("读不到可信 UID —— 不会提交注册信息。")
+            self._show_hint(i18n.tr("读不到可信 UID —— 不会提交注册信息。"))
             return
         if self._record and uid_of(self._record) and uid != uid_of(self._record):
             self._set_busy(False)
             self._apply_record(record)
-            self._show_hint("设备 UID 与刚才读取的不一致 —— 请核对后重试。")
+            self._show_hint(i18n.tr("设备 UID 与刚才读取的不一致 —— 请核对后重试。"))
             return
         self._record = record
         try:
@@ -470,19 +481,22 @@ class ActivationPage(QWidget):
     def _on_net_done(self, lic, err):
         if self._net_epoch != self._epoch:
             self._set_busy(False)
-            self._log("[WARN] 连接已变化 —— 丢弃这次激活结果")
+            self._log(i18n.tr("[WARN] 连接已变化 —— 丢弃这次激活结果"))
             return
         if err is not None:
             self._set_busy(False)
             reason = getattr(err, "reason", None)
             self._show_hint(_reason_text(err) if isinstance(err, activation.ActivationError)
-                            else f"激活失败：{err}")
-            self._log(f"[ERR] 激活请求失败({reason or 'error'}): {err}")
+                            else i18n.tr("激活失败：{err}",
+                                        err=i18n.safe_detail(err)))
+            self._log(i18n.tr("[ERR] 激活请求失败({reason}): {err}",
+                              reason=reason or "error", err=err))
             return
         # 第 3 段：写凭据 + 回读（所有者线程）。
-        self._show_hint("凭据已领到，正在写入设备…")
+        self._show_hint(i18n.tr("凭据已领到，正在写入设备…"))
         self._write_epoch = self._epoch
-        self._submit("写入授权凭据", lambda arm: write_license(arm, lic), self._on_written)
+        self._submit(i18n.tr("写入授权凭据"), lambda arm: write_license(arm, lic),
+                     self._on_written)
 
     def _on_written(self, res):
         if res is None:
@@ -490,7 +504,7 @@ class ActivationPage(QWidget):
             return
         if self._write_epoch != self._epoch:
             self._set_busy(False)
-            self._log("[WARN] 连接已变化 —— 丢弃这次写入结果")
+            self._log(i18n.tr("[WARN] 连接已变化 —— 丢弃这次写入结果"))
             return
         self._set_busy(False)
         if not res.ok:
@@ -499,10 +513,10 @@ class ActivationPage(QWidget):
                 # ⚠ 显示我们映射过的文案, 不要用 `res.text`: 它沿 `__context__` 找到
                 # 原始的固件 ERR, 会把"已使能请先失能"说回成 `[3F-04] 当前模式不允许`。
                 self._show_hint(_reason_text(err))
-                self._log(f"[ERR] 写入授权失败: {err}")
+                self._log(i18n.tr("[ERR] 写入授权失败: {err}", err=err))
             else:
-                self._show_hint(f"写入授权失败：{res.text}")
-                self._log(f"[ERR] 写入授权失败: {res.text}")
+                self._show_hint(i18n.tr("写入授权失败：{text}", text=res.text))
+                self._log(i18n.tr("[ERR] 写入授权失败: {text}", text=res.text))
             self.refresh()
             return
 
@@ -512,16 +526,33 @@ class ActivationPage(QWidget):
         #   `useActivation.submit` 同一判据：`supported === true && activated`。
         if record.get("supported") is True and record.get("activated") is True:
             self._show_hint("")
-            self._log("[OK] 激活成功 —— 授权记录已回读确认")
+            self._log(i18n.tr("[OK] 激活成功 —— 授权记录已回读确认"))
             self.consent_cb.setChecked(False)
         else:
-            state = record.get("stateName") or "未知"
-            self._show_hint("写入已受理，但回读未确认激活 —— 请点「读取授权记录」再确认。")
-            self._log(f"[WARN] 授权写入已受理，但回读未确认激活（设备状态 {state}）")
+            state = record.get("stateName") or i18n.tr("未知")
+            self._show_hint(i18n.tr(
+                "写入已受理，但回读未确认激活 —— 请点「读取授权记录」再确认。"))
+            self._log(i18n.tr(
+                "[WARN] 授权写入已受理，但回读未确认激活（设备状态 {state}）",
+                state=state))
 
     # ------------------------------------------------------------------ 杂项
     def set_firmware(self, firmware: str):
         self._firmware = str(firmware or "")
+
+    def retranslate(self) -> None:
+        self.consent_label.setText(consent_text())
+        self.url_lbl.setText(i18n.tr("激活服务: {url}", url=self._url))
+        self._toggle_consent(self.btn_consent.isChecked())
+        if self._online:
+            self.state_lbl.setText(i18n.tr("已连接"))
+        else:
+            self.state_lbl.setText(i18n.tr("未连接"))
+        if self._record is not None:
+            self._apply_record(self._record)
+        else:
+            self.record_hint.setText(i18n.tr("连接设备后点「读取授权记录」。"))
+        self._set_busy(self._busy)
 
     def _copy_uid(self):
         from PyQt5.QtWidgets import QApplication
@@ -531,14 +562,15 @@ class ActivationPage(QWidget):
         try:
             QApplication.clipboard().setText(uid)
         except Exception as e:  # noqa: BLE001 - 复制失败不能拖垮界面
-            self._log(f"[WARN] 复制 UID 失败: {e}")
+            self._log(i18n.tr("[WARN] 复制 UID 失败: {err}", err=e))
             return
-        self._log("[OK] 设备 UID 已复制到剪贴板")
+        self._log(i18n.tr("[OK] 设备 UID 已复制到剪贴板"))
 
     def _toggle_consent(self, shown: bool):
         self.consent_label.setVisible(bool(shown))
         self.btn_consent.setText(
-            "收起《激活注册信息同意书》" if shown else "查看《激活注册信息同意书》")
+            i18n.tr("收起《激活注册信息同意书》") if shown
+            else i18n.tr("查看《激活注册信息同意书》"))
 
     def _trim_purpose(self):
         """用途输入框与 studio 的 500 字上限同值（超长只可能来自粘贴）。"""
@@ -561,9 +593,9 @@ class ActivationPage(QWidget):
         self._busy = busy
         self._update_buttons()
         if busy:
-            self.btn_activate.setText("处理中…")
+            self.btn_activate.setText(i18n.tr("处理中…"))
         else:
-            self.btn_activate.setText("提交并激活")
+            self.btn_activate.setText(i18n.tr("提交并激活"))
 
     def _update_buttons(self):
         can_read = self._online and not self._busy and self._submit is not None
@@ -606,10 +638,12 @@ def _unreadable_reason(firmware: str) -> str:
     """
     version = _firmware_version(firmware)
     if version is not None and version < LICENSE_MIN_FW:
-        return (f"这台固件没有授权功能（需要 "
-                f"{LICENSE_MIN_FW[0]}.{LICENSE_MIN_FW[1]}.{LICENSE_MIN_FW[2]} 及以上）"
-                "—— 请升级固件")
-    return "设备未应答（固件过旧或链路异常）"
+        return i18n.tr(
+            "这台固件没有授权功能（需要 {major}.{minor}.{patch} 及以上）"
+            "—— 请升级固件",
+            major=LICENSE_MIN_FW[0], minor=LICENSE_MIN_FW[1],
+            patch=LICENSE_MIN_FW[2])
+    return i18n.tr("设备未应答（固件过旧或链路异常）")
 
 
 def _reason_text(err: activation.ActivationError) -> str:
@@ -645,7 +679,7 @@ def _reason_text(err: activation.ActivationError) -> str:
                     "错误码）—— 请点「读取授权记录」看授权状态；仍未激活就核对 UID 后"
                     "重新申请凭据。",
     }
-    return table.get(reason, str(err))
+    return i18n.tr(table.get(reason, i18n.safe_detail(err)))
 
 
 def _tool_identification() -> str:

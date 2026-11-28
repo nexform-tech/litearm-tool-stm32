@@ -14,6 +14,9 @@ from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QPlainTextEdit, QTableWidget,
                              QTableWidgetItem, QTreeWidget, QTreeWidgetItem,
                              QVBoxLayout, QWidget)
 
+from litetool import i18n
+from litetool.gui.i18n_ui import TrLabel, tr_header
+
 MONO = QFont("DejaVu Sans Mono", 11)
 
 MODE_COLOR = {"INIT": "#b0b0b0", "MOVE_J": "#6fdd8b", "MOVE_P": "#6fdd8b",
@@ -25,7 +28,7 @@ CHIP_OFF = "QLabel{background:#3a3a3a;color:#b0b0b0;border-radius:4px;padding:2p
 
 # DM 电机状态字节: 0=失能 1=使能 13=CAN 超时保护 (1.5.2/M6b 真机 halt 实测);
 # 其余为未知/故障码 -> 红底
-ERR_STATE = {0: "失能", 1: "使能", 13: "超时保护"}
+ERR_STATE = {0: "已失能", 1: "已使能", 13: "超时保护"}
 
 #: 固件故障原因码 -> 表格短名（完整文案走 SDK `describe_fault`）。
 FAULT_SHORT = {1: "断线", 2: "越限", 3: "超速", 4: "电机", 5: "过温",
@@ -43,7 +46,7 @@ def mono_label(width: Optional[int] = None, text: str = "—") -> QLabel:
 
 
 def static_label(text: str) -> QLabel:
-    lb = QLabel(text)
+    lb = TrLabel(text)
     lb.setStyleSheet("color:#a0a0a0;")
     return lb
 
@@ -60,6 +63,7 @@ class StatusStrip(QWidget):
         self._chips = []
         self._chip_on = [False] * 6
         self._last: dict = {}
+        self._last_args = None
 
         row = QHBoxLayout(self)
         row.setContentsMargins(8, 2, 8, 2)
@@ -70,7 +74,7 @@ class StatusStrip(QWidget):
         row.addWidget(self.mode_lbl)
 
         row.addWidget(static_label("臂"))
-        self.arm_lbl = mono_label(50)
+        self.arm_lbl = mono_label(70)
         row.addWidget(self.arm_lbl)
 
         from litearm import _protocol as _P
@@ -94,6 +98,7 @@ class StatusStrip(QWidget):
 
     def reset(self):
         self._last.clear()
+        self._last_args = None
         self._chip_on = [False] * 6
         for chip in self._chips:
             chip.setStyleSheet(CHIP_OFF)
@@ -104,9 +109,16 @@ class StatusStrip(QWidget):
         for lb in (self.seq_val, self.drops_val, self.fps_val):
             lb.setText("—")
 
+    def retranslate(self):
+        """切语言后重写"使能/失能"等状态词（值没变时 update_from 不会重写）。"""
+        if self._last_args is not None:
+            self._last.clear()
+            self.update_from(*self._last_args)
+
     def update_from(self, st, drops: int, fps: float):
         if st is None:
             return
+        self._last_args = (st, drops, fps)
         if st.mode_name != self._last.get("mode"):
             self._last["mode"] = st.mode_name
             self.mode_lbl.setText(st.mode_name)
@@ -116,7 +128,7 @@ class StatusStrip(QWidget):
         en = bool(st.enabled)
         if en != self._last.get("enabled"):
             self._last["enabled"] = en
-            self.arm_lbl.setText("使能" if en else "失能")
+            self.arm_lbl.setText(i18n.tr("已使能") if en else i18n.tr("已失能"))
             self.arm_lbl.setStyleSheet(
                 f"color:{'#6fdd8b' if en else '#a0a0a0'};font-weight:bold;")
 
@@ -140,9 +152,8 @@ class JointTable(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(
-            ["关节", "q (rad)", "dq (rad/s)", "tau (Nm)",
-             "T_mos (°C)", "T_coil (°C)", "状态"])
+        tr_header(self.table, ["关节", "q (rad)", "dq (rad/s)", "tau (Nm)",
+                               "T_mos (°C)", "T_coil (°C)", "状态"])
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -186,9 +197,10 @@ class JointTable(QWidget):
                 # 固件 1.12.2 起带原因码；旧固件为空列表 -> 只显示"断轴"
                 reasons = getattr(st, "fault_reason", []) or []
                 r = reasons[i] if i < len(reasons) else 0
-                st_text = f"断轴·{FAULT_SHORT.get(r, '?')}" if r else "断轴"
+                st_text = (i18n.tr("断轴·{reason}", reason=i18n.tr(FAULT_SHORT.get(r, '?')))
+                           if r else i18n.tr("断轴"))
             else:
-                st_text = ERR_STATE.get(js.err, f"0x{js.err:02X}")
+                st_text = i18n.tr(ERR_STATE.get(js.err, f"0x{js.err:02X}"))
             bad = unknown or faulted
             for col, text, bg in ((1, f"{js.q:.3f}", "err" if bad else "normal"),
                                   (2, f"{js.dq:.3f}", "err" if bad else "normal"),
@@ -227,11 +239,11 @@ class Banner(QLabel):
 
     def set_locked(self, locked: bool, reason: str = ""):
         if locked:
-            self.setText(f"⛔ {reason}" if reason else "⛔ 已锁定")
+            self.setText(f"⛔ {reason}" if reason else "⛔ " + i18n.tr("已锁定"))
             self.setStyleSheet("background:#5a4a2a;color:#ffd166;font-weight:bold;"
                                "font-size:14px;border-radius:4px;")
         else:
-            self.setText("✔ 已解锁 — 请谨慎操作，急停随时可用")
+            self.setText("✔ " + i18n.tr("已解锁 — 请谨慎操作，急停随时可用"))
             self.setStyleSheet("background:#2a5a3a;color:#6fdd8b;font-weight:bold;"
                                "font-size:14px;border-radius:4px;")
 
@@ -259,13 +271,16 @@ class NavList(QTreeWidget):
         self.setHeaderHidden(True)
         self.setRootIsDecorated(False)
         self.setIndentation(18)
-        self.setFixedWidth(168)
+        self.setFixedWidth(190)
         self._items: dict = {}
+        #: (item, kind, 源文案, 源 tooltip) —— 切语言时按源串重写。
+        self._i18n_items: list = []
         self.itemClicked.connect(self._on_clicked)
 
     def add_group(self, title: str):
         """分组标题：不可选、带底色 —— 分组得看得出来，否则导航就退化成一张平表。"""
-        item = QTreeWidgetItem([title])
+        item = QTreeWidgetItem([i18n.tr(title)])
+        self._i18n_items.append((item, "group", title, ""))
         item.setFlags(Qt.ItemIsEnabled)
         item.setForeground(0, QColor("#4a6b8a"))
         item.setBackground(0, QColor("#e8eef5"))
@@ -277,13 +292,20 @@ class NavList(QTreeWidget):
         return item
 
     def add_page(self, group_item, key: str, title: str, tip: str = ""):
-        item = QTreeWidgetItem([title])
+        item = QTreeWidgetItem([i18n.tr(title)])
         item.setData(0, Qt.UserRole, key)
         if tip:
-            item.setToolTip(0, tip)
+            item.setToolTip(0, i18n.tr(tip))
+        self._i18n_items.append((item, "page", title, tip))
         group_item.addChild(item)
         self._items[key] = item
         return item
+
+    def retranslate(self) -> None:
+        for item, _kind, source, tip in self._i18n_items:
+            item.setText(0, i18n.tr(source))
+            if tip:
+                item.setToolTip(0, i18n.tr(tip))
 
     def _on_clicked(self, item, _col):
         key = item.data(0, Qt.UserRole)
@@ -315,9 +337,25 @@ class LogPanel(QPlainTextEdit):
             "[WARN]": "#ffd166",
             "[INFO]": "#c8c8c8",
         }
+        #: 保留原始行，切语言时能按翻译表重渲染（只翻能匹配源串的行）。
+        self._lines: list = []
 
     def append_line(self, msg: str):
         ts = time.strftime("%H:%M:%S")
+        self._lines.append((ts, str(msg)))
+        self._render_line(ts, str(msg))
+
+    def retranslate(self) -> None:
+        self.clear()
+        for ts, msg in self._lines:
+            text = i18n.tr(msg)
+            # 带格式参数的旧日志（例如"拒绝 {op} — …"）无法按源串匹配；
+            # 英文界面宁可少显示这一行，也不把中文留在底部面板。
+            if i18n.language() == "en" and i18n.has_chinese(text):
+                continue
+            self._render_line(ts, text)
+
+    def _render_line(self, ts: str, msg: str) -> None:
         color = "#c8c8c8"
         for key, c in self._level_color.items():
             if msg.startswith(key):
@@ -327,4 +365,5 @@ class LogPanel(QPlainTextEdit):
                         f'<span style="color:{color}">{msg}</span>')
 
     def clear_log(self):
+        self._lines.clear()
         self.clear()

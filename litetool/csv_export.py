@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from litetool import i18n
+
 import csv
 import datetime as _dt
 import os
@@ -72,10 +74,10 @@ def _atomic_write(path: str, write_rows) -> None:
 
 def _rect(name: str, rows: Sequence[Sequence], n_rows: int, n_cols: int) -> None:
     if len(rows) != n_rows:
-        raise ValueError(f"{name} 有 {len(rows)} 行，时间轴有 {n_rows} 行 —— 拒绝导出错位数据")
+        raise ValueError(i18n.tr("{name} 有 {rows} 行，时间轴有 {n} 行 —— 拒绝导出错位数据", name=name, rows=len(rows), n=n_rows))
     for i, row in enumerate(rows):
         if len(row) != n_cols:
-            raise ValueError(f"{name} 第 {i} 行有 {len(row)} 列，期望 {n_cols} —— 拒绝导出错位数据")
+            raise ValueError(i18n.tr("{name} 第 {row} 行有 {got} 列，期望 {want} —— 拒绝导出错位数据", name=name, row=i, got=len(row), want=n_cols))
 
 
 def _joints(n: int, joints: Optional[Iterable[int]]) -> list:
@@ -84,7 +86,7 @@ def _joints(n: int, joints: Optional[Iterable[int]]) -> list:
     out = sorted({int(j) for j in joints})
     for j in out:
         if not 0 <= j < n:
-            raise ValueError(f"关节索引 {j} 超出 0..{n - 1}")
+            raise ValueError(i18n.tr("关节索引 {j} 超出 0..{last}", j=j, last=n - 1))
     return out
 
 
@@ -96,7 +98,7 @@ def write_plot_csv(path: str, snapshot: dict, joints: Optional[Iterable[int]] = 
     """
     times = list(snapshot.get("times") or [])
     if not times:
-        raise ValueError("曲线窗口里没有数据 —— 连接后等几帧再导出")
+        raise ValueError(i18n.tr("曲线窗口里没有数据 —— 连接后等几帧再导出"))
     q = list(snapshot.get("q") or [])
     dq = list(snapshot.get("dq") or [])
     tau = list(snapshot.get("tau") or [])
@@ -110,7 +112,7 @@ def write_plot_csv(path: str, snapshot: dict, joints: Optional[Iterable[int]] = 
                        ("t_coil", t_coil), ("err", err)):
         _rect(name, rows, n_rows, n)
     if len(fault) != n_rows:
-        raise ValueError(f"joint_fault 有 {len(fault)} 行，时间轴有 {n_rows} 行")
+        raise ValueError(i18n.tr("joint_fault 有 {rows} 行，时间轴有 {n} 行", rows=len(fault), n=n_rows))
 
     picked = _joints(n, joints)
     header = ["t (s)", "joint_fault (mask)"]
@@ -141,13 +143,13 @@ def write_capture_csv(path: str, samples: Sequence, firmware: str = "",
     100 Hz 状态流里，请用曲线窗口的 CSV。
     """
     if not samples:
-        raise ValueError("还没有读回采集数据 —— 先 [读回并预览] 再导出")
+        raise ValueError(i18n.tr("还没有读回采集数据 —— 先 [读回并预览] 再导出"))
     n = len(samples[0].q_ref)
     for i, s in enumerate(samples):
         if not (len(s.q_ref) == len(s.dq) == len(s.tau) == n):
-            raise ValueError(f"第 {i} 拍各字段轴数不一致 —— 拒绝导出错位数据")
+            raise ValueError(i18n.tr("第 {i} 拍各字段轴数不一致 —— 拒绝导出错位数据", i=i))
     if hz <= 0:
-        raise ValueError(f"控制频率必须为正: {hz}")
+        raise ValueError(i18n.tr("控制频率必须为正: {hz}", hz=hz))
 
     header = ["tick", "t (s)"]
     for j in range(n):

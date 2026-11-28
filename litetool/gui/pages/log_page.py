@@ -20,7 +20,8 @@ from PyQt5.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout, QLabel,
                              QSplitter, QTableWidget, QTableWidgetItem,
                              QVBoxLayout, QWidget)
 
-from litetool import obs
+from litetool import i18n, obs
+from litetool.gui.i18n_ui import TrButton, TrLabel, tr_header, tr_placeholder
 
 _COLUMNS = ("时间", "级别", "类别", "内容")
 _LEVEL_COLOR = {"WARN": "#d8a13a", "ERROR": "#ff6b6b", "FATAL": "#ff4d4d"}
@@ -60,23 +61,25 @@ class LogPage(QWidget):
 
         # ---------------- 筛选条 ----------------
         self.level = QComboBox()
-        self.level.addItems(["全部"] + list(obs.SEVERITY_NAMES))
+        self.level.addItem(i18n.tr("全部"), None)
+        for name in obs.SEVERITY_NAMES:
+            self.level.addItem(name, name)
         self.level.currentTextChanged.connect(lambda _=None: self._rebuild())
         self.category = QComboBox()
         self.category.currentTextChanged.connect(lambda _=None: self._rebuild())
         self.search = QLineEdit()
-        self.search.setPlaceholderText("文本 / 事件名 / 字段…")
+        tr_placeholder(self.search, "文本 / 事件名 / 字段…")
         self.search.textChanged.connect(lambda _=None: self._rebuild())
 
-        self.btn_refresh = QPushButton("刷新历史")
+        self.btn_refresh = TrButton("刷新历史")
         self.btn_refresh.clicked.connect(self.refresh_history)
-        self.btn_export = QPushButton("导出 JSONL…")
+        self.btn_export = TrButton("导出 JSONL…")
         self.btn_export.clicked.connect(self._on_export)
 
         bar = QHBoxLayout()
-        bar.addWidget(QLabel("最低级别"))
+        bar.addWidget(TrLabel("最低级别"))
         bar.addWidget(self.level)
-        bar.addWidget(QLabel("类别"))
+        bar.addWidget(TrLabel("类别"))
         bar.addWidget(self.category)
         bar.addWidget(self.search, 1)
         bar.addWidget(self.btn_refresh)
@@ -84,7 +87,7 @@ class LogPage(QWidget):
 
         # ---------------- 表格 ----------------
         self.table = QTableWidget(0, len(_COLUMNS))
-        self.table.setHorizontalHeaderLabels(_COLUMNS)
+        tr_header(self.table, _COLUMNS)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -93,7 +96,7 @@ class LogPage(QWidget):
         self.table.itemSelectionChanged.connect(self._show_selected)
         self.table.setColumnWidth(0, 108)
         self.table.setColumnWidth(1, 64)
-        self.table.setColumnWidth(2, 96)
+        self.table.setColumnWidth(2, 120)
 
         self.detail = QPlainTextEdit()
         self.detail.setReadOnly(True)
@@ -147,16 +150,23 @@ class LogPage(QWidget):
 
     # ---------------- 筛选 ----------------
     def _matches(self, rec: dict) -> bool:
-        level = self.level.currentText()
-        if level != "全部" and obs.severity_number(rec.get("severity")) < \
+        # 英文界面不显示"无法翻译的中文旧记录"；切回中文即可看到全部原始记录。
+        # 记录文件本身不动，诊断信息没有丢。
+        if i18n.language() == "en" and i18n.has_chinese(
+                i18n.tr(str(rec.get("body", "")))):
+            return False
+        level = self.level.currentData()
+        if level and obs.severity_number(rec.get("severity")) < \
                 obs.severity_number(level):
             return False
-        cat = self.category.currentText()
-        if cat != "全部" and _category(rec) != cat:
+        cat = self.category.currentData()
+        if cat and _category(rec) != cat:
             return False
         needle = self.search.text().strip().lower()
         if needle:
-            blob = " ".join((str(rec.get("body", "")), str(rec.get("event", "")),
+            blob = " ".join((i18n.tr(str(rec.get("body", ""))),
+                             str(rec.get("body", "")),
+                             str(rec.get("event", "")),
                              json.dumps(rec.get("fields") or {}, ensure_ascii=False)))
             if needle not in blob.lower():
                 return False
@@ -167,12 +177,14 @@ class LogPage(QWidget):
         cats = sorted({_category(r) for r in self._records})
         if cats == self._category_choices:
             return False
-        current = self.category.currentText()
+        current = self.category.currentData()
         self._category_choices = cats
         self.category.blockSignals(True)
         self.category.clear()
-        self.category.addItems(["全部"] + cats)
-        idx = self.category.findText(current)
+        self.category.addItem(i18n.tr("全部"), None)
+        for cat in cats:
+            self.category.addItem(cat, cat)
+        idx = self.category.findData(current)
         self.category.setCurrentIndex(idx if idx >= 0 else 0)
         self.category.blockSignals(False)
         return True
@@ -191,8 +203,10 @@ class LogPage(QWidget):
 
     def _insert_row(self, row: int, rec: dict):
         self.table.insertRow(row)
+        # 历史/切语言前的记录：body 若正好是翻译表的源串就按当前语言显示；
+        # 详情面板仍给原始 JSON（诊断要的是原样字节）。
         values = (_local_time(rec), str(rec.get("severity", "")),
-                  _category(rec), str(rec.get("body", "")))
+                  _category(rec), i18n.tr(str(rec.get("body", ""))))
         for col, text in enumerate(values):
             item = QTableWidgetItem(text)
             if col == 1:
@@ -209,26 +223,30 @@ class LogPage(QWidget):
                 self._visible.pop()
 
     def _update_status(self):
-        self.status.setText(
-            f"显示 {len(self._visible)} / 共 {len(self._records)} 条 · "
-            f"文件 {self.slog.path}")
+        self.status.setText(i18n.tr(
+            "显示 {shown} / 共 {total} 条 · 文件 {path}",
+            shown=len(self._visible), total=len(self._records),
+            path=self.slog.path))
 
     def _show_selected(self):
         row = self.table.currentRow()
         if not 0 <= row < len(self._visible):
             return
-        self.detail.setPlainText(
-            json.dumps(self._visible[row], ensure_ascii=False, indent=2))
+        rec = dict(self._visible[row])
+        # 详情面板里的 body 跟列表同步翻译；其余字段保持原始 JSON 便于排查。
+        rec["body"] = i18n.tr(str(rec.get("body", "")))
+        self.detail.setPlainText(json.dumps(rec, ensure_ascii=False, indent=2))
 
     # ---------------- 导出 ----------------
     def _on_export(self):
         if not self._visible:
-            QMessageBox.information(self, "导出日志", "当前筛选结果为空。")
+            QMessageBox.information(self, i18n.tr("导出日志"),
+                                    i18n.tr("当前筛选结果为空。"))
             return
         stamp = time.strftime("%Y%m%d-%H%M%S")
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出筛选后的日志", f"litearm_log_{stamp}.jsonl",
-            "JSON Lines (*.jsonl);;全部 (*)")
+            self, i18n.tr("导出筛选后的日志"), f"litearm_log_{stamp}.jsonl",
+            i18n.tr("JSON Lines (*.jsonl);;全部 (*)"))
         if not path:
             return
         # 表格是新→旧，文件按时间顺序写。
@@ -236,6 +254,15 @@ class LogPage(QWidget):
         try:
             n = obs.export_jsonl(path, rows)
         except Exception as e:  # noqa: BLE001 - 导出失败不该拖垮界面
-            QMessageBox.warning(self, "导出失败", str(e))
+            QMessageBox.warning(self, i18n.tr("导出失败"),
+                                i18n.safe_detail(e) or i18n.tr("未知错误"))
             return
-        QMessageBox.information(self, "导出完成", f"已写出 {n} 条 → {path}")
+        QMessageBox.information(self, i18n.tr("导出完成"),
+                                i18n.tr("已写出 {n} 条 → {path}", n=n, path=path))
+
+    def retranslate(self):
+        if self.level.count():
+            self.level.setItemText(0, i18n.tr("全部"))
+        if self.category.count():
+            self.category.setItemText(0, i18n.tr("全部"))
+        self._rebuild()          # 重渲染历史记录里的 body（能翻的按当前语言显示）

@@ -15,7 +15,8 @@ import pyqtgraph as pg
 from PyQt5.QtWidgets import (QFileDialog, QLabel, QPushButton,
                              QVBoxLayout, QWidget)
 
-from litetool import csv_export
+from litetool import csv_export, i18n
+from litetool.gui.i18n_ui import TrButton, TrLabel, tr_tooltip
 from litetool.gui.pages.common import group, hint, note, row, spin
 from litetool.gui.widgets import mono_label
 
@@ -40,23 +41,25 @@ class CapturePage(QWidget):
         self.n_ticks.valueChanged.connect(self._refresh_eta)
         self.eta_lbl = mono_label(120)
 
-        self.btn_start = QPushButton("开始记录")
+        self.btn_start = TrButton("开始记录")
         self.btn_start.clicked.connect(self._on_start)
-        self.btn_stop = QPushButton("停止/清空")
+        self.btn_stop = TrButton("停止/清空")
         self.btn_stop.clicked.connect(self._on_stop)
-        self.btn_read = QPushButton("读回并预览")
+        self.btn_read = TrButton("读回并预览")
         self.btn_read.clicked.connect(self._on_read)
-        self.btn_capture = QPushButton("采集全程（等录满后读回）")
-        self.btn_capture.setToolTip(
+        self.btn_capture = TrButton("采集全程（等录满后读回）")
+        tr_tooltip(
+            self.btn_capture,
             "`log.capture(n)`：开始记录 → 等录满 n 拍 → 读回 → 解析。\n"
             "n 拍要 n/300 秒才录满，故会阻塞 SDK 所有者线程（界面不卡）。")
         self.btn_capture.clicked.connect(self._on_capture)
-        self.btn_prog = QPushButton("查进度")
+        self.btn_prog = TrButton("查进度")
         self.btn_prog.clicked.connect(self._on_progress)
-        self.btn_dump = QPushButton("导出原始字节…")
+        self.btn_dump = TrButton("导出原始字节…")
         self.btn_dump.clicked.connect(self._on_dump)
-        self.btn_csv = QPushButton("导出解析 CSV…")
-        self.btn_csv.setToolTip(
+        self.btn_csv = TrButton("导出解析 CSV…")
+        tr_tooltip(
+            self.btn_csv,
             "把最近一次读回的样本写成 CSV：tick、时间、q_ref/dq/tau。\n"
             "采集缓冲里没有温度与错误码 —— 那些请到总览页导出曲线 CSV。")
         self.btn_csv.clicked.connect(self._on_csv)
@@ -65,12 +68,13 @@ class CapturePage(QWidget):
 
         g_rec = group(
             "录制",
-            row(QLabel("拍数"), self.n_ticks, QLabel("预计"), self.eta_lbl),
+            row(TrLabel("拍数"), self.n_ticks, TrLabel("预计"), self.eta_lbl),
             row(self.btn_start, self.btn_stop, self.btn_read, self.btn_dump),
             row(self.btn_capture, self.btn_prog, self.btn_csv),
-            row(QLabel("进度"), self.prog_lbl),
-            note(f"固件缓冲上限 {LOG_MAX_SAMPLES} 拍（≈{LOG_MAX_SAMPLES / CTRL_HZ:.1f}s @ {CTRL_HZ}Hz），"
-                 "记满自停。可导出原始字节，也可把最近一次读回的样本写成解析 CSV。"),
+            row(TrLabel("进度"), self.prog_lbl),
+            note("固件缓冲上限 {n} 拍（≈{secs:.1f}s @ {hz}Hz），"
+                 "记满自停。可导出原始字节，也可把最近一次读回的样本写成解析 CSV。",
+                 n=LOG_MAX_SAMPLES, secs=LOG_MAX_SAMPLES / CTRL_HZ, hz=CTRL_HZ),
             hint("⚠ 固件是逐拍记录的：点开始后缓冲里还没有数据，要等 n/300 秒才录满。"
                  "读回在未录满时也能拿到已录部分。"),
             note("采集缓冲只有 tick/q_ref/dq/tau —— 温度与错误码在 100Hz 状态流里，"
@@ -83,12 +87,12 @@ class CapturePage(QWidget):
         for r in range(3):
             pi = self.gw.addPlot(row=r, col=0)
             pi.showGrid(x=True, y=True, alpha=0.2)
-            pi.setLabel("left", FIELD_TITLES[r])
+            pi.setLabel("left", i18n.tr(FIELD_TITLES[r]))
             pi.addLegend(offset=(10, 10))
             if r:
                 pi.setXLink(self.plots[0])
             self.plots.append(pi)
-        self.plots[-1].setLabel("bottom", "时间 (s)")
+        self.plots[-1].setLabel("bottom", i18n.tr("时间 (s)"))
         self.curves: list = []
         g_plot = group("预览（读回后绘制）", self.gw)
 
@@ -141,7 +145,7 @@ class CapturePage(QWidget):
     def _after_start(self, res, n):
         if res.ok:
             self._recording = True
-            self.prog_lbl.setText(f"已开始记录 {n} 拍 …")
+            self.prog_lbl.setText(i18n.tr("已开始记录 {n} 拍 …", n=n))
         self._refresh()
 
     def _on_stop(self):
@@ -151,7 +155,7 @@ class CapturePage(QWidget):
     def _after_stop(self, res):
         self._recording = False
         if res.ok:
-            self.prog_lbl.setText("已停止/清空")
+            self.prog_lbl.setText(i18n.tr("已停止/清空"))
         self._refresh()
 
     def _on_capture(self):
@@ -170,7 +174,8 @@ class CapturePage(QWidget):
         """`LogReader.total()` —— 固件侧已录了多少拍（不读全量、不等）。"""
         self._do("log.total", lambda arm: arm.log.reader().total(),
                  lambda res: self.prog_lbl.setText(
-                     f"已记录 {res.value} 拍" if res.ok else f"查进度失败：{res.error}"))
+                     i18n.tr("已记录 {n} 拍", n=res.value) if res.ok
+                     else i18n.tr("查进度失败：{err}", err=res.error)))
 
     def _on_read(self):
         self._do("log.reader", lambda arm: arm.log.reader().samples(),
@@ -178,42 +183,43 @@ class CapturePage(QWidget):
 
     def _after_read(self, res):
         if not res.ok:
-            self.prog_lbl.setText(f"读回失败：{res.error}")
+            self.prog_lbl.setText(i18n.tr("读回失败：{err}", err=res.error))
             return
         samples = res.value or []
         self._samples = list(samples)
-        self.prog_lbl.setText(f"读回 {len(samples)} 拍")
+        self.prog_lbl.setText(i18n.tr("读回 {n} 拍", n=len(samples)))
         self._draw(samples)
         self._refresh()
 
     def _on_dump(self):
-        path, _ = QFileDialog.getSaveFileName(self, "导出采集原始字节", "log_capture.bin",
-                                              "二进制 (*.bin);;全部 (*)")
+        path, _ = QFileDialog.getSaveFileName(
+            self, i18n.tr("导出采集原始字节"), "log_capture.bin",
+            i18n.tr("二进制 (*.bin);;全部 (*)"))
         if not path:
             return
         self._do("log.dump", lambda arm: arm.log.dump(path, wait=False),
                  lambda res: self.prog_lbl.setText(
-                     f"已导出 {res.value} 字节 → {path}" if res.ok
-                     else f"导出失败：{res.error}"))
+                     i18n.tr("已导出 {n} 字节 → {path}", n=res.value, path=path)
+                     if res.ok else i18n.tr("导出失败：{err}", err=res.error)))
 
     def _on_csv(self):
         """把最近一次读回的样本写成 CSV（纯本地，不再碰串口）。"""
         if not self._samples:
-            self.prog_lbl.setText("还没有可导出的样本 —— 先读回并预览")
+            self.prog_lbl.setText(i18n.tr("还没有可导出的样本 —— 先读回并预览"))
             return
         path, _ = QFileDialog.getSaveFileName(
-            self, "导出采集解析 CSV",
+            self, i18n.tr("导出采集解析 CSV"),
             csv_export.timestamped_name("capture", self._firmware),
-            "CSV (*.csv);;全部 (*)")
+            i18n.tr("CSV (*.csv);;全部 (*)"))
         if not path:
             return
         try:
             rows = csv_export.write_capture_csv(path, self._samples,
                                                 firmware=self._firmware, hz=CTRL_HZ)
         except Exception as e:  # noqa: BLE001 - 导出失败不该拖垮界面
-            self.prog_lbl.setText(f"导出失败：{e}")
+            self.prog_lbl.setText(i18n.tr("导出失败：{err}", err=e))
             return
-        self.prog_lbl.setText(f"已导出 {rows} 行 → {path}")
+        self.prog_lbl.setText(i18n.tr("已导出 {n} 行 → {path}", n=rows, path=path))
 
     def _do(self, name, fn, cb):
         if self._submit is None:
@@ -222,6 +228,17 @@ class CapturePage(QWidget):
         self._submit(name, fn, cb)
 
     # ---------------- 预览绘制 ----------------
+    def retranslate(self):
+        for r, plot in enumerate(self.plots):
+            plot.setLabel("left", i18n.tr(FIELD_TITLES[r]))
+        self.plots[-1].setLabel("bottom", i18n.tr("时间 (s)"))
+        if self._samples:
+            self.prog_lbl.setText(i18n.tr("已读回 {n} 拍", n=len(self._samples)))
+        elif self._recording:
+            self.prog_lbl.setText(i18n.tr("录制中…"))
+        else:
+            self.prog_lbl.setText("—")
+
     def _draw(self, samples):
         for pi in self.plots:
             pi.clear()

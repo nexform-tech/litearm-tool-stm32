@@ -1,5 +1,7 @@
 """settings.py 测试 —— 配置合并/容错。"""
 
+import pytest
+
 from litetool import settings
 
 
@@ -57,3 +59,23 @@ def test_scene_software_gl_defaults_off_and_parses_bool(tmp_path):
     cfg = tmp_path / "c.yaml"
     cfg.write_text("scene_software_gl: true\n", encoding="utf-8")
     assert settings.Settings.load(str(cfg)).scene_software_gl is True
+
+
+def test_language_defaults_to_auto():
+    assert settings.Settings.load(None).language == "auto"
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("zh", "zh"), ("zh-CN", "zh"), ("en", "en"), ("en_US", "en"),
+    ("auto", "auto"), ("system", "auto"),
+])
+def test_language_accepts_supported_choices(tmp_path, value, expected):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(f"language: {value}\n", encoding="utf-8")
+    assert settings.Settings.load(str(cfg)).language == expected
+
+
+def test_language_rejects_unknown_choice(tmp_path):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("language: fr\n", encoding="utf-8")
+    assert settings.Settings.load(str(cfg)).language == "auto"

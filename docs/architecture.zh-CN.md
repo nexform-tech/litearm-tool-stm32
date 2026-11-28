@@ -23,6 +23,11 @@
 | `litetool/protocol.py` | 帧编解码、CRC、G8 状态帧、ACK/ERR、调参命令编解码 | 仅标准库 |
 | `litetool/param_catalog.py` | 参数镜像：schema、范围、diff、ff_mask、role/hint/detail | `protocol.py` |
 | `litetool/tuning_guide.py` | 调参指南文本：公式、符号映射、读前须知、症状速查 | 仅标准库 |
+| `litetool/i18n.py` | 界面语言状态、系统语言检测、中文源串 `tr()`（缺项自动回落） | 仅标准库 |
+| `litetool/i18n_en.py` | 英文翻译表（中文源串 → 英文） | 仅标准库 |
+| `litetool/param_catalog_en.py`、`litetool/tuning_guide_en.py` | 参数元数据与指南内容的英文版 | 仅标准库 |
+| `litetool/gui/i18n_ui.py` | PyQt 静态文案登记与即时切换 | PyQt5 |
+| `litetool/gui/prefs.py` | 按机器保存的界面偏好（`QSettings`：语言） | PyQt5 |
 | `litetool/checks.py` | Δq 意图确认与运动页锁定校验 | 仅标准库 |
 | `litetool/client.py` | 状态缓存、ACK 配对、急停旁路、参数读写 | `protocol.py`、`transport.py` |
 | `litetool/transport.py` | 串口发现与 `SerialLink` 后台读线程 | `pyserial` |

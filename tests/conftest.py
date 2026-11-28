@@ -22,5 +22,24 @@ def _isolated_log_dir(tmp_path, monkeypatch):
     monkeypatch.delenv("LC_ALL", raising=False)
     from litetool import i18n
     i18n.set_language("zh")
+    # Windows 的系统语言检测优先 Qt `uiLanguages`，runner 是 en-US；只设
+    # LANGUAGE/LANG 不会让默认语言变中文。这里把 MainWindow 看到的系统语言
+    # 固定成中文 —— 既有用例的断言都是中文，语言行为自己的用例会显式切 en。
+    try:
+        import litetool.gui.main_window as mw
+
+        class _FakeSystemLocale:
+            @staticmethod
+            def uiLanguages():
+                return ["zh-CN", "zh"]
+
+        class _FakeQLocale:
+            @staticmethod
+            def system():
+                return _FakeSystemLocale()
+
+        monkeypatch.setattr(mw, "QLocale", _FakeQLocale)
+    except Exception:  # noqa: BLE001 - 没有 PyQt 的纯测试不关心界面语言
+        pass
     yield
     i18n.set_language("zh")

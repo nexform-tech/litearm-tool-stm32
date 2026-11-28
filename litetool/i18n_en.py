@@ -1314,6 +1314,14 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '分量{sub}({err})': 'Component {sub} ({err})',
  '下发 movej': 'Movej',
  '就绪姿态': 'Ready Pose',
+ '就绪姿态（movej）': 'Ready pose (movej)',
+ '把机械臂 movej 到就绪姿态 [0, 0.5, 0, -1, 0, 0.6, 0]（按轴数裁剪/补 0）。\n仍走运动解锁与 Δq 确认；与关节页的「就绪姿态」是同一个动作。': 'Move the arm with movej to the ready pose [0, 0.5, 0, -1, 0, 0.6, 0] '
+                                                                                '(trimmed/padded with 0 per joint count).\n'
+                                                                                'Still goes through motion unlock and Δq '
+                                                                                'confirmation; same action as "Ready Pose" on '
+                                                                                'the joint page.',
+ '[WARN] 拒绝就绪姿态 — 还没识别到关节数': '[WARN] Ready pose refused — joint count is not known yet',
+ '[INFO] 就绪姿态：movej 目标 {q}': '[INFO] Ready pose: movej target {q}',
  '把目标填成就绪姿态 [0, 0.5, 0, -1, 0, 0.6, 0]（按轴数裁剪/补 0）\n并立即下发 movej。仍走运动解锁与 Δq 确认。': 'Fill the target with the '
                                                                                 'ready pose [0, 0.5, 0, -1, '
                                                                                 '0, 0.6, 0] (trimmed/padded '

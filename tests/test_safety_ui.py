@@ -250,6 +250,7 @@ def test_zero_g_button_follows_actual_state(win):
 # ---------------------------------------------------------------- 运动闸门（唯一收口）
 MOTION_CALLS = [
     ("movej", lambda w: w._on_movej([0.5] * 7, 0.2)),
+    ("ready_pose", lambda w: w._on_ready_pose(0.2)),
     ("move_js", lambda w: w._on_move_js([0.5] * 7, [0.0] * 7, None)),
     ("move_mit", lambda w: w._on_mit_one(0, 0.5, 0.0, 30.0, 2.0, 0.0)),
     ("move_mit_all", lambda w: w._on_mit_all([0.5] * 7, [0.0] * 7,

@@ -108,6 +108,19 @@ def test_movej_reaches_sdk(win, monkeypatch):
     assert calls_of(arm, "movej")[0][1] == ([0.0] * 7, 0.25)
 
 
+def test_cart_ready_pose_reaches_sdk(win, monkeypatch):
+    """笛卡尔页的「就绪姿态」最终落在 movej，且目标是按轴数裁剪的 READY_POSE。"""
+    from PyQt5.QtWidgets import QMessageBox
+    from litetool.gui.pages.joint_page import READY_POSE
+    w, arm, app = win
+    monkeypatch.setattr("litetool.gui.main_window.QMessageBox.warning",
+                        lambda *a, **k: QMessageBox.Ok)
+    w.pages["cart"].btn_ready.click()
+    assert pump(app, lambda: calls_of(arm, "movej"))
+    q, _speed = calls_of(arm, "movej")[0][1]
+    assert q == list(READY_POSE)
+
+
 def test_move_js_mit_one_mit_all_reach_sdk(win, monkeypatch):
     from PyQt5.QtWidgets import QMessageBox
     w, arm, app = win

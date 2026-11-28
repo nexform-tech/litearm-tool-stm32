@@ -46,6 +46,8 @@ class CartPage(QWidget):
     ik_req = pyqtSignal(list, object)        # pose, q_seed|None
     movep = pyqtSignal(list, float)          # pose, speed
     movel = pyqtSignal(list, float)          # pose, speed
+    #: 就绪姿态（关节空间 movej；主窗口负责按轴数裁剪并走 movej 闸门）
+    ready_req = pyqtSignal(float)            # speed
     #: 点动一步：axis, kind(translate/rotate), amount(SI), frame(base/tool), speed, gen
     jog_step = pyqtSignal(str, str, float, str, float, int)
     #: 受控停止点动（movej 到当前关节角；旁路，不排队）
@@ -59,6 +61,7 @@ class CartPage(QWidget):
         self._fault_blocked = False
         self._tcp = None
         self._seed_q = None
+        self._n = 0
         self._cart_ok = None             # True/False/None（未知）
         self._cart_silent = False
 
@@ -75,10 +78,19 @@ class CartPage(QWidget):
         self.btn_tcp.clicked.connect(self.tcp_req.emit)
         self.btn_fill = TrButton("填入下方目标位姿")
         self.btn_fill.clicked.connect(lambda: self.pose.set_value(self._tcp))
+        # 就绪姿态是 IK 失败 / movep 超时 / 接近奇异位形后的标准恢复动作。
+        # 它属于关节空间，却最常在笛卡尔页被需要 —— 不能再要求用户切到关节页
+        # 去找一个小按钮（issue #42）。主窗口按轴数裁剪后走同一条 movej 闸门。
+        self.btn_ready = TrButton("就绪姿态（movej）")
+        tr_tooltip(
+            self.btn_ready,
+            "把机械臂 movej 到就绪姿态 [0, 0.5, 0, -1, 0, 0.6, 0]（按轴数裁剪/补 0）。\n"
+            "仍走运动解锁与 Δq 确认；与关节页的「就绪姿态」是同一个动作。")
+        self.btn_ready.clicked.connect(self._emit_ready)
         self.tcp_lbl = QLabel("—")
         self.tcp_lbl.setStyleSheet("color:#61afef;font-family:'DejaVu Sans Mono';")
         g_now = group("当前末端位姿 pos[3] + rpy[3]",
-                      row(self.btn_tcp, self.btn_fill),
+                      row(self.btn_tcp, self.btn_fill, self.btn_ready),
                       self.tcp_lbl)
 
         # ---------------- 点动 ----------------
@@ -210,6 +222,14 @@ class CartPage(QWidget):
             self._abort_jog(i18n.tr("FAULT/急停锁存"))
         self._refresh()
 
+    def set_joints(self, n: int):
+        """主窗口识别到关节数后注入 —— 就绪姿态要按轴数裁剪，未识别前按钮保持灰色。"""
+        n = int(n)
+        if n == self._n:
+            return
+        self._n = n
+        self._refresh()
+
     def set_cart_supported(self, ok, silent: bool = False):
         """主窗口在连接后注入固件能力（None = 未知/未连接）。"""
         self._cart_ok = ok
@@ -239,6 +259,8 @@ class CartPage(QWidget):
         self.btn_fill.setEnabled(can)
         self.btn_ik.setEnabled(can)
         self.seed_cb.setEnabled(can)
+        # 与关节页的 movej 同一闸门；轴数未知时不能裁剪目标，保持灰色。
+        self.btn_ready.setEnabled(move_can and self._n > 0)
         self.btn_mp.setEnabled(move_can)
         self.btn_ml.setEnabled(cart_can)
         for b in self._jog_buttons:
@@ -373,3 +395,7 @@ class CartPage(QWidget):
     def _emit_ik(self):
         self.ik_req.emit(self.pose.value(),
                          self._seed_q if self.seed_cb.isChecked() else None)
+
+    def _emit_ready(self):
+        """发出就绪姿态请求；裁剪目标与闸门都在主窗口（与关节页同一条路径）。"""
+        self.ready_req.emit(self.speed.value())

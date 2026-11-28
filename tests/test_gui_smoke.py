@@ -143,7 +143,7 @@ def test_motion_pages_start_locked():
     w = _win()
     for key in ("machine", "joint", "cart", "zerog"):
         page = w.pages[key]
-        for name in ("btn_home", "btn_mj", "btn_mp", "btn"):
+        for name in ("btn_home", "btn_mj", "btn_ready", "btn_mp", "btn"):
             b = getattr(page, name, None)
             if b is not None:
                 assert not b.isEnabled(), f"{key}.{name} 未解锁却可用"

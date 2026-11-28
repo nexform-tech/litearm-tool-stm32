@@ -55,14 +55,7 @@ class JointSelector(QWidget):
         self._boxes = []
         for j in range(n):
             cb = QCheckBox(f"J{j + 1}")
-            color = COLORS[j % len(COLORS)]
-            # 文字保持黑色（页底是浅色），颜色放在复选框本身：空心=未选，
-            # 实心=已选。这样彩色标记不再影响文字可读性。
-            cb.setStyleSheet(
-                "QCheckBox { color: #000000; spacing: 4px; }"
-                f"QCheckBox::indicator {{ width: 12px; height: 12px; "
-                f"border: 2px solid {color}; border-radius: 2px; }}"
-                f"QCheckBox::indicator:checked {{ background-color: {color}; }}")
+            cb.setStyleSheet("color: #000000;")     # 只改文字颜色，复选框保持原生
             cb.setChecked(default_first is None or j < default_first)
             cb.toggled.connect(self._emit_changed)
             self._row.addWidget(cb)

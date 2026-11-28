@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 
 import pytest
@@ -124,6 +125,88 @@ def test_reconnect_prefers_last_port_then_falls_back(monkeypatch):
         assert calls[0] == "p1" and calls[1] == "p1", "重连先试上次成功的口"
         assert "p2" in calls, "上次的口不行时要重新枚举并试其它口"
         assert w._port == "p2"
+    finally:
+        w.close()
+
+
+def test_manual_reconnect_retires_the_old_reconnect_thread(monkeypatch):
+    """issue #43：手动重连成功后，旧的自动重连线程不能再活着抢端口。
+
+    旧实现的 `close()` 在 join 超时后仍会 `clear()` 共享 Event —— 卡在阻塞工厂
+    调用里的旧线程被"复活"，与新线程同时跑 `_reconnect()`。这里让旧线程卡在
+    幽灵口的工厂调用里（对应日志里 COM60 的写超时），再手动连到新口。
+    """
+    first = FakeArm()
+    second = FakeArm(firmware="Litearm2.0-7J")
+    late = FakeArm()
+    blocked, entered = threading.Event(), threading.Event()
+    opened = []
+
+    def factory(port):
+        if port == "phantom":
+            entered.set()
+            blocked.wait(2.0)
+            return late          # 即使最后成功，过期线程也只能把它关掉
+        if port == "p1" and not opened:
+            opened.append(port)
+            return first
+        if port == "p2":
+            return second
+        raise OSError(f"{port} gone")
+
+    monkeypatch.setattr("litetool.ports.find_ports",
+                        lambda: [{"device": "phantom"}])
+    w = SdkWorker(arm_factory=factory, offline_timeout=0.05, idle_timeout=0.005,
+                  reconnect_initial_s=0.01, reconnect_max_s=0.02,
+                  close_join_s=0.05)
+    try:
+        w.open("p1")
+        old = w._thread
+        assert wait_for(lambda: w.state is not None)
+        first.silent = True
+        assert wait_for(entered.is_set), "旧线程应已卡在幽灵口的工厂调用里"
+
+        # 用户手动在新口重连：close() 的 join 会超时，但新会话必须立刻可用。
+        w.open("p2")
+        assert w.online and w.arm is second
+        assert w._thread is not old
+
+        blocked.set()
+        assert wait_for(lambda: not old.is_alive()), "过期重连线程必须退出"
+        assert wait_for(lambda: late.closed), "过期线程打开的链路必须被关掉"
+        assert w.arm is second and not second.closed, "过期线程不得抢走新会话的 arm"
+        assert w.online
+    finally:
+        blocked.set()
+        w.close()
+
+
+def test_reconnect_skips_non_usb_placeholder_ports(monkeypatch):
+    """幽灵 COM60–COM67 没有 USB VID/PID：重连不能逐个拨过去白等写超时。"""
+    first = FakeArm()
+    calls, logs = [], []
+
+    def factory(port):
+        calls.append(port)
+        if len(calls) == 1:
+            return first
+        raise OSError(f"{port} gone")
+
+    monkeypatch.setattr("litetool.ports.find_ports", lambda: [
+        {"device": "COM60", "_rank": 2},
+        {"device": "COM61", "_rank": 2},
+    ])
+    w = SdkWorker(arm_factory=factory, log=logs.append, offline_timeout=0.05,
+                  idle_timeout=0.005, reconnect_initial_s=0.01,
+                  reconnect_max_s=0.02)
+    try:
+        w.open("COM10")
+        first.silent = True
+        assert wait_for(lambda: len(calls) >= 2)
+        time.sleep(0.05)
+        assert "COM60" not in calls and "COM61" not in calls
+        # 每轮一条摘要，而不是每个口一条 WARN（幽灵口能刷几分钟）
+        assert any("个端口均无响应" in m for m in logs), logs
     finally:
         w.close()
 

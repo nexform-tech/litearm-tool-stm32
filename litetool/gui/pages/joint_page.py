@@ -54,10 +54,13 @@ class JointPage(QWidget):
             "⚠ 若在途的是另一条 movej，SDK 要等原目标超时/到位才返回；\n"
             "接管帧本身已经发出，固件会改走新目标。")
         self.sup_cb.toggled.connect(lambda _=None: self._refresh())
+        # 就绪姿态单独一行压在关节输入上方：原来挤在速度/接管/下发中间，
+        # 现场反馈"根本找不到"（issue #42）。
         g_mj = group("move_j —— 关节轨迹（绝对角 rad，固件 S 曲线自完成 + 到位静止保持）",
+                     row(self.btn_ready),
                      self.mj_row,
                      row(TrLabel("速度倍率 (0..1)"), self.mj_speed,
-                         self.btn_ready, self.sup_cb, self.btn_mj))
+                         self.sup_cb, self.btn_mj))
 
         # ---------------- move_js ----------------
         self.js_q = JointRow()

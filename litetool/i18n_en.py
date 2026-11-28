@@ -71,6 +71,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '零重力': 'Zero-G',
  '拖动示教（保活由 SDK 维持）': 'Drag teaching (keep-alive maintained by SDK)',
  '夹爪': 'Gripper',
+ '夹爪（仅 Linux）': 'Gripper (Linux only)',
  'LiteGrip（仅 Linux）：连接/使能/开合/抓取/标定': 'LiteGrip (Linux only): connect/enable/open-close/grasp/calibration',
  '参数表': 'Parameters',
  '关节/前馈参数读写与批量导入导出': 'Read/write joint and feedforward parameters, batch import/export',
@@ -1314,6 +1315,14 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '分量{sub}({err})': 'Component {sub} ({err})',
  '下发 movej': 'Movej',
  '就绪姿态': 'Ready Pose',
+ '就绪姿态（movej）': 'Ready pose (movej)',
+ '把机械臂 movej 到就绪姿态 [0, 0.5, 0, -1, 0, 0.6, 0]（按轴数裁剪/补 0）。\n仍走运动解锁与 Δq 确认；与关节页的「就绪姿态」是同一个动作。': 'Move the arm with movej to the ready pose [0, 0.5, 0, -1, 0, 0.6, 0] '
+                                                                                '(trimmed/padded with 0 per joint count).\n'
+                                                                                'Still goes through motion unlock and Δq '
+                                                                                'confirmation; same action as "Ready Pose" on '
+                                                                                'the joint page.',
+ '[WARN] 拒绝就绪姿态 — 还没识别到关节数': '[WARN] Ready pose refused — joint count is not known yet',
+ '[INFO] 就绪姿态：movej 目标 {q}': '[INFO] Ready pose: movej target {q}',
  '把目标填成就绪姿态 [0, 0.5, 0, -1, 0, 0.6, 0]（按轴数裁剪/补 0）\n并立即下发 movej。仍走运动解锁与 Δq 确认。': 'Fill the target with the '
                                                                                 'ready pose [0, 0.5, 0, -1, '
                                                                                 '0, 0.6, 0] (trimmed/padded '
@@ -2475,6 +2484,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '未预期异常: {err}': 'Unexpected exception: {err}',
  '状态流静默 >{timeout:.1f}s': 'State stream silent >{timeout:.1f}s',
  '[WARN] 重连 {port} 失败: {err}': '[WARN] Reconnect to {port} failed: {err}',
+ '[WARN] 第 {n} 次重连失败：{count} 个端口均无响应（{port}: {err}）': '[WARN] Reconnect attempt {n} failed: no response on {count} port(s) ({port}: {err})',
  '激活服务返回 HTTP {status}': 'Activation service returned HTTP {status}',
  '{field} 必须是十六进制字符串': '{field} must be a hex string',
  '{field} 需 {want} 位十六进制，给的是 {got} 位': '{field} must be {want} hex digits, got {got}',
@@ -2530,6 +2540,8 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '夹爪已连接 {channel}': 'Gripper connected {channel}',
  '夹爪已断开': 'Gripper disconnected',
  '夹爪未连接': 'Gripper not connected',
+ '夹爪不可用 — {why}。连接按钮已禁用。': 'Gripper unavailable — {why}. The connect button is disabled.',
+ '不可用：{why}': 'Unavailable: {why}',
  '零力矩帧已发出': 'Zero-torque frame sent',
  '[WARN] 夹爪断开出错: {err}': '[WARN] Error disconnecting gripper: {err}',
  '零力矩帧已发出，但失能失败（在途动作可能继续）: {err}': 'Zero-torque frame sent, but disable failed (in-flight motion may '

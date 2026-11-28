@@ -52,7 +52,7 @@ three navigation groups on the left + a collapsible log at the bottom.
 | | **Faults** | Per-axis fault reasons (`0x51` on demand when `flags` bit11 is set) + flags + `drop_hold`; all 7 axes on one screen, reason and action in separate columns |
 | Operate | **Machine** | Enable / disable / reset / clear faults / home / global speed / park / read state / reset reason |
 | | **Joints** | `move_j` / `move_js` / single-joint `move_mit` / whole-arm `move_mit_all`; one-click ready pose `[0, 0.5, 0, -1, 0, 0.6, 0]` (trimmed/padded to the axis count); explicit `movej` takeover |
-| | **Cartesian** | Read TCP / `ik` solve / `move_p` / `movel` (straight line) / base- or tool-frame jog (hold to run, release to stop) / controlled stop |
+| | **Cartesian** | Read TCP / `ik` solve / `move_p` / `movel` (straight line) / base- or tool-frame jog (hold to run, release to stop) / controlled stop / one-click ready pose (the same joint-space `movej` path as the joint page) |
 | | **Zero-G** | Hand-guiding (keep-alive is maintained by the SDK background thread; this tool sends no heartbeat frames) |
 | | **Gripper** | LiteGrip (Linux only): connect / enable / open / close / grasp / zero-torque stop / telemetry / calibration / write zero |
 | Tuning | **Parameters** | Joint parameters and the 0x26/0x27/0x28 feed-forward family: read back / edit and send / ff_mask / batch import-export / persist to flash / factory reset |
@@ -419,6 +419,7 @@ python3 -m pytest          # 689 passed (all offline, no hardware required)
    - [ ] `move_j` with a delta > 0.5 rad → Δq confirmation; cancelling sends nothing
    - [ ] [Ready pose] fills the target with `[0, 0.5, 0, -1, 0, 0.6, 0]` and sends it through the same confirmation
    - [ ] Cartesian page [Read current TCP pose] returns a value; [Solve IK] returns 7 numbers; a small `move_p` arrives
+   - [ ] Cartesian page [Ready pose] sends the same trimmed ready pose through the `movej` gate
    - [ ] Hold a jog direction for ~1 s → several small steps; release → the arm stops and holds; [Stop jog] also holds
    - [ ] `movel` a 10 mm straight line → arrives; the page refreshes TCP after the motion
    - [ ] On firmware without `LITEARM_CART_PLAN` (or a silent probe) the jog/movel buttons stay grey and the page states why

@@ -183,16 +183,13 @@ def test_capture_and_diag_pages_idle_offline():
     w.close()
 
 
-def test_plot_legend_hidden_until_there_are_curves():
-    """空图例会在黑画布上留个空框子 —— 没曲线时先藏着，有曲线了再亮出来。"""
+def test_plot_has_no_in_plot_legend_to_clip_or_drag():
+    """关节开关行取代了图内图例 —— 图例会被子图高度截掉，也不能再被拖走。"""
     w = _win()
     ov = w.pages["overview"]
-    assert not any(lg.isVisible() for lg in ov.plot._legends.values())
     ov.set_joints(1)
-    assert not any(lg.isVisible() for lg in ov.plot._legends.values())
-    w.worker.model.push(make_state(n=1))
-    ov.refresh_plot(w.worker.model)
-    assert any(lg.isVisible() for lg in ov.plot._legends.values())
+    assert all(pi.legend is None for pi in ov.plot.plots)
+    assert ov.plot.joints.n == 1
     w.close()
 
 

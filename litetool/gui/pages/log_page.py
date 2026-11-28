@@ -96,7 +96,7 @@ class LogPage(QWidget):
         self.table.itemSelectionChanged.connect(self._show_selected)
         self.table.setColumnWidth(0, 108)
         self.table.setColumnWidth(1, 64)
-        self.table.setColumnWidth(2, 96)
+        self.table.setColumnWidth(2, 120)
 
         self.detail = QPlainTextEdit()
         self.detail.setReadOnly(True)
@@ -150,6 +150,11 @@ class LogPage(QWidget):
 
     # ---------------- 筛选 ----------------
     def _matches(self, rec: dict) -> bool:
+        # 英文界面不显示"无法翻译的中文旧记录"；切回中文即可看到全部原始记录。
+        # 记录文件本身不动，诊断信息没有丢。
+        if i18n.language() == "en" and i18n.has_chinese(
+                i18n.tr(str(rec.get("body", "")))):
+            return False
         level = self.level.currentData()
         if level and obs.severity_number(rec.get("severity")) < \
                 obs.severity_number(level):

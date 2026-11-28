@@ -323,6 +323,7 @@ class ScenePage(QWidget):
 
     def _clear_banner(self):
         self._banner_src = None
+        self.banner.setText("")
         self.banner.setVisible(False)
 
     def retranslate(self):

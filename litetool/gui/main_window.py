@@ -390,8 +390,10 @@ class MainWindow(QMainWindow):
             if callable(hook):
                 hook()
         self.log_panel.retranslate()
+        self._refresh_ports()          # 串口描述/假设备条目是按当前语言生成的
         self._apply_online(self._connected,
                            "" if self._connected else i18n.tr("未连接"))
+        self.strip.retranslate()
         self._render_estop()
         self._render_last_error()
         self._tick()

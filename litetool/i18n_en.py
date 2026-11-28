@@ -521,9 +521,9 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '写入授权失败：{text}': 'Activation write failed: {text}',
  '[ERR] 写入授权失败: {text}': '[ERR] Activation write failed: {text}',
  '[WARN] 复制 UID 失败: {err}': '[WARN] Copy UID failed: {err}',
- '执行参考 q_ref (rad)': 'Command reference q_ref (rad)',
- '执行速度 dq (rad/s)': 'Command velocity dq (rad/s)',
- '实测力矩 tau (Nm)': 'Measured torque tau (Nm)',
+ '执行参考 q_ref (rad)': 'q_ref (rad)',
+ '执行速度 dq (rad/s)': 'dq (rad/s)',
+ '实测力矩 tau (Nm)': 'tau (Nm)',
  '开始记录': 'Start recording',
  '停止/清空': 'Stop/Clear',
  '读回并预览': 'Read back and preview',
@@ -660,8 +660,8 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '点动 {button} …': 'Jog {button} …',
  '受控停止…': 'Controlled stop…',
  '失败：{msg}': 'Failed: {msg}',
- '基座系': 'Base frame',
- '工具系': 'Tool frame',
+ '基座系': 'Base',
+ '工具系': 'Tool',
  '坐标系': 'Coordinate frame',
  '平移步长': 'Translation step',
  '旋转步长': 'Rotation step',
@@ -1009,9 +1009,9 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
                                                                                               'Travel '
                                                                                               '{travel:.1f} '
                                                                                               'mm · {state}',
- '出厂（正装）': 'Factory (standard mount)',
- '正装模板': 'Standard-Mount Template',
- '反装模板': 'Reverse-Mount Template',
+ '出厂（正装）': 'Factory',
+ '正装模板': 'Standard',
+ '反装模板': 'Reverse',
  '通道': 'Channel',
  '安装': 'Mount',
  '标定文件': 'Calibration File',
@@ -1312,7 +1312,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '符合预期': 'As expected',
  '⚠ 与预期不符': '⚠ Does not match expectation',
  '分量{sub}({err})': 'Component {sub} ({err})',
- '下发 movej': 'Send movej',
+ '下发 movej': 'Movej',
  '就绪姿态': 'Ready Pose',
  '把目标填成就绪姿态 [0, 0.5, 0, -1, 0, 0.6, 0]（按轴数裁剪/补 0）\n并立即下发 movej。仍走运动解锁与 Δq 确认。': 'Fill the target with the '
                                                                                 'ready pose [0, 0.5, 0, -1, '
@@ -1321,7 +1321,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
                                                                                 'and send movej immediately. '
                                                                                 'Still goes through motion '
                                                                                 'unlock and Δq confirmation.',
- '接管在途运动': 'Take Over In-Flight Motion',
+ '接管在途运动': 'Take over motion',
  '勾选后直接写一条 movej 旁路帧：固件会作废在途的笛卡尔规划（点动/直线），\n不必等它走完。\n⚠ 若在途的是另一条 movej，SDK 要等原目标超时/到位才返回；\n接管帧本身已经发出，固件会改走新目标。': 'When '
                                                                                                                 'checked, '
                                                                                                                 'sends '
@@ -1389,9 +1389,9 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '带 tau_ff 前馈': 'With tau_ff feedforward',
  '单发 move_js': 'Send move_js Once',
  'move_js —— 连续伺服透传（单发）': 'move_js — continuous servo passthrough (single shot)',
- '下发 move_mit 单帧': 'Send move_mit Single Frame',
+ '下发 move_mit 单帧': 'Send MIT',
  'move_mit —— 单关节 MIT 透传（单帧，无保活）': 'move_mit — single-joint MIT passthrough (single frame, no keepalive)',
- '下发整臂 MIT 单帧': 'Send Whole-Arm MIT Single Frame',
+ '下发整臂 MIT 单帧': 'Send all',
  'move_mit_all —— 整臂 MIT 透传（单帧）': 'move_mit_all — whole-arm MIT passthrough (single frame)',
  '⚠ 固件 0.1s 看门狗：连续伺服须以 ≥10Hz 重发，否则 0.1s 后掉 fail-soft 持位。本页只做单发。': '⚠ Firmware 0.1 s watchdog: continuous '
                                                                   'servo must be resent at ≥10 Hz, otherwise '
@@ -1399,8 +1399,8 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
                                                                   'This page only sends single shots.',
  'kp/kd 对全部关节统一；要逐关节不同请用单关节 move_mit。': 'kp/kd are uniform across all joints; for per-joint values use '
                                         'single-joint move_mit.',
- 'kp(统一)': 'kp (uniform)',
- 'kd(统一)': 'kd (uniform)',
+ 'kp(统一)': 'kp (all)',
+ 'kd(统一)': 'kd (all)',
  '时间': 'Time',
  '级别': 'Level',
  '类别': 'Category',
@@ -2808,4 +2808,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '写入 {done}/{total} B (假件)': 'wrote {done}/{total} B (fake device)',
  'body{i} 参数个数 {got} != {want}': 'body{i} parameter count {got} != {want}',
  'jm 个数 {got} != {want}': 'jm count {got} != {want}',
- '已失能': 'Disabled'}
+ '已失能': 'Disabled',
+ '已连接 — 参数已读取，可编辑/下发': 'Connected — parameters loaded; editing/sending enabled',
+ '已读回 {n} 拍': 'Read back {n} ticks',
+ '录制中…': 'Recording…'}

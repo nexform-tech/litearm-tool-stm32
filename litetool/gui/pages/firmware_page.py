@@ -400,16 +400,18 @@ class FirmwarePage(QWidget):
     def _show_summary(self, summary) -> None:
         self.summary_box.setVisible(True)
         self.file_lbl.setText(summary.name)
+        note = i18n.tr(summary.version_note) if summary.version_note else "—"
         self.ver_lbl.setText(summary.version or i18n.tr(
-            "未识别（{note}）", note=summary.version_note or "—"))
+            "未识别（{note}）", note=note))
         self.size_lbl.setText(f"{summary.size} B")
         end = summary.base + summary.size - 1
         self.range_lbl.setText(f"0x{summary.base:08X}..0x{end:08X}")
         self.format_lbl.setText(summary.format)
         self.holes_lbl.setText(i18n.tr("{n} 段（按 0xFF 填充）", n=summary.holes))
         self.sha_lbl.setText(summary.sha256)
-        self.version_note_lbl.setText(summary.version_note or "")
-        self.version_note_lbl.setVisible(bool(summary.version_note))
+        note = i18n.tr(summary.version_note) if summary.version_note else ""
+        self.version_note_lbl.setText(note)
+        self.version_note_lbl.setVisible(bool(note))
 
     # ------------------------------------------------------------------ 状态
     def _schedule_poll(self) -> None:
@@ -609,6 +611,11 @@ class FirmwarePage(QWidget):
         self.file_lbl.setText("")
         self.phase_lbl.setText("")
         self.detail_lbl.setText("")
+        for lb in (self.ver_lbl, self.size_lbl, self.range_lbl,
+                   self.format_lbl, self.holes_lbl, self.sha_lbl):
+            lb.setText("—")
+        self.version_note_lbl.setText("")
+        self.version_note_lbl.setVisible(False)
         self.bar.setRange(0, 1)
         self.bar.setValue(0)
         self._last_phase = None

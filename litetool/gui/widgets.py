@@ -63,6 +63,7 @@ class StatusStrip(QWidget):
         self._chips = []
         self._chip_on = [False] * 6
         self._last: dict = {}
+        self._last_args = None
 
         row = QHBoxLayout(self)
         row.setContentsMargins(8, 2, 8, 2)
@@ -73,7 +74,7 @@ class StatusStrip(QWidget):
         row.addWidget(self.mode_lbl)
 
         row.addWidget(static_label("臂"))
-        self.arm_lbl = mono_label(50)
+        self.arm_lbl = mono_label(70)
         row.addWidget(self.arm_lbl)
 
         from litearm import _protocol as _P
@@ -97,6 +98,7 @@ class StatusStrip(QWidget):
 
     def reset(self):
         self._last.clear()
+        self._last_args = None
         self._chip_on = [False] * 6
         for chip in self._chips:
             chip.setStyleSheet(CHIP_OFF)
@@ -107,9 +109,16 @@ class StatusStrip(QWidget):
         for lb in (self.seq_val, self.drops_val, self.fps_val):
             lb.setText("—")
 
+    def retranslate(self):
+        """切语言后重写"使能/失能"等状态词（值没变时 update_from 不会重写）。"""
+        if self._last_args is not None:
+            self._last.clear()
+            self.update_from(*self._last_args)
+
     def update_from(self, st, drops: int, fps: float):
         if st is None:
             return
+        self._last_args = (st, drops, fps)
         if st.mode_name != self._last.get("mode"):
             self._last["mode"] = st.mode_name
             self.mode_lbl.setText(st.mode_name)
@@ -339,7 +348,12 @@ class LogPanel(QPlainTextEdit):
     def retranslate(self) -> None:
         self.clear()
         for ts, msg in self._lines:
-            self._render_line(ts, i18n.tr(msg))
+            text = i18n.tr(msg)
+            # 带格式参数的旧日志（例如"拒绝 {op} — …"）无法按源串匹配；
+            # 英文界面宁可少显示这一行，也不把中文留在底部面板。
+            if i18n.language() == "en" and i18n.has_chinese(text):
+                continue
+            self._render_line(ts, text)
 
     def _render_line(self, ts: str, msg: str) -> None:
         color = "#c8c8c8"

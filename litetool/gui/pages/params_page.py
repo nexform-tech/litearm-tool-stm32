@@ -791,6 +791,9 @@ class ParamsPage(QWidget):
             self._ff_cbs[i].setToolTip(self._ff_tooltip(i, mask, name, label))
         self._update_model_label()
         self._refresh_state()
+        if self._device_synced:
+            # 上一层操作的结果文案可能是旧语言；用状态事实重写一条，避免残留。
+            self.status.setText(i18n.tr("已连接 — 参数已读取，可编辑/下发"))
 
     def _apply_global_to_ui(self, g: dict):
         self._synced_glob = {k: (list(v) if isinstance(v, list) else v)

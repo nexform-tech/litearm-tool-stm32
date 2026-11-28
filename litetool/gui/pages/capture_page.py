@@ -92,7 +92,7 @@ class CapturePage(QWidget):
             if r:
                 pi.setXLink(self.plots[0])
             self.plots.append(pi)
-        self.plots[-1].setLabel("bottom", "时间 (s)")
+        self.plots[-1].setLabel("bottom", i18n.tr("时间 (s)"))
         self.curves: list = []
         g_plot = group("预览（读回后绘制）", self.gw)
 
@@ -231,6 +231,13 @@ class CapturePage(QWidget):
     def retranslate(self):
         for r, plot in enumerate(self.plots):
             plot.setLabel("left", i18n.tr(FIELD_TITLES[r]))
+        self.plots[-1].setLabel("bottom", i18n.tr("时间 (s)"))
+        if self._samples:
+            self.prog_lbl.setText(i18n.tr("已读回 {n} 拍", n=len(self._samples)))
+        elif self._recording:
+            self.prog_lbl.setText(i18n.tr("录制中…"))
+        else:
+            self.prog_lbl.setText("—")
 
     def _draw(self, samples):
         for pi in self.plots:

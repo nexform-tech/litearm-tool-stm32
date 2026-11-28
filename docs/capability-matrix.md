@@ -37,7 +37,7 @@ acceptance on a real arm, gripper, DFU board and Windows CDC.
 | Structured logs | JSONL + web viewer | JSONL, redaction, PyQt viewer, restart history | Delivered, PR #23 |
 | CSV export | Browser telemetry export | Plot window + capture samples | Delivered, PR #22 |
 | Single instance / fake device | Daemon lock + `--fake` | Single-instance lock and `--fake` demo mode | Delivered, PR #21 + #33 |
-| Chinese / English UI | Yes | Chinese + English; live switch, system default, persisted per machine | Delivered, issue #12 |
+| Chinese / English UI | Yes | Chinese + English; live switch, system default, persisted per machine | Delivered, PR #40 |
 | Light / dark theme | Yes | Dark only | Not migrated; add on request |
 | Windows build | Yes (exe) | PyInstaller onedir; tag releases build Linux and Windows bundles | Delivered, PR #29/#35/#36 (real CDC/DFU acceptance pending; Windows/OpenGL verified, including software-GL fallback) |
 | Release artifacts | Studio desktop build | Every tag attaches Linux tar.gz + `.deb` + Windows zip with `.sha256` sidecars | Delivered, PR #35/#36 |

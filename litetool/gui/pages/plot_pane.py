@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (QCheckBox, QFileDialog, QHBoxLayout, QLabel,
 
 from litetool import csv_export, i18n
 from litetool.gui.i18n_ui import TrButton, TrLabel, tr_tooltip
+from litetool.gui.plot_utils import add_fixed_legend
 
 COLORS = ["#e8c547", "#e06c75", "#61afef", "#98c379", "#c678dd",
           "#56b6c2", "#d19a66"]
@@ -83,7 +84,7 @@ class PlotPane(QWidget):
 
         没曲线时先藏起来：空图例会在黑画布上留一个空框子。
         """
-        lg = pi.addLegend(offset=(10, 10), **self._LEGEND_KW)
+        lg = add_fixed_legend(pi, offset=(10, 10), **self._LEGEND_KW)
         lg.setVisible(bool(self.curves))
         self._legends[id(pi)] = lg
 

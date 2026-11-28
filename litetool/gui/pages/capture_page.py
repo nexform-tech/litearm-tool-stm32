@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (QFileDialog, QLabel, QPushButton,
 from litetool import csv_export, i18n
 from litetool.gui.i18n_ui import TrButton, TrLabel, tr_tooltip
 from litetool.gui.pages.common import group, hint, note, row, spin
+from litetool.gui.plot_utils import add_fixed_legend
 from litetool.gui.widgets import mono_label
 
 CTRL_HZ = 300
@@ -88,7 +89,7 @@ class CapturePage(QWidget):
             pi = self.gw.addPlot(row=r, col=0)
             pi.showGrid(x=True, y=True, alpha=0.2)
             pi.setLabel("left", i18n.tr(FIELD_TITLES[r]))
-            pi.addLegend(offset=(10, 10))
+            add_fixed_legend(pi, offset=(10, 10))
             if r:
                 pi.setXLink(self.plots[0])
             self.plots.append(pi)
@@ -242,7 +243,7 @@ class CapturePage(QWidget):
     def _draw(self, samples):
         for pi in self.plots:
             pi.clear()
-            pi.addLegend(offset=(10, 10))
+            add_fixed_legend(pi, offset=(10, 10))
         self.curves = []
         if not samples:
             return

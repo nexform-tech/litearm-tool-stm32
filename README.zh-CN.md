@@ -210,12 +210,22 @@ Windows 是 `%LOCALAPPDATA%\litearm-tool\Logs`），单文件 5 MB、保留 5 �
 `LITEARM_TOOL_LOG_DIR` 可改目录。「日志」页读当前文件与备份，所以重启后历史仍在；
 诊断包只附日志路径，不内联内容。
 
-**LiteGrip（可选，仅 Linux）。** 安装 `requirements-gripper.txt`，把 SocketCAN 以 1 Mbit/s
-拉起（`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`），再进
+**LiteGrip（可选，仅 Linux）。** 安装 `requirements-gripper.txt`（需要
+`litegrip-python>=1.3.1`），把 SocketCAN 以 1 Mbit/s 拉起
+（`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`），再进
 「夹爪」页。通道下拉列出内核枚举到的 CAN 接口（`/sys/class/net/*/type` = `ARPHRD_CAN` 280），
 也允许手填未列出的名字。Windows 或未安装 `litegrip-python` 时页面保留但禁用连接并写明原因。
-通道 / CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。停止按钮发
-零力矩帧，动作在途时并失能电机以中止，不是机械臂急停。
+通道 / CAN ID / MST ID 断开重连后生效；标定决定行程与方向，未标定时 SDK 拒绝运动。
+
+电机使能且空闲时，工作线程每 20 ms 发一帧零力矩 MIT 控制帧。DM4310 在最后一帧控制帧后约
+100 ms 会自锁通信丢失故障（`err = 0x0D`），读状态不算控制帧。任务只有在 SDK 返回值不是
+`ok=False` / `False`，且刷新后的错误码是 0（失能）或 1（使能）时才记为完成，日志条目带动作名。
+停止按钮发零力矩帧，动作在途时并失能电机以中止，不是机械臂急停。
+
+若 `PYTHONPATH` 上更早命中了另一份名为 `litegrip` 的模块（`litearm-server` 自带的运行时自报
+2.2.0），页面按它实际提供的能力降级：遥测仍显示读数；缺少 `fresh` / `data_age_s` 时新鲜度行
+写明不支持；缺少 `refresh_status()` 时「刷新状态」禁用；发不出保活帧时「使能」禁用；日志里
+只提醒一次缺少哪些接口。
 
 **Windows 打包。** 在仓库根目录运行
 `powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1`。脚本会建干净
@@ -381,10 +391,13 @@ python3 -m pytest          # 689 passed（全部离线，无需硬件）
    - [ ] 命令执行中快速连点其它按钮 → 提示"忙"，不并发下发
    - [ ] 手动给 move_j 输入极大值 → 日志显示固件 ERR 拒绝，臂不动
 11. **夹爪**（Linux，LiteGrip 接在 `can0`）：
+   - [ ] 连接 → 使能 → 空闲 2s：`err` 保持 1，状态灯常亮
    - [ ] 连接 → 使能 → 张开/闭合；遥测显示新的位置、夹持力与温度
    - [ ] 以 20N 抓取 3s → 保持住；[停止 / 释放] 中止在途抓取、把力矩拉到 0 并失能
+   - [ ] 制造一次失败动作（张开时挡住手指）→ 日志是带动作名的 `[ERR]`，不是 `[OK]`
    - [ ] [读取标定] 显示行程与安装方向；保存并重新加载标定文件
    - [ ] Windows（或未安装 `litegrip-python`）时页面写明平台限制并禁用连接
+   - [ ] 把旧版 `litegrip` 模块放到 `PYTHONPATH` 最前 → 页面仍持续刷新，新鲜度行写明不支持，刷新按钮说明原因
 12. **固件升级**（需测试镜像且臂有支撑）：
    - [ ] 连着应用态：选镜像 → 摘要一致；开始 → 先失能、进 bootloader、显示相位 + 字节
          进度，结束后带预期版本重新连上
@@ -481,6 +494,7 @@ python3 -m pytest          # 689 passed（全部离线，无需硬件）
   该调用仍要等原目标收尾 —— 固件已改道，所有者线程在跑完旧等待后才释放。
 - 工具 UI 的固件错误显示是命令名 + 通用码义（`describe`）；逐命令细节在 SDK 异常的
   `err_reason` 消息里（`CommandRejectedError` 的 `str(e)`）。
-- 夹爪仅 Linux，且需要 `litegrip-python` 与已拉起的 1 Mbit/s SocketCAN 接口；
-  改通道 / CAN ID / MST ID 后需重新连接。零力矩停止不能替代机械臂急停，夹爪链路也
-  不做自动重连。
+- 夹爪仅 Linux，且需要 `litegrip-python>=1.3.1` 与已拉起的 1 Mbit/s SocketCAN 接口；
+  使能中的电机靠 20 ms 一帧的零力矩流保活；`PYTHONPATH` 上另一份缺快照 API 的 `litegrip`
+  模块会让页面按能力降级并写明原因，而不是崩溃。改通道 / CAN ID / MST ID 后需重新连接。
+  零力矩停止不能替代机械臂急停，夹爪链路也不做自动重连。

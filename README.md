@@ -248,15 +248,28 @@ Structured logs go to `$XDG_STATE_HOME/litearm-tool/tool.jsonl` (`~/.local/state
 `LITEARM_TOOL_LOG_DIR` overrides the directory. The **Logs** page reads the current file and its
 backups, so history survives a restart; diagnostics bundles carry the path, not the contents.
 
-**LiteGrip (optional, Linux only).** Install `requirements-gripper.txt`, bring up SocketCAN at
-1 Mbit/s (`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`), then use the
+**LiteGrip (optional, Linux only).** Install `requirements-gripper.txt` (it needs
+`litegrip-python>=1.3.1`), bring up SocketCAN at 1 Mbit/s
+(`sudo ip link set can0 type can bitrate 1000000; sudo ip link set can0 up`), then use the
 **Gripper** page. The channel drop-down lists the kernel's CAN interfaces
 (`/sys/class/net/*/type` = `ARPHRD_CAN` 280) and still accepts a typed name that is not listed.
 On Windows or without `litegrip-python` the page stays visible but disabled and states why.
 Channel / CAN ID / MST ID take effect on reconnect; calibration decides travel and direction, and
-the SDK refuses motion until one is loaded. The stop button sends a zero-torque frame and disables
-the motor while an action is in flight (so a running grasp stops), not an emergency stop for the
-arm.
+the SDK refuses motion until one is loaded.
+
+While the motor is enabled and idle, the worker streams a zero-torque MIT frame every 20 ms. A
+DM4310 otherwise self-locks a communication-loss fault (`err = 0x0D`) about 100 ms after the last
+control frame; reading the status does not count as a control frame. A task is reported complete
+only when the SDK result is not `ok=False` / `False` and the refreshed error code is 0 (disabled)
+or 1 (enabled), and the log entry names the action. The stop button sends a zero-torque frame and
+disables the motor while an action is in flight (so a running grasp stops), not an emergency stop
+for the arm.
+
+If another module named `litegrip` is earlier on `PYTHONPATH` — the runtime vendored with
+`litearm-server` reports 2.2.0 — the page feature-detects what it provides. Telemetry still renders
+the readings; the freshness row says unsupported when `fresh` / `data_age_s` are missing; Refresh
+is disabled without `refresh_status()`, Enable is disabled when no keep-alive frame can be sent,
+and one warning in the log names the missing calls.
 
 **Windows build.** Run `powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-windows.ps1`
 from the repository root. It creates a clean venv, installs `litearm-python` from the sibling
@@ -419,10 +432,13 @@ python3 -m pytest          # 689 passed (all offline, no hardware required)
    - [ ] Click other buttons rapidly while a command is running → "busy", no concurrent sends
    - [ ] Enter an extreme value for `move_j` → the log shows the firmware ERR rejection, the arm does not move
 11. **Gripper** (Linux, LiteGrip on `can0`):
+   - [ ] Connect → enable → leave idle for 2 s: `err` stays 1 and the status LED stays steady
    - [ ] Connect → enable → open/close; telemetry shows fresh position, force and temperatures
    - [ ] Grasp 20 N for 3 s → holds; [Stop / release] aborts the hold, drops the torque and disables the motor
+   - [ ] Force a failed action (block the jaws while opening) → the log shows `[ERR]` with the action name, not `[OK]`
    - [ ] [Read calibration] shows travel and mount direction; save and reload a calibration file
    - [ ] On Windows (or without `litegrip-python`) the page states the platform limit and disables connect
+   - [ ] Put an older `litegrip` module first on `PYTHONPATH` → the page keeps updating, the freshness row says unsupported, and Refresh states why
 12. **Firmware upgrade** (needs a test image and the arm supported):
    - [ ] Connected arm: select image → the summary matches; start → it disarms, enters the bootloader, shows phase + byte progress, and reconnects with the expected version
    - [ ] Cancel before the flash phase → nothing is written and the board returns to the application
@@ -539,6 +555,9 @@ YAML, and the UI). Values follow firmware `params.c` and `flash_store.c apply_lo
 - The UI's firmware-error display is the command name + generic code meaning (`describe`); the
   per-command detail is in the SDK exception's `err_reason` message (the `str(e)` of
   `CommandRejectedError`).
-- Gripper support is Linux-only and needs `litegrip-python` plus a SocketCAN interface already up
-  at 1 Mbit/s. Changing channel / CAN ID / MST ID requires a reconnect. The zero-torque stop is
-  not a substitute for the arm's emergency stop, and the gripper link does not auto-reconnect.
+- Gripper support is Linux-only and needs `litegrip-python>=1.3.1` plus a SocketCAN interface
+  already up at 1 Mbit/s. An enabled motor is kept alive with a 20 ms zero-torque frame stream; a
+  different `litegrip` module on `PYTHONPATH` that lacks the snapshot API degrades the page with a
+  stated reason instead of crashing it. Changing channel / CAN ID / MST ID requires a reconnect.
+  The zero-torque stop is not a substitute for the arm's emergency stop, and the gripper link does
+  not auto-reconnect.

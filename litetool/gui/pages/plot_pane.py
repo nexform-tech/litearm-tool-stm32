@@ -55,7 +55,9 @@ class PlotPane(QWidget):
         self.freeze_btn.toggled.connect(self._on_freeze)
         top.addWidget(self.freeze_btn)
         self.clear_btn = TrButton("清屏")
-        self.clear_btn.clicked.connect(self.clear_all)
+        tr_tooltip(self.clear_btn,
+                   "清空曲线窗口和导出缓冲；新数据从空窗口重新累积")
+        self.clear_btn.clicked.connect(self.clear_data)
         top.addWidget(self.clear_btn)
         self.export_btn = TrButton("导出 CSV…")
         tr_tooltip(
@@ -82,6 +84,16 @@ class PlotPane(QWidget):
         self.curves.clear()
         for pi in self.plots:
             pi.clear()
+
+    def clear_data(self):
+        """「清屏」= 清空数据窗口，而不只是擦掉已经画出来的线。
+
+        只清曲线的话，30 Hz 的 ``refresh`` 会立刻从模型里把同一段数据重画回来，
+        看起来就是按钮没反应。冻结时也清空模型；解冻后从空窗口重新累积。
+        """
+        self.clear_all()
+        if self._model is not None:
+            self._model.reset()
 
     def retranslate(self):
         self._on_freeze(self.frozen)

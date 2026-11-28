@@ -112,3 +112,62 @@ def test_overview_pane_uses_the_same_selector(app):
         assert pane.selected_joints() == [1, 2], "同一关节数下重设不能丢勾选"
     finally:
         pane.close()
+
+
+class _Model:
+    """``PlotModel`` 的最小替身：只够 refresh / clear 用。"""
+
+    def __init__(self, n=3, ticks=3):
+        self.n = n
+        self._ticks = ticks
+        self.reset_calls = 0
+
+    def snapshot(self):
+        if self._ticks == 0:
+            return [], [], [], []
+        times = [i * 0.01 for i in range(self._ticks)]
+        series = [[0.1 * (j + 1) + 0.01 * i for j in range(self.n)]
+                  for i in range(self._ticks)]
+        return times, series, series, series
+
+    def reset(self):
+        self.reset_calls += 1
+        self._ticks = 0
+
+
+def test_clear_button_resets_the_data_window(app):
+    from litetool.gui.pages.plot_pane import PlotPane
+
+    pane = PlotPane()
+    try:
+        pane.set_joints(3)
+        model = _Model()
+        pane.refresh(model)
+        assert len(pane.curves) == 9
+
+        pane.clear_btn.click()
+        assert model.reset_calls == 1, "清屏必须清模型，否则下一次刷新又画回来"
+        assert pane.curves == {}
+        assert all(not pi.listDataItems() for pi in pane.plots)
+
+        pane.refresh(model)                  # 模型已空，不会再画
+        assert pane.curves == {}
+    finally:
+        pane.close()
+
+
+def test_page_entry_clear_keeps_the_model_buffer(app):
+    from litetool.gui.pages.plot_pane import PlotPane
+
+    pane = PlotPane()
+    try:
+        pane.set_joints(3)
+        model = _Model()
+        pane.refresh(model)
+        pane.clear_all()                     # 进入总览页 / 关节数变化时用
+        assert model.reset_calls == 0, "进页面不能把缓冲清掉"
+
+        pane.refresh(model)
+        assert len(pane.curves) == 9
+    finally:
+        pane.close()

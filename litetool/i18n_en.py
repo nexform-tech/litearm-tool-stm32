@@ -2304,6 +2304,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '读回失败': 'Read-back failed',
  '❚❚ 冻结': '❚❚ Freeze',
  '清屏': 'Clear',
+ '清空曲线窗口和导出缓冲；新数据从空窗口重新累积': 'Clear the chart window and export buffer; new data starts accumulating from an empty window',
  '导出 CSV…': 'Export CSV…',
  '导出当前窗口里勾选的关节：时间、q/dq/tau、MOS/线圈温度、驱动错误码。\n冻结状态下导出的是冻结那一刻的窗口。': 'Export the joints checked in the current '
                                                                  'window: time, q/dq/tau, MOS/coil '

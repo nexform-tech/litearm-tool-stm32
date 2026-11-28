@@ -62,3 +62,26 @@ def test_ready_pose_needs_the_motion_unlock(app):
         assert page.btn_ready.isEnabled()
     finally:
         page.close()
+
+
+def test_cart_page_exposes_the_ready_pose(app):
+    """issue #42：笛卡尔页也要能一键回就绪姿态，且同样受运动闸门约束。"""
+    from litetool.gui.pages.cart_page import CartPage
+
+    page = CartPage(settings_mod.Settings.load(None))
+    try:
+        page.set_online(True)
+        page.set_armed(True)
+        assert not page.btn_ready.isEnabled(), "未识别到关节数前不能裁剪目标"
+        page.set_joints(7)
+        assert page.btn_ready.isEnabled()
+
+        got = []
+        page.ready_req.connect(got.append)
+        page.btn_ready.click()
+        assert got == [pytest.approx(page.speed.value())]
+
+        page.set_armed(False)
+        assert not page.btn_ready.isEnabled()
+    finally:
+        page.close()

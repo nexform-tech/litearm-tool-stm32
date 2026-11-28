@@ -22,7 +22,7 @@ acceptance on a real arm, gripper, DFU board and Windows CDC.
 | Machine control | Enable / disable / reset / clear faults / speed | Same + home / park / read state / reset reason | Delivered |
 | Joint motion | `movej` | `movej` / `move_js` / `move_mit` / `move_mit_all` | Delivered |
 | Joint sliders + soft limits + ready pose | Sliders, firmware soft limits, ready pose | Numeric `movej` inputs; one-click ready pose | Sliders declined 2026-11-27; ready pose delivered, PR #27 |
-| Cartesian absolute | `movep` | `get_tcp` / `ik` / `move_p` | Delivered |
+| Cartesian absolute | `movep` | `get_tcp` / `ik` / `move_p`; ready pose through the same joint-space `movej` gate | Delivered |
 | Cartesian jog / straight line / stop | Base/tool jog, `movel`, controlled stop, takeover | Jog + `movel` + controlled stop + explicit `movej` takeover | Delivered, PR #25 |
 | Zero-G hand guiding | Yes | Yes, SDK keep-alive, exit-to-hold | Delivered |
 | LiteGrip gripper | Page, telemetry, calibration, settings (Linux only) | Page + owner thread, telemetry, calibration, zero-torque stop, CAN channel enumeration | Delivered, PR #28/#34 (Linux only; hardware acceptance pending) |

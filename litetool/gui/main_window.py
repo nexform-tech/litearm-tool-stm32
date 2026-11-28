@@ -40,7 +40,7 @@ from litetool.gui.pages.firmware_page import FirmwarePage
 from litetool.gui.pages.guide_page import TuningGuidePage
 from litetool.gui.pages.gripper_page import GripperPage
 from litetool.gui.pages.installation_page import InstallationPage
-from litetool.gui.pages.joint_page import JointPage
+from litetool.gui.pages.joint_page import READY_POSE, JointPage
 from litetool.gui.pages.log_page import LogPage
 from litetool.gui.pages.machine_page import MachinePage
 from litetool.gui.pages.overview_page import OverviewPage
@@ -326,6 +326,7 @@ class MainWindow(QMainWindow):
         j.mit_one.connect(self._on_mit_one)
         j.mit_all.connect(self._on_mit_all)
         c.tcp_req.connect(self._on_get_tcp)
+        c.ready_req.connect(self._on_ready_pose)
         c.ik_req.connect(self._on_ik)
         c.movep.connect(self._on_movep)
         c.movel.connect(self._on_movel)
@@ -802,6 +803,7 @@ class MainWindow(QMainWindow):
             self._n = st.n
             self.pages["overview"].set_joints(st.n)
             self.pages["joint"].set_joints(st.n)
+            self.pages["cart"].set_joints(st.n)
             self._log(i18n.tr("[INFO] 识别到 {n} 个关节", n=st.n))
 
         fps = self.worker.model.rate()
@@ -1103,6 +1105,24 @@ class MainWindow(QMainWindow):
                      self._after_simple)
 
     # ================= 笛卡尔 =================
+    def _on_ready_pose(self, speed: float):
+        """笛卡尔页的「就绪姿态」—— 裁剪目标后走与关节页相同的 movej 路径。
+
+        幅度确认、运动解锁、忙态互斥全部复用 `_on_movej`，不另立一套闸门。
+        """
+        st = self.worker.state
+        n = int(getattr(st, "n", 0) or 0) if st is not None else 0
+        if n <= 0:
+            n = int(self._n or self.worker.n_joints or 0)
+        if n <= 0:
+            self._log(i18n.tr("[WARN] 拒绝就绪姿态 — 还没识别到关节数"))
+            return
+        target = [READY_POSE[i] if i < len(READY_POSE) else 0.0
+                  for i in range(n)]
+        self._log(i18n.tr("[INFO] 就绪姿态：movej 目标 {q}",
+                          q=" ".join(f"{v:+.3f}" for v in target)))
+        self._on_movej(target, speed)
+
     def _on_get_tcp(self):
         def done(res):
             self.pages["cart"].show_tcp(res.value if res.ok else None)

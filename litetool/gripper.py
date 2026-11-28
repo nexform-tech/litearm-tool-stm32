@@ -85,13 +85,44 @@ class GripperTaskResult:
 
     @property
     def text(self) -> str:
-        name = self.name if not i18n.has_chinese(self.name) else i18n.tr(self.name)
-        if i18n.has_chinese(name):
+        name = i18n.tr(self.name)
+        if i18n.language() == "en" and i18n.has_chinese(name):
+            # 动态标题（「夹爪抓取 20N/3s」）没有固定译文；英文界面用通用名，
+            # 不留中文。中文界面保留动作名 —— 以前这里把所有中文标题都折成
+            # 「夹爪任务」，日志因此分不出跑的是哪条动作。
             name = i18n.tr("夹爪任务")
         if self.ok:
             return i18n.tr("{name} 完成", name=name)
         return i18n.tr("{name} 失败: {err}", name=name,
                        err=i18n.safe_detail(self.error) or i18n.tr("未预期错误"))
+
+
+def _result_failure(value: Any) -> Optional[str]:
+    """SDK 用**返回值**报告失败时的说明；成功返回 ``None``。
+
+    LiteGrip 1.x 的 ``open`` / ``close`` / ``grasp`` / ``enable`` /
+    ``write_zero`` 返回带 ``ok`` 的结果对象，``refresh_status`` / ``disable``
+    返回裸 ``bool`` —— 普通失败都不抛异常。只看"没抛"会把失败记成完成。
+    """
+    ok = getattr(value, "ok", None)
+    if ok is False:
+        state = getattr(value, "state", None)
+        code = getattr(state, "error_code", None)
+        if code is not None:
+            return i18n.tr("SDK 返回 ok=False（err={code}）", code=code)
+        return i18n.tr("SDK 返回 ok=False")
+    if isinstance(value, bool) and not value:
+        return i18n.tr("SDK 返回 False")
+    return None
+
+
+def _state_fault_code(st: Any) -> Optional[int]:
+    """状态里的真实故障码（error_code ∉ {0=失能, 1=使能}）；无故障返回 None。"""
+    try:
+        code = int(getattr(st, "error_code", 0))
+    except (TypeError, ValueError):
+        return None
+    return code if code not in (0, 1) else None
 
 
 def availability() -> tuple:
@@ -458,13 +489,25 @@ class GripperWorker:
 
     def _run(self, name: str, fn, on_done) -> None:
         self._busy.set()
+        value = None
+        error: Optional[BaseException] = None
         try:
             value = fn(self._grip)
-            res = GripperTaskResult(name, True, value=value)
+            failure = _result_failure(value)
+            if failure is not None:
+                error = RuntimeError(failure)
+            else:
+                # 返回值说成功还不够：故障可能在动作收尾时刚刚锁存。
+                st = self._read_state_after_task()
+                code = _state_fault_code(st)
+                if code is not None:
+                    error = RuntimeError(i18n.tr(
+                        "任务后电机故障 err=0x{code:02X}（{code}）", code=code))
         except BaseException as e:  # noqa: BLE001 - 全部报给 GUI
-            res = GripperTaskResult(name, False, error=e)
+            error = e
         finally:
             self._busy.clear()
+        res = GripperTaskResult(name, error is None, value=value, error=error)
         if self._interrupted.is_set():
             # 这一条是在途任务，被 stop_now() 中止：不管底层返回什么，都按"已中止"
             # 上报 —— 否则界面会把一次被打断的抓取显示成"完成"。
@@ -481,6 +524,27 @@ class GripperWorker:
             (on_done or self._on_task)(res)
         except Exception:  # noqa: BLE001 - GUI 回调出错不能拖垮线程
             pass
+
+    def _read_state_after_task(self) -> Any:
+        """任务结束后取一帧最新状态：先 ``0xCC`` 刷新，再等状态帧。
+
+        动作返回时总线通常已经安静，直接 ``get_state`` 只会读到旧缓存；刷新请求
+        让电机说一次话（不驱动手指），随后固件立刻给出真实错误码。没有
+        ``refresh_status`` 的旧 SDK 退回普通读取，读不到就返回 None。
+        """
+        grip = self._grip
+        if grip is None:
+            return None
+        refresh = getattr(grip, "refresh_status", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:  # noqa: BLE001 - 状态读不到不能把成功的动作判失败
+                pass
+        try:
+            return grip.get_state(wait=True)
+        except Exception:  # noqa: BLE001
+            return None
 
     def _go_offline(self, why: str) -> None:
         grip, self._grip = self._grip, None

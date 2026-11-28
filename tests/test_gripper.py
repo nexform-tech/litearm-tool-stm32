@@ -10,6 +10,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
+from litetool import i18n
 from litetool.gripper import GripperTaskResult, GripperWorker
 from tests.fake_arm import wait_for
 
@@ -51,23 +52,28 @@ class FakeGrip:
     def enable(self):
         self.enabled = True
         self.calls.append("enable")
+        return SimpleNamespace(ok=True, state=self.get_state(), tries=1)
 
     def disable(self):
         self.enabled = False
         self.calls.append("disable")
+        return True
 
     def open(self, speed=None, **kw):
         self.calls.append(("open", speed))
+        return SimpleNamespace(ok=True)
 
     def close(self, speed=None, **kw):
         self.calls.append(("close", speed))
+        return SimpleNamespace(ok=True)
 
     def grasp(self, force_n=None, hold_s=0.0, **kw):
         self.calls.append(("grasp", force_n, hold_s))
-        return "grasped"
+        return SimpleNamespace(ok=True)
 
     def write_zero(self):
         self.calls.append("write_zero")
+        return SimpleNamespace(ok=True)
 
     def zero(self):
         self.calls.append("zero")
@@ -221,6 +227,100 @@ def test_keepalive_falls_back_to_stop_on_an_older_sdk():
         assert wait_for(lambda: grip.calls.count("stop") >= 2, timeout=1.0)
     finally:
         w.close()
+
+
+class FailedEnableGrip(FakeGrip):
+    """使能失败但正常返回 —— LiteGrip 1.x 不为此抛异常。"""
+
+    def enable(self):
+        self.calls.append("enable")
+        return SimpleNamespace(ok=False, state=self.get_state(), tries=3)
+
+
+class FalseReturningGrip(FakeGrip):
+    def disable(self):
+        self.enabled = False
+        self.calls.append("disable")
+        return False
+
+
+class PostTaskFaultGrip(FakeGrip):
+    """动作自身返回成功，但收尾时状态帧报通信丢失（0x0D）。"""
+
+    def __init__(self, channel="can0", can_id=8, mst_id=None):
+        super().__init__(channel, can_id, mst_id)
+        self.faulted = False
+
+    def open(self, speed=None, **kw):
+        self.calls.append(("open", speed))
+        self.faulted = True
+        return SimpleNamespace(ok=True)
+
+    def get_state(self, wait=True):
+        st = super().get_state(wait)
+        if self.faulted:
+            st.error_code = 13
+            st.is_enabled = False
+        return st
+
+
+def test_a_result_with_ok_false_is_reported_as_a_failed_task():
+    grip = FailedEnableGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        got = []
+        w.enable(cb=got.append)
+        assert wait_for(lambda: got)
+        assert not got[0].ok
+        assert "ok=False" in str(got[0].error)
+    finally:
+        w.close()
+
+
+def test_a_bare_false_return_is_reported_as_a_failed_task():
+    grip = FalseReturningGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        enabled = []
+        w.enable(cb=enabled.append)
+        assert wait_for(lambda: enabled and enabled[0].ok)
+        got = []
+        w.disable(cb=got.append)
+        assert wait_for(lambda: got)
+        assert not got[0].ok
+        assert "False" in str(got[0].error)
+    finally:
+        w.close()
+
+
+def test_a_fault_latched_after_the_task_is_reported_as_failed():
+    grip = PostTaskFaultGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        got = []
+        w.open_jaws(cb=got.append)
+        assert wait_for(lambda: got)
+        assert not got[0].ok
+        assert "13" in str(got[0].error)
+    finally:
+        w.close()
+
+
+def test_task_text_keeps_the_action_name():
+    try:
+        i18n.set_language("zh")
+        assert GripperTaskResult("夹爪使能", True).text == "夹爪使能 完成"
+        assert (GripperTaskResult("夹爪抓取 20.0N/3.0s", True).text
+                == "夹爪抓取 20.0N/3.0s 完成")
+        i18n.set_language("en")
+        assert GripperTaskResult("夹爪使能", True).text == "Gripper enable complete"
+        assert "gripper task" in GripperTaskResult(
+            "夹爪抓取 20.0N/3.0s", True).text
+    finally:
+        i18n.set_language("zh")
 
 
 

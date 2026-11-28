@@ -130,7 +130,7 @@ def test_state_hook_missing_fails_loudly():
 
 
 def test_transport_error_marks_offline():
-    w, arm, logs, onlines, tasks = _worker()
+    w, arm, logs, onlines, tasks = _worker(auto_reconnect=False)
     w.open(None)
     assert wait_for(lambda: w.online)
     arm.raise_error = pa.TransportError("串口读异常")
@@ -141,7 +141,7 @@ def test_transport_error_marks_offline():
 
 
 def test_silent_link_times_out_to_offline():
-    w, arm, logs, onlines, tasks = _worker(offline_timeout=0.3, idle_timeout=0.02)
+    w, arm, logs, onlines, tasks = _worker(offline_timeout=0.3, idle_timeout=0.02, auto_reconnect=False)
     w.open(None)
     assert wait_for(lambda: w.online)
     arm.silent = True
@@ -303,7 +303,7 @@ def test_state_is_cleared_on_close():
 
 
 def test_state_is_cleared_when_link_goes_offline():
-    w, arm, *_ = _worker()
+    w, arm, *_ = _worker(auto_reconnect=False)
     try:
         w.open(None)
         assert wait_for(lambda: w.state is not None)

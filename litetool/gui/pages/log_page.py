@@ -232,8 +232,10 @@ class LogPage(QWidget):
         row = self.table.currentRow()
         if not 0 <= row < len(self._visible):
             return
-        self.detail.setPlainText(
-            json.dumps(self._visible[row], ensure_ascii=False, indent=2))
+        rec = dict(self._visible[row])
+        # 详情面板里的 body 跟列表同步翻译；其余字段保持原始 JSON 便于排查。
+        rec["body"] = i18n.tr(str(rec.get("body", "")))
+        self.detail.setPlainText(json.dumps(rec, ensure_ascii=False, indent=2))
 
     # ---------------- 导出 ----------------
     def _on_export(self):

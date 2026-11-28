@@ -355,7 +355,7 @@ pages no longer create their own threads; everything is `submit`ted to the owner
 ## Tests
 
 ```bash
-python3 -m pytest          # 688 passed (all offline, no hardware required)
+python3 -m pytest          # 689 passed (all offline, no hardware required)
 ```
 
 | File | What it guards |
@@ -381,6 +381,7 @@ python3 -m pytest          # 688 passed (all offline, no hardware required)
 | `test_dfu_controller.py` | Tool-side adapter: disarm/enter failure mapping, port release after `enter_dfu`, udev-permission retry, prechecks |
 | `test_firmware_page.py` | Firmware page with a fake engine + fake SDK: summary, from-DFU path, full pipeline, failure, cancel, reconnect RPC |
 | `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | Intent layer and pure data layer |
+| `test_i18n.py` `test_i18n_ui.py` `test_i18n_live.py` | Language detection/fallback, source coverage, offscreen English build, and a connected fake-device language switch |
 | `test_preset_sync.py` | Field-by-field comparison of `presets/` and `templates/` against firmware `defaults.c` (runs when the firmware tree is present; `LITEARM_FW_DIR` can point to it) |
 
 ## On-hardware acceptance checklist (STM32 + motors/CAN online)

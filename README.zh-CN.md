@@ -312,7 +312,7 @@ tests/                  离线测试（无硬件可跑）
 ## 测试
 
 ```bash
-python3 -m pytest          # 688 passed（全部离线，无需硬件）
+python3 -m pytest          # 689 passed（全部离线，无需硬件）
 ```
 
 | 文件 | 盯什么 |
@@ -338,6 +338,7 @@ python3 -m pytest          # 688 passed（全部离线，无需硬件）
 | `test_dfu_controller.py` | tool 侧适配：失能/进 DFU 失败映射、`enter_dfu` 后放串口、udev 权限重试、开跑前闸门 |
 | `test_firmware_page.py` | 固件升级页（假引擎 + 假 SDK）：摘要、from-DFU 路径、完整流水线、失败、取消、重连 RPC |
 | `test_checks.py` `test_plot_model.py` `test_param_catalog.py` `test_settings.py` `test_tuning_guide.py` | 意图层与纯数据层 |
+| `test_i18n.py` `test_i18n_ui.py` `test_i18n_live.py` | 语言检测/回落、源码覆盖、离屏英文窗口、连接假设备后的中英切换 |
 | `test_preset_sync.py` | `presets/` 与 `templates/` 逐字段比对固件 `defaults.c`（固件仓在场时生效，`LITEARM_FW_DIR` 可指定） |
 
 ## 真机验收清单（需 STM32 + 电机/CAN 在线）

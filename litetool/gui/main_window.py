@@ -212,9 +212,13 @@ class MainWindow(QMainWindow):
         self._add_page("cart", "笛卡尔", "get_tcp / ik / move_p",
                        CartPage(self._settings))
         self._add_page("zerog", "零重力", "拖动示教（保活由 SDK 维持）", ZeroGPage())
-        self._add_page("gripper", "夹爪",
+        # Windows 包不装 litegrip：导航项直接把限制写在名字上，别让用户点进去
+        # 才发现连接按钮是灰的（issue #44）。
+        gripper_page = GripperPage(self._settings)
+        self._add_page("gripper",
+                       "夹爪" if gripper_page.available else "夹爪（仅 Linux）",
                        "LiteGrip（仅 Linux）：连接/使能/开合/抓取/标定",
-                       GripperPage(self._settings))
+                       gripper_page)
         self._add_page("params", "参数表", "关节/前馈参数读写与批量导入导出",
                        ParamsPage())
         self._add_page("guide", "调参指南", "公式 / 症状速查 / 逐参数详解",

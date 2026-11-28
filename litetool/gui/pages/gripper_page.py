@@ -19,7 +19,7 @@ from litetool.gripper import GripperWorker, list_channels
 from litetool.gui.i18n_ui import (TrButton, TrLabel, tr_items, tr_placeholder,
                                   tr_tooltip)
 from litetool.gui.pages.common import group, hint, note, row, spin
-from litetool.gui.widgets import mono_label
+from litetool.gui.widgets import Banner, mono_label
 
 TICK_MS = 100
 
@@ -34,6 +34,11 @@ class GripperPage(QWidget):
         self._worker = worker or GripperWorker(log=self._log)
         self._avail, self._why = self._worker.available()
         self._calib = None
+
+        # 不可用原因必须**顶在页头**：连接按钮灰掉时，用户只剩这一个解释入口
+        # （见 issue #44 —— 原因原本只写在连接组底部的小灰字里，读起来像按钮坏了）。
+        self.avail_banner = Banner()
+        self.avail_banner.setVisible(False)
 
         # ---------------- 连接 / 身份 ----------------
         # 通道默认从内核枚举（/sys/class/net/type == 280）；枚举不到时仍保留 can0，
@@ -152,6 +157,7 @@ class GripperPage(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(8, 8, 8, 8)
+        lay.addWidget(self.avail_banner)
         lay.addWidget(g_conn)
         lay.addWidget(g_act)
         lay.addWidget(g_tel)
@@ -163,9 +169,15 @@ class GripperPage(QWidget):
         self._timer.timeout.connect(self._tick)
         self._timer.start(TICK_MS)
         self._refresh_channels()
+        self._render_avail()
         self._refresh()
 
     # ---------------- 外部 ----------------
+    @property
+    def available(self) -> bool:
+        """本平台/本安装是否具备夹爪能力（主窗口据此在导航上标注 Linux only）。"""
+        return bool(self._avail)
+
     def set_log(self, fn):
         self._log_fn = fn
 
@@ -309,6 +321,19 @@ class GripperPage(QWidget):
         self._refresh()
 
     # ---------------- 轮询 ----------------
+    def _render_avail(self) -> None:
+        """不可用时的页头横幅 + 禁用按钮的 tooltip（两者都随语言重写）。"""
+        if self._avail:
+            self.avail_banner.setVisible(False)
+            self.btn_conn.setToolTip("")
+            return
+        why = i18n.tr(self._why)
+        self.avail_banner.set_warn(i18n.tr(
+            "夹爪不可用 — {why}。连接按钮已禁用。", why=why))
+        self.avail_banner.setVisible(True)
+        # 灰按钮自己也要能说明原因：用户最先点的就是它。
+        self.btn_conn.setToolTip(i18n.tr("不可用：{why}", why=why))
+
     def _render_conn(self, online: bool) -> None:
         self.conn_lbl.setText(i18n.tr("● 已连接") if online
                               else i18n.tr("● 未连接"))
@@ -333,6 +358,7 @@ class GripperPage(QWidget):
             state=i18n.tr("已标定") if v['calibrated'] else i18n.tr("未标定")))
 
     def retranslate(self) -> None:
+        self._render_avail()
         self._render_conn(bool(self._worker.online))
         self._render_calib()
         self._tick()

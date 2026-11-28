@@ -2401,6 +2401,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '模式': 'Mode',
  '臂': 'Arm',
  '丢帧': 'Drops',
+ '接收侧丢帧：按状态帧 seq 差分累计；seq 只是帧序号，绝对值没有物理意义，原始值在整机页 [读取状态] 里可查': 'Receive-side drops, accumulated from status-frame seq gaps; seq is only a frame counter and its absolute value has no physical meaning. The raw value is on the Machine page under [Read status GET_STATUS].',
  '帧率': 'Frame rate',
  '断轴·{reason}': 'Joint lost · {reason}',
  '已解锁 — 请谨慎操作，急停随时可用': 'Unlocked — operate carefully; emergency stop is always available',

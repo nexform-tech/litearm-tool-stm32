@@ -15,7 +15,7 @@ from PyQt5.QtWidgets import (QHBoxLayout, QLabel, QPlainTextEdit, QTableWidget,
                              QVBoxLayout, QWidget)
 
 from litetool import i18n
-from litetool.gui.i18n_ui import TrLabel, tr_header
+from litetool.gui.i18n_ui import TrLabel, tr_header, tr_tooltip
 
 MONO = QFont("DejaVu Sans Mono", 11)
 
@@ -52,7 +52,10 @@ def static_label(text: str) -> QLabel:
 
 
 class StatusStrip(QWidget):
-    """**常驻**状态条：模式 / 臂使能 / 6 个安全 flag 灯 / seq / 丢帧 / 帧率。
+    """**常驻**状态条：模式 / 臂使能 / 6 个安全 flag 灯 / 丢帧 / 帧率。
+
+    不显示原始 seq：它只是状态帧序号，100 Hz 下每秒涨 100、绝对值没有物理意义；
+    操作员真正要看的是由它差分出来的丢帧数。原始 seq 仍在整机页 [读取状态] 里可查。
 
     钉在顶栏下方，切页时不消失 —— 状态是操作的前提，不该要求用户先切到某页才看得见。
     更新策略：值/颜色**真正变化**才写控件，避免 20Hz 全量重绘导致整行闪烁。
@@ -87,14 +90,17 @@ class StatusStrip(QWidget):
             row.addWidget(chip)
         row.addStretch(1)
 
-        self.seq_val = mono_label(50)
         self.drops_val = mono_label(56)
         self.fps_val = mono_label(44)
-        for cap, val in (("seq", self.seq_val), ("丢帧", self.drops_val),
-                         ("帧率", self.fps_val)):
-            row.addSpacing(10)
-            row.addWidget(static_label(cap))
-            row.addWidget(val)
+        row.addSpacing(10)
+        row.addWidget(static_label("丢帧"))
+        tr_tooltip(self.drops_val,
+                   "接收侧丢帧：按状态帧 seq 差分累计；seq 只是帧序号，"
+                   "绝对值没有物理意义，原始值在整机页 [读取状态] 里可查")
+        row.addWidget(self.drops_val)
+        row.addSpacing(10)
+        row.addWidget(static_label("帧率"))
+        row.addWidget(self.fps_val)
 
     def reset(self):
         self._last.clear()
@@ -106,7 +112,7 @@ class StatusStrip(QWidget):
         self.mode_lbl.setStyleSheet("")
         self.arm_lbl.setText("—")
         self.arm_lbl.setStyleSheet("")
-        for lb in (self.seq_val, self.drops_val, self.fps_val):
+        for lb in (self.drops_val, self.fps_val):
             lb.setText("—")
 
     def retranslate(self):
@@ -138,8 +144,7 @@ class StatusStrip(QWidget):
                 self._chip_on[bit] = on
                 chip.setStyleSheet(CHIP_ON if on else CHIP_OFF)
 
-        for key, val, text in (("seq", self.seq_val, str(st.seq)),
-                               ("drops", self.drops_val, str(drops)),
+        for key, val, text in (("drops", self.drops_val, str(drops)),
                                ("fps", self.fps_val, f"{fps:.0f}")):
             if text != self._last.get(key):
                 self._last[key] = text

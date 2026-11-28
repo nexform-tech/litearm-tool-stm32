@@ -2475,6 +2475,7 @@ EN = {'{0=v1 误差方向, 1=v2 SE1 速度方向, 2=drag 版(拖动用)}': '{0=v
  '未预期异常: {err}': 'Unexpected exception: {err}',
  '状态流静默 >{timeout:.1f}s': 'State stream silent >{timeout:.1f}s',
  '[WARN] 重连 {port} 失败: {err}': '[WARN] Reconnect to {port} failed: {err}',
+ '[WARN] 第 {n} 次重连失败：{count} 个端口均无响应（{port}: {err}）': '[WARN] Reconnect attempt {n} failed: no response on {count} port(s) ({port}: {err})',
  '激活服务返回 HTTP {status}': 'Activation service returned HTTP {status}',
  '{field} 必须是十六进制字符串': '{field} must be a hex string',
  '{field} 需 {want} 位十六进制，给的是 {got} 位': '{field} must be {want} hex digits, got {got}',

@@ -125,6 +125,15 @@ def _state_fault_code(st: Any) -> Optional[int]:
     return code if code not in (0, 1) else None
 
 
+def _refresh_status(grip: Any) -> bool:
+    """任务形式的状态刷新：缺 API 时给出原因，而不是 ``AttributeError``。"""
+    fn = getattr(grip, "refresh_status", None)
+    if not callable(fn):
+        raise GripperUnavailable(i18n.tr(
+            "已安装的 litegrip-python 缺少 refresh_status()（需要 >=1.3.1）"))
+    return fn()
+
+
 def availability() -> tuple:
     """`(可用, 原因)` —— 页面在构造时显示原因，不靠用户猜。"""
     if not sys.platform.startswith("linux"):
@@ -394,7 +403,7 @@ class GripperWorker:
         self.submit(i18n.tr("加载标定"), fn, cb)
 
     def refresh(self, cb=None) -> None:
-        self.submit(i18n.tr("刷新夹爪状态"), lambda g: g.refresh_status(), cb)
+        self.submit(i18n.tr("刷新夹爪状态"), _refresh_status, cb)
 
     def calibration(self, cb=None) -> None:
         """读回当前标定的摘要（给页面显示行程/方向/是否已标定）。"""

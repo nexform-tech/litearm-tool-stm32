@@ -6,4 +6,8 @@
 # 需要先把 CAN 接口拉起来（1 Mbit/s）：
 #   sudo ip link set can0 type can bitrate 1000000
 #   sudo ip link set can0 up
-litegrip-python>=1.1.3
+# >=1.3.1：工具读取 GripperState.fresh / data_age_s、调用 refresh_status()，
+# 并在空闲时用 send_mit_frame() 发保活帧，压住 DM4310 约 100 ms 的通信丢失自锁。
+# 若 PYTHONPATH 先命中另一份同名 litegrip（litearm-server 自带的运行时自报
+# 2.2.0），页面会按能力降级并写明原因，而不是每个 tick 抛 AttributeError。
+litegrip-python>=1.3.1

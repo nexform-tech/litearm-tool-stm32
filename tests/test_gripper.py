@@ -309,6 +309,45 @@ def test_a_fault_latched_after_the_task_is_reported_as_failed():
         w.close()
 
 
+class LegacyRefreshGrip(FakeGrip):
+    """安装路径上命中了一份没有 ``refresh_status`` 的同名模块。"""
+
+    refresh_status = None
+
+
+class NoKeepaliveGrip(FakeGrip):
+    """既没有 send_mit_frame 也没有 stop —— 使能后必锁 0x0D，页面必须拦住。"""
+
+    send_mit_frame = None
+    stop = None
+
+
+def test_refresh_reports_the_missing_sdk_api_instead_of_raising():
+    grip = LegacyRefreshGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        assert not w.supports("refresh_status")
+        assert w.can_keep_alive()
+        got = []
+        w.refresh(cb=got.append)
+        assert wait_for(lambda: got)
+        assert not got[0].ok
+        assert "refresh_status" in str(got[0].error)
+    finally:
+        w.close()
+
+
+def test_can_keep_alive_requires_one_of_the_two_frame_senders():
+    grip = NoKeepaliveGrip()
+    w = GripperWorker(factory=lambda **kwargs: grip, poll_s=0.02)
+    try:
+        w.open()
+        assert not w.can_keep_alive()
+    finally:
+        w.close()
+
+
 def test_task_text_keeps_the_action_name():
     try:
         i18n.set_language("zh")
@@ -377,6 +416,12 @@ class FakeWorker:
 
     def available(self):
         return self._available
+
+    def supports(self, name):
+        return True
+
+    def can_keep_alive(self):
+        return True
 
     def open(self, **kw):
         self.calls.append(("open", kw))
@@ -470,6 +515,39 @@ def test_page_reports_unavailable_platform(app):
     try:
         assert not page.btn_conn.isEnabled()
         assert "不可用" in page.conn_lbl.text()
+    finally:
+        page.shutdown()
+
+
+class LegacyWorker(FakeWorker):
+    """自报 2.2.0 的运行时装载：没有新鲜度字段，也没有 refresh_status。"""
+
+    def __init__(self):
+        super().__init__()
+        self.state = SimpleNamespace(
+            position_mm=12.3, force_n=4.5, torque_nm=0.45,
+            temperature_mos=30, temperature_coil=31, error_code=1,
+            is_enabled=True)
+
+    def supports(self, name):
+        return False
+
+    def can_keep_alive(self):
+        return False
+
+
+def test_page_renders_an_old_snapshot_without_crashing_or_hiding_buttons(app):
+    worker = LegacyWorker()
+    worker.online = True
+    page = _page(worker)
+    try:
+        page._tick()                     # 旧实现在这里 AttributeError: data_age_s
+        assert page.pos_lbl.text() == "+12.30"
+        assert "不支持" in page.fresh_lbl.text()
+        assert not page.btn_refresh.isEnabled(), "缺少 refresh_status 时刷新不可用"
+        assert not page.btn_enable.isEnabled(), "发不出保活帧时必须拦住使能"
+        assert page.btn_stop.isEnabled(), "停止 / 释放永远可达"
+        assert "不兼容" in page.log_view.toPlainText()
     finally:
         page.shutdown()
 
